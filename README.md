@@ -218,8 +218,8 @@ AI Tool (Claude Code, Cursor, etc.)
 │  │   (stdio)         │ │
 │  └────────┬─────────┘ │
 │           │            │
-│  ┌────────▼─────────��� │
-│  │   Tool Router     │ │  ← Routes to capture/search/link/etc.
+│  ┌────────▼─────────┐ │
+│  │   Tool Router    │ │  ← Routes to capture/search/link/etc.
 │  └────────┬─────────┘ │
 │           │            │
 │  ┌────────▼─────────┐ │
@@ -258,7 +258,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full technical design.
 
 ## Part of the Shelby Ecosystem
 
-ShelbyMCP is the open-source memory server. **[Shelby for Mac](https://github.com/Studio-Moser/Shelby)** is the native macOS app that adds:
+ShelbyMCP is the open-source memory server. **Shelby for Mac** (coming soon) is the native macOS app that adds:
 
 - Always-on embedding pipeline (no scheduled skill needed)
 - Instant auto-classification at capture time
