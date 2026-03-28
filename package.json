@@ -1,0 +1,58 @@
+{
+  "name": "shelbymcp",
+  "version": "0.1.0",
+  "description": "Knowledge-graph memory server for AI tools via MCP",
+  "type": "module",
+  "bin": {
+    "shelbymcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc && shx chmod +x dist/*.js",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest --watch",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "better-sqlite3": "^11.0.0",
+    "uuid": "^11.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "shx": "^0.3.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.8"
+  },
+  "license": "MIT",
+  "author": "Studio Moser",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Studio-Moser/shelbymcp.git"
+  },
+  "homepage": "https://github.com/Studio-Moser/shelbymcp",
+  "bugs": "https://github.com/Studio-Moser/shelbymcp/issues",
+  "keywords": [
+    "mcp",
+    "memory",
+    "knowledge-graph",
+    "ai",
+    "claude",
+    "sqlite",
+    "model-context-protocol"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

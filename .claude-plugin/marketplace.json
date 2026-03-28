@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "shelbymcp",
+  "description": "Knowledge-graph memory server for AI tools",
+  "owner": {
+    "name": "Studio Moser"
+  },
+  "plugins": [
+    {
+      "name": "shelbymcp",
+      "description": "Persistent memory with knowledge graph, FTS5 search, and Forage enrichment skill",
+      "version": "0.1.0",
+      "author": {
+        "name": "Studio Moser"
+      },
+      "source": "./skills/shelby-forage",
+      "category": "productivity",
+      "homepage": "https://github.com/Studio-Moser/shelbymcp"
+    }
+  ]
+}
