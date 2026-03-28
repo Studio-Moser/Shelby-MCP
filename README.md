@@ -166,13 +166,14 @@ ShelbyMCP ships with `shelby-forage`, a scheduled skill that runs on your existi
 
 | Task | Frequency | What it does |
 |---|---|---|
-| **Embed backfill** | Daily | Generate embeddings for thoughts that don't have them |
-| **Auto-classify** | Daily | Re-scan poorly tagged thoughts, improve metadata |
-| **Consolidation** | Daily | Find duplicate/similar thoughts, merge into rich summaries |
-| **Contradiction detection** | Daily | Flag conflicting memories for user resolution |
-| **Connection discovery** | Daily | Find related thoughts, create knowledge graph edges |
-| **Stale sweep** | Weekly | Flag old action items that fell through the cracks |
-| **Digest** | Weekly | Generate a summary of the week's thinking |
+| **Summary backfill** | Daily | Generate one-liners for thoughts missing summaries |
+| **Auto-classify** | Daily | Improve type/topics/people on poorly tagged thoughts |
+| **Consolidation** | Daily | Find and merge duplicate thoughts |
+| **Contradiction detection** | Daily | Flag conflicting memories (tagged `needs-attention`) |
+| **Connection discovery** | Daily | Create edges between related thoughts |
+| **Stale sweep** | Weekly (Mon) | Flag forgotten action items (tagged `needs-attention`) |
+| **Digest** | Weekly (Mon) | Summary of the week's thinking by project/topic |
+| **Forage log** | Every run | Audit trail for continuity between runs |
 
 ### Setup
 
