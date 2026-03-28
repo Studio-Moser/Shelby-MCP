@@ -5,6 +5,7 @@ Usage:
   shelbymcp                    Start the MCP server (stdio)
   shelbymcp setup <agent>      Set up ShelbyMCP for an agent
   shelbymcp setup <agent> --forage  ...and install the Forage skill
+  shelbymcp uninstall <agent>  Remove ShelbyMCP from an agent
   shelbymcp protocol           Print the Memory Protocol
   shelbymcp forage             Print the Forage skill prompt
   shelbymcp help               Show this help

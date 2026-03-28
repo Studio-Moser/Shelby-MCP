@@ -8,7 +8,7 @@ export interface ShelbyConfig {
 }
 
 export interface CliCommand {
-  command: "help" | "setup" | "protocol" | "forage";
+  command: "help" | "setup" | "uninstall" | "protocol" | "forage";
   agent?: string;
   forage?: boolean;
 }
@@ -28,6 +28,11 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
     const forage = argv.includes("--forage");
     const agent = argv[1] && !argv[1].startsWith("--") ? argv[1] : undefined;
     return { command: "setup", agent, forage };
+  }
+
+  if (first === "uninstall") {
+    const agent = argv[1] && !argv[1].startsWith("--") ? argv[1] : undefined;
+    return { command: "uninstall", agent };
   }
 
   if (first === "protocol") {

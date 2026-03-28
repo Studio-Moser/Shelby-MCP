@@ -7,6 +7,7 @@ import { printHelp } from "./cli/help.js";
 import { printProtocol } from "./cli/protocol.js";
 import { printForage } from "./cli/forage.js";
 import { runSetup } from "./cli/setup.js";
+import { runUninstall } from "./cli/uninstall.js";
 
 async function main() {
   const config = parseArgs(process.argv.slice(2));
@@ -23,6 +24,9 @@ async function main() {
         break;
       case "setup":
         runSetup(config.agent, config.forage ?? false);
+        break;
+      case "uninstall":
+        runUninstall(config.agent);
         break;
       case "protocol":
         printProtocol();
