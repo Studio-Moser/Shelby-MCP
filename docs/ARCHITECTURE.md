@@ -332,7 +332,9 @@ shelbymcp/
 
 ## Compatibility with Shelby for Mac
 
-ShelbyMCP and the Shelby Mac app use the **same SQLite database schema**. A user can:
+ShelbyMCP (TypeScript) and the Shelby Mac app (Swift) are **separate implementations of the same schema**. They share no code but are fully interoperable at the database level.
+
+A user can:
 
 1. Start with ShelbyMCP standalone (any platform)
 2. Build up a memory database
@@ -340,7 +342,29 @@ ShelbyMCP and the Shelby Mac app use the **same SQLite database schema**. A user
 4. Point it at the same `memory.db` file
 5. Instantly get: native UI, always-on embeddings, CloudKit sync, Heartbeat
 
-Zero migration. The Mac app reads and writes the same tables.
+Zero migration. Same file, different runtimes.
+
+### Schema as Contract
+
+The database schema defined in this document (thoughts, edges, thoughts_fts tables with all columns and indexes) is the **canonical contract** between ShelbyMCP and the Shelby Mac app. Both projects implement this schema independently.
+
+**If the schema needs to change:**
+1. The change is proposed and documented here in ARCHITECTURE.md first
+2. Both implementations (TypeScript + Swift) update their migrations
+3. Both must handle reading databases written by the other (forward and backward compatibility)
+4. Schema version is tracked in a `schema_version` table — both projects check it on startup
+
+**What each project owns:**
+
+| | ShelbyMCP (TypeScript) | Shelby Mac App (Swift) |
+|---|---|---|
+| **DB access** | better-sqlite3 (synchronous) | SQLite C API (direct) |
+| **MCP server** | @modelcontextprotocol/sdk | Custom stdio JSON-RPC |
+| **Embeddings** | None (Forage skill backfills) | OpenAI API / on-device |
+| **Classification** | Agent provides at capture | App pipeline auto-classifies |
+| **Sync** | None (single file) | CloudKit |
+| **Heartbeat** | None (Forage skill via scheduler) | Native Pulse/Tidyup/Forage |
+| **UI** | None (CLI/MCP only) | SwiftUI menu bar + main window |
 
 ---
 
