@@ -24,6 +24,7 @@ export interface SearchListResult {
   offset: number;
 }
 
+// eslint-disable-next-line no-useless-escape
 const FTS_SPECIAL_CHARS = /["\*\(\)\+\-\^:\{\}\[\]]/g;
 const FTS_KEYWORDS = /\b(AND|OR|NOT|NEAR)\b/g;
 

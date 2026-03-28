@@ -119,7 +119,8 @@ export function linkThoughts(db: ThoughtDatabase, input: EdgeInput): string {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("UNIQUE constraint failed")) {
       throw new Error(
-        `Edge already exists: ${source_id} -[${edge_type}]-> ${target_id}`
+        `Edge already exists: ${source_id} -[${edge_type}]-> ${target_id}`,
+        { cause: err }
       );
     }
     throw err;

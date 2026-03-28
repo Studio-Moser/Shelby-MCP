@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, writeFileSync, readFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runUninstall } from "../../src/cli/uninstall.js";
