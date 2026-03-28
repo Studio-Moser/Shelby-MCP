@@ -47,6 +47,7 @@ export interface ListOptions {
   source?: string;
   since?: string;
   until?: string;
+  has_summary?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -260,6 +261,11 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   if (options.until) {
     whereClauses.push("created_at <= @until");
     params.until = options.until;
+  }
+  if (options.has_summary === true) {
+    whereClauses.push("summary IS NOT NULL AND summary != ''");
+  } else if (options.has_summary === false) {
+    whereClauses.push("(summary IS NULL OR summary = '')");
   }
 
   const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";

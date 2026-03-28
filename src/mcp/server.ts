@@ -123,6 +123,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         source: z.string().describe("Filter by source").optional(),
         since: z.string().describe("ISO 8601 start date").optional(),
         until: z.string().describe("ISO 8601 end date").optional(),
+        has_summary: z.boolean().describe("Filter by summary presence: true = has summary, false = missing summary").optional(),
         limit: z.number().describe("Max results (default 20, max 100)").optional(),
         offset: z.number().describe("Pagination offset").optional(),
       },

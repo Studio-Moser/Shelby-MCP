@@ -10,6 +10,7 @@ interface ListArgs {
   source?: string;
   since?: string;
   until?: string;
+  has_summary?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -28,6 +29,7 @@ export function handleListThoughts(
     source: a.source,
     since: a.since,
     until: a.until,
+    has_summary: a.has_summary,
     limit: clampLimit(a.limit),
     offset: a.offset,
   });

@@ -63,4 +63,24 @@ describe("handleListThoughts", () => {
     const data = parseResult(result);
     expect(data.results.length).toBe(1);
   });
+
+  it("filters by has_summary = false (missing summaries)", () => {
+    captureId("Has summary", { summary: "A summary" });
+    captureId("No summary");
+
+    const result = handleListThoughts(db, { has_summary: false });
+    const data = parseResult(result);
+    expect(data.results.length).toBe(1);
+    expect(data.total_count).toBe(1);
+  });
+
+  it("filters by has_summary = true (has summaries)", () => {
+    captureId("Has summary", { summary: "A summary" });
+    captureId("No summary");
+
+    const result = handleListThoughts(db, { has_summary: true });
+    const data = parseResult(result);
+    expect(data.results.length).toBe(1);
+    expect(data.results[0].summary).toBe("A summary");
+  });
 });
