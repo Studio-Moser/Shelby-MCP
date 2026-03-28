@@ -14,6 +14,8 @@
 3. **Knowledge graph as a first-class citizen.** Thoughts aren't isolated. Typed edges (refines, cites, refuted_by, tags, related, follows) connect memories into a navigable graph.
 4. **Single file for portability.** The entire database is one SQLite file. Easy to back up, sync (CloudKit, Dropbox, git), or move between machines.
 5. **Native to the MCP ecosystem.** Built with the official MCP TypeScript SDK and better-sqlite3 — the same tools the MCP community already uses.
+6. **Focused tool surface.** Keep the tool count between 8-10. Research from Block, Phil Schmid, and Docker shows 5-8 tools per server is the sweet spot — above 15, agent selection accuracy drops. Consolidate related operations into single tools with action parameters rather than adding more endpoints.
+7. **Errors are instructions.** Tool error responses should tell the agent what went wrong and what to try next. "Thought not found. Try searching by topic instead" — not "404 Not Found".
 
 ---
 
@@ -32,7 +34,7 @@
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐ │
 │  │  Protocol    │  │ Tool Router │  │  DB Layer    │ │
 │  │  Handler     │──│             │──│              │ │
-│  │  (JSON-RPC)  │  │  14 tools   │  │  SQLite      │ │
+│  │  (JSON-RPC)  │  │  9 tools    │  │  SQLite      │ │
 │  └─────────────┘  └─────────────┘  │  + FTS5      │ │
 │                                     │  + edges     │ │
 │                                     └──────────────┘ │
@@ -152,8 +154,9 @@ Search results return: `id`, `summary`, `type`, `topics`, `created_at`. The agen
 All list/search tools enforce limits to prevent context blowup:
 
 - `limit` param on every list/search tool (default: 20, max: 100)
+- `offset` param for cursor-based pagination
 - Results sorted by relevance (search) or recency (list) so the most useful results come first
-- Response includes `total_count` so the agent knows if there are more results
+- Response includes `total_count`, `has_more` (boolean), and `offset` so the agent can paginate intelligently
 
 ### Concise Tool Descriptions (Priority: Medium)
 
@@ -165,6 +168,209 @@ The Forage skill needs to update many thoughts per run (backfill summaries, upda
 
 - `bulk_capture` — Capture multiple thoughts in one call
 - `bulk_update` — Update metadata on multiple thoughts in one call
+
+---
+
+## Tool Annotations
+
+The MCP spec (2025-11-25) introduced tool annotations that signal tool behavior to clients without changing execution semantics. Every registered tool MUST include annotations.
+
+| Annotation | Type | Purpose |
+|---|---|---|
+| `readOnlyHint` | boolean | Tool only reads data, never modifies state |
+| `destructiveHint` | boolean | Tool deletes or irreversibly modifies data |
+| `idempotentHint` | boolean | Calling the tool twice with the same args produces the same result |
+| `openWorldHint` | boolean | Tool interacts with external systems beyond the server |
+
+**Example annotations for ShelbyMCP tools:**
+
+| Tool | readOnly | destructive | idempotent | openWorld |
+|---|---|---|---|---|
+| `capture_thought` | false | false | false | false |
+| `search_thoughts` | true | false | true | false |
+| `get_thought` | true | false | true | false |
+| `update_thought` | false | false | true | false |
+| `delete_thought` | false | true | true | false |
+| `manage_edges` | false | varies | true | false |
+| `explore_graph` | true | false | true | false |
+| `thought_stats` | true | false | true | false |
+
+```typescript
+server.registerTool(
+  "search_thoughts",
+  {
+    title: "Search Thoughts",
+    description: "Full-text search with knowledge graph expansion",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: { /* ... */ },
+  },
+  handler
+);
+```
+
+---
+
+## Error Handling
+
+### Error Response Pattern
+
+All tool errors MUST use the `isError` flag so agents can distinguish failures from successful results. Without this flag, agents may interpret error text as a valid response and proceed incorrectly.
+
+```typescript
+// GOOD — agent knows this is an error and can self-correct
+return {
+  isError: true,
+  content: [{ type: "text" as const, text: JSON.stringify({
+    error: "not_found",
+    message: "No thought found with ID abc123. Try search_thoughts to find it by content.",
+  }) }],
+};
+
+// BAD — agent may treat this as a successful result
+return {
+  content: [{ type: "text" as const, text: "Error: thought not found" }],
+};
+```
+
+### Semantic Error Categories
+
+Use consistent error category strings across all tools:
+
+| Category | When to use |
+|---|---|
+| `not_found` | Thought or edge ID doesn't exist |
+| `invalid_input` | Zod validation failed, or args are semantically wrong |
+| `duplicate` | Edge already exists, thought already captured |
+| `limit_exceeded` | Requested limit above max (100) |
+| `temporary_failure` | DB locked, write conflict — retryable |
+| `constraint_violation` | Foreign key failure, schema violation |
+
+### Actionable Messages
+
+Error messages are instructions to the agent. Always include what to do next:
+
+| Bad | Good |
+|---|---|
+| "Not found" | "No thought found with ID abc123. Try search_thoughts to find it by content." |
+| "Invalid input" | "Edge type must be one of: refines, cites, refuted_by, tags, related, follows." |
+| "Duplicate" | "Edge already exists between abc123 and def456 with type 'related'. Use update_thought to modify metadata instead." |
+
+### Internal errors
+
+Log full stack traces to stderr (`console.error`). Return sanitized, agent-safe messages in tool responses. Never expose SQLite errors, file paths, or internal state.
+
+---
+
+## Tool Consolidation
+
+The original design had 15 tools. Research consensus (Block, Phil Schmid, Docker) recommends 5-8 tools per server, with 8-12 as the upper bound for mature servers. We consolidate to **9 core tools**:
+
+### Consolidated tool map
+
+| Tool | Replaces | Rationale |
+|---|---|---|
+| `capture_thought` | (same) | Core operation, unchanged |
+| `search_thoughts` | `search_thoughts` + `search_by_embedding` | Single search tool auto-detects mode. If query is text → FTS5. If `embedding` param provided → cosine similarity. Simpler agent decision-making. |
+| `list_thoughts` | (same) | Browse/filter, unchanged |
+| `get_thought` | (same) | Fetch full content by ID, unchanged |
+| `update_thought` | `update_thought` + `bulk_update` | Add optional `ids` array param. Single ID = single update. Array of IDs = bulk update. Eliminates a dedicated bulk tool. |
+| `delete_thought` | (same) | Remove a thought, unchanged |
+| `manage_edges` | `link_thoughts` + `unlink_thoughts` + `capture_edge` | Single tool with `action` param: `"link"`, `"unlink"`. Captures metadata on link. Reduces 3 tools to 1. |
+| `explore_graph` | `get_connections` + `get_graph` | Single tool with `depth` param. Depth 1 = get_connections behavior. Depth 2+ = graph traversal. |
+| `thought_stats` | (same) | Aggregate stats, unchanged |
+
+### Removed from public surface
+
+| Tool | Disposition |
+|---|---|
+| `bulk_capture` | Moved to internal Forage-only operation via `capture_thought` with an array `thoughts` param |
+| `search_by_embedding` | Merged into `search_thoughts` |
+| `get_connections` | Merged into `explore_graph` |
+| `link_thoughts` | Merged into `manage_edges` |
+| `unlink_thoughts` | Merged into `manage_edges` |
+| `capture_edge` | Merged into `manage_edges` |
+| `get_graph` | Merged into `explore_graph` |
+| `bulk_update` | Merged into `update_thought` |
+
+### Tool naming convention
+
+All tools use the pattern `{action}_{resource}` without a service prefix for now. If multi-server disambiguation becomes a problem (user reports), we add a `shelby_` prefix in a future version.
+
+---
+
+## Progress Reporting
+
+For long-running operations, emit MCP progress notifications to prevent client timeouts and provide feedback.
+
+**Tools that should report progress:**
+- `update_thought` with bulk `ids` array (many updates)
+- `explore_graph` with depth > 2 (deep traversal)
+- `capture_thought` with array `thoughts` param (bulk capture)
+
+```typescript
+// Progress notification pattern
+await ctx.reportProgress({
+  progress: currentItem,
+  total: totalItems,
+});
+```
+
+---
+
+## Structured Logging
+
+### Development
+
+All diagnostic output to `console.error` (stderr). This is non-negotiable — stdout is the JSON-RPC channel.
+
+### Production
+
+For production diagnostics beyond stderr, support an optional `--log-file` flag that enables structured JSON logging to a file:
+
+- Default: stderr only (no file logging)
+- `--log-file ~/.shelbymcp/server.log`: enables file logging
+- `--verbose`: sets log level to debug (default is info)
+- Log format: JSON lines with ISO 8601 timestamps, level, message, and optional context fields
+- Log rotation: not built-in — users can use `logrotate` or similar
+
+```typescript
+// Logging levels
+console.error("[INFO] ShelbyMCP running on stdio");
+console.error("[DEBUG] search_thoughts query='sync' limit=20 results=5");
+console.error("[ERROR] Database write failed", { error: e.message });
+```
+
+---
+
+## Health Check
+
+A `server_status` resource (NOT a tool — resources don't cost tool-description tokens) exposes server health:
+
+```
+URI: shelby://status
+```
+
+Returns:
+```json
+{
+  "version": "0.1.0",
+  "uptime_seconds": 3600,
+  "db_size_bytes": 1048576,
+  "thought_count": 247,
+  "edge_count": 89,
+  "db_path": "~/.shelbymcp/memory.db"
+}
+```
+
+This is a resource, not a tool, because:
+1. It doesn't cost tool-description tokens in the system prompt
+2. It's read-only metadata about the server itself
+3. Clients can poll it without agent involvement
 
 ---
 
@@ -243,11 +449,10 @@ Claude Code Scheduler
 │  Uses ShelbyMCP tools:     │
 │  - list_thoughts           │
 │  - search_thoughts         │
-│  - update_thought          │
-│  - link_thoughts           │
-│  - capture_thought         │
-│  - bulk_capture            │
-│  - search_by_embedding     │
+│  - update_thought (bulk)   │
+│  - manage_edges            │
+│  - capture_thought (bulk)  │
+│  - explore_graph           │
 └──────────────────────────┘
     │
     │ MCP (stdio)
@@ -288,13 +493,13 @@ shelbymcp/
 │   │   ├── server.ts          # MCP server via @modelcontextprotocol/sdk
 │   │   └── tools.ts           # Tool definitions and routing
 │   ├── tools/
-│   │   ├── capture.ts         # capture_thought, bulk_capture
-│   │   ├── search.ts          # search_thoughts, search_by_embedding
+│   │   ├── capture.ts         # capture_thought (single + bulk via array param)
+│   │   ├── search.ts          # search_thoughts (FTS5 + embedding auto-detect)
 │   │   ├── list.ts            # list_thoughts
 │   │   ├── get.ts             # get_thought
-│   │   ├── update.ts          # update_thought
+│   │   ├── update.ts          # update_thought (single + bulk via ids array)
 │   │   ├── delete.ts          # delete_thought
-│   │   ├── graph.ts           # link_thoughts, unlink_thoughts, get_connections, get_graph, capture_edge
+│   │   ├── graph.ts           # manage_edges, explore_graph
 │   │   └── stats.ts           # thought_stats
 │   └── config.ts              # CLI flags, env vars, defaults
 ├── tests/
@@ -370,7 +575,8 @@ The database schema defined in this document (thoughts, edges, thoughts_fts tabl
 
 ## Future Considerations
 
-- **HTTP API**: Optional REST endpoint alongside MCP stdio (for non-MCP clients)
+- **Streamable HTTP transport**: The MCP spec (2025-11-25) introduced Streamable HTTP transport replacing the older SSE transport. This is the standard path for remote MCP access — use `NodeStreamableHTTPServerTransport` from the SDK (with `createMcpExpressApp()` or `createMcpHonoApp()` for DNS rebinding protection) rather than building a custom REST API. Enables remote clients, web UIs, and multi-machine setups.
 - **sqlite-vec integration**: When the npm package matures, replace custom cosine similarity with sqlite-vec's optimized implementation
 - **Plugin system**: Allow community-built Forage tasks
 - **Multi-user**: Scoped memory access for team scenarios
+- **Dynamic tool loading**: For users who find 9 tools too many, support a `--tools` CLI flag to load only specified tools. Speakeasy demonstrated 96%+ input token reduction with dynamic tool loading. Low priority — 9 tools is within the recommended range.

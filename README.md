@@ -123,23 +123,19 @@ Forage runs on Claude Code's scheduler:
 
 ## MCP Tools
 
+9 focused tools — research shows 5-8 tools per server is the sweet spot for agent accuracy.
+
 | Tool | Description |
 |---|---|
-| `capture_thought` | Store a thought with summary, metadata, topics, and relationships |
-| `search_thoughts` | Full-text search with knowledge graph expansion (returns summaries, not full content) |
+| `capture_thought` | Store a thought with summary, metadata, topics, and relationships. Accepts an array for bulk capture. |
+| `search_thoughts` | Full-text search with knowledge graph expansion. Auto-detects FTS5 vs. vector mode. Returns summaries, not full content. |
 | `list_thoughts` | Browse/filter by type, topic, person, project, date range |
-| `get_thought` | Retrieve a specific thought by ID |
-| `update_thought` | Update content or metadata |
+| `get_thought` | Retrieve a specific thought by ID (full content) |
+| `update_thought` | Update content or metadata. Accepts `ids` array for bulk updates. |
 | `delete_thought` | Remove a thought |
-| `link_thoughts` | Create a typed relationship between two thoughts |
-| `unlink_thoughts` | Remove a relationship |
-| `get_connections` | Get all thoughts connected to a given thought |
+| `manage_edges` | Create or remove typed relationships between thoughts (link, unlink) |
+| `explore_graph` | Traverse the knowledge graph from a starting thought. Depth 1 = direct connections, 2+ = full traversal. |
 | `thought_stats` | Aggregate statistics about your memory |
-| `search_by_embedding` | Vector similarity search (requires embeddings) |
-| `capture_edge` | Create a knowledge graph edge with metadata |
-| `get_graph` | Traverse the knowledge graph from a starting thought |
-| `bulk_capture` | Capture multiple thoughts in one call |
-| `bulk_update` | Update metadata on multiple thoughts in one call (for Forage efficiency) |
 
 ---
 
@@ -284,11 +280,17 @@ These are non-negotiable. They exist because MCP servers directly impact token c
 
 2. **Search returns summaries, not full content.** A search hitting 20 thoughts at 2,000 words each = 40K wasted tokens. Search results return the agent-provided `summary` field (one line). The agent calls `get_thought` for full content when it needs it.
 
-3. **All list/search tools have a `limit` parameter.** Default 20, max 100. No unbounded queries.
+3. **All list/search tools have a `limit` parameter.** Default 20, max 100. Responses include `total_count` and `has_more`. No unbounded queries.
 
 4. **The server runs zero inference.** Agents provide metadata (type, topics, summary, relationships) at capture time. The Forage skill handles enrichment. The server is pure storage + retrieval.
 
 5. **All logging to stderr.** `console.error` only. stdout is the MCP JSON-RPC channel. A single `console.log` breaks everything.
+
+6. **Keep the tool count focused.** 9 tools. Research (Block, Phil Schmid, Docker) shows 5-8 per server is optimal. Consolidate related operations into single tools with action parameters.
+
+7. **Errors are instructions.** Return `isError: true` with actionable messages. "Not found" is useless. "No thought with ID abc123. Try search_thoughts to find it by content." helps the agent self-correct.
+
+8. **Every tool gets annotations.** MCP spec annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every registered tool. See [Architecture: Tool Annotations](docs/ARCHITECTURE.md#tool-annotations).
 
 ---
 
