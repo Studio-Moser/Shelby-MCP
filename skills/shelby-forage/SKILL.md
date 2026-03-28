@@ -54,6 +54,7 @@ Look for thoughts that disagree with each other — these are high-value signals
 2. If you find a genuine contradiction (e.g., "we're using PostgreSQL" vs. "we decided on SQLite"), capture a new thought:
    - Type: `question`
    - Source: `forage`
+   - Topics: `["needs-attention"]`
    - Content: describe the contradiction and the two conflicting thoughts
    - Summary: brief description of what contradicts what
 3. Link the contradicting thoughts to the new question using `manage_edges` with `action: "link"` and `edge_type: "refuted_by"`
@@ -85,11 +86,13 @@ Find *actionable* tasks that may have been forgotten. The goal is to surface thi
    - **Skip it** if it's a standing practice, ongoing guideline, or reference (e.g., "always use ESM imports", "run tests before merging", "prefer composition over inheritance"). These aren't stale — they're meant to persist.
    - **Skip it** if it has a `consolidated_into` value (already handled)
    - **Skip it** if it has recent edges linking it to other thoughts (it's being actively referenced)
-3. If you find genuinely stale tasks, create a summary thought:
-   - Type: `note`
+3. For each genuinely stale task, capture a thought:
+   - Type: `question`
    - Source: `forage`
-   - Summary: "Weekly stale task sweep — [today's date]"
-   - Content: list the stale tasks with their IDs and summaries, and briefly note why each one looks forgotten
+   - Topics: `["needs-attention"]`
+   - Summary: a short description of the stale task (e.g., "Stale task: fix the login bug — created 3 weeks ago, never referenced")
+   - Content: the original task content, when it was created, and why it looks forgotten
+   - Link it to the original task using `manage_edges` with `action: "link"` and `edge_type: "related"`
 
 ## Task 7: Digest (Mondays only)
 
