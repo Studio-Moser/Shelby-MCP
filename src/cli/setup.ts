@@ -104,6 +104,9 @@ function setupClaudeDesktop(): void {
   console.log("\nIMPORTANT: Quit and restart Claude Desktop after editing.");
   console.log("\nNote: Claude Desktop and Claude Code CLI have separate configs.");
   console.log("Setting up one does NOT configure the other.");
+  console.log("\nNext: Add the Memory Protocol to your Desktop profile:");
+  console.log("  Settings > Profile > \"What preferences should Claude consider?\"");
+  console.log("  Run: shelbymcp protocol");
 }
 
 function setupCursor(): void {

@@ -59,7 +59,7 @@ Claude Desktop uses a separate config file from the CLI.
 **Config path (macOS):** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Config path (Windows):** `%APPDATA%\Claude\claude_desktop_config.json`
 
-**Note:** Claude Desktop does not have a system prompt file, so the Memory Protocol doesn't apply here. The agent will still use memory when you ask it to, but won't proactively save without prompting.
+**Memory Protocol:** Go to Settings > Profile and paste the Memory Protocol (see Section 2) into the "What preferences should Claude consider?" field. This applies to all conversations and syncs across devices.
 
 ### Cursor
 
@@ -158,10 +158,10 @@ Connecting the server gives your agent memory tools, but **agents won't use them
 
 ### Where to paste it
 
-| Agent | File | Notes |
+| Agent | Where to paste | Notes |
 |---|---|---|
 | Claude Code CLI | `~/.claude/CLAUDE.md` (global) or `CLAUDE.md` (project) | Survives context compaction |
-| Claude Desktop | N/A | No system prompt file — Desktop agents use memory reactively |
+| Claude Desktop | Settings > Profile > "What preferences should Claude consider?" | Account-level, syncs across devices, applies to all conversations |
 | Cursor | `.cursor/rules/shelbymcp.mdc` | Must include `alwaysApply: true` frontmatter (see below) |
 | Codex | `AGENTS.md` in project root | |
 | Windsurf | `.windsurfrules` in project root | |
