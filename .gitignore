@@ -1,0 +1,33 @@
+# Binary
+shelbymcp
+shelbymcp-*
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database (don't commit user data)
+*.db
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.local
