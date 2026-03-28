@@ -1,161 +1,389 @@
 # Agent Setup
 
-Connect ShelbyMCP to your AI tools. Each tool needs one config entry pointing to the ShelbyMCP binary.
+ShelbyMCP works with any MCP-compatible AI tool. Setup has three parts:
+
+1. **Connect the server** — register ShelbyMCP with your agent
+2. **Add the Memory Protocol** — tell your agent when and how to use memory
+3. **(Optional) Set up Forage** — scheduled enrichment that makes memories smarter over time
+
+> **Quick setup:** Run `shelbymcp setup <agent>` to auto-configure. See `shelbymcp help` for available agents.
 
 ---
 
-## Claude Code
+## 1. Connect the MCP Server
 
-Add to `~/.claude/mcp.json`:
+Each agent has its own config system. Pick yours below.
 
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
-    }
-  }
-}
-```
+> **Important:** Claude Code CLI and Claude Desktop are **separate apps** with **separate configs**. Adding a server to one does NOT make it available in the other.
 
-### With Forage Skill
+### Claude Code CLI
 
-Copy the scheduled skill to enable daily memory enrichment:
+The fastest way — one command:
 
 ```bash
-cp -r skills/shelby-forage ~/.claude/scheduled-tasks/shelby-forage
+claude mcp add -s user -t stdio memory -- npx shelbymcp
 ```
 
----
+This adds ShelbyMCP to your user-scoped config (`~/.claude.json`), available across all projects.
 
-## Cursor
+**Scopes:**
+- `user` — available in all projects (recommended)
+- `project` — stored in `.mcp.json` at project root, shared via version control
+- `local` — (default) private to you, only in the current project
 
-Add to `.cursor/mcp.json` in your project or global config:
+**Verify:** Run `claude mcp list` or type `/mcp` inside a session.
+
+**Memory Protocol:** Paste into `~/.claude/CLAUDE.md` (global) or `CLAUDE.md` in your project root.
+
+### Claude Desktop
+
+Claude Desktop uses a separate config file from the CLI.
+
+1. Open Claude Desktop
+2. Go to **Settings > Developer > Edit Config**
+3. Add the `memory` entry to the `mcpServers` object:
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
+      "command": "npx",
+      "args": ["shelbymcp"]
     }
   }
 }
 ```
 
----
+4. **Quit and restart Claude Desktop** (required — changes don't take effect until restart)
 
-## Codex
+**Config path (macOS):** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Config path (Windows):** `%APPDATA%\Claude\claude_desktop_config.json`
 
-Add to your Codex MCP configuration:
+**Note:** Claude Desktop does not have a system prompt file, so the Memory Protocol doesn't apply here. The agent will still use memory when you ask it to, but won't proactively save without prompting.
+
+### Cursor
+
+**Via UI:** Settings > Tools & MCP > New MCP Server
+
+**Via config file** (global — `~/.cursor/mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
+      "command": "npx",
+      "args": ["shelbymcp"]
     }
   }
 }
 ```
 
----
+Also supports project-level config at `.cursor/mcp.json` in your project root.
 
-## Windsurf
+**Memory Protocol:** Create `.cursor/rules/shelbymcp.mdc` in your project with `alwaysApply: true` frontmatter (see Section 2).
 
-Add to your Windsurf MCP settings:
+### Codex (OpenAI)
+
+**Via CLI:**
+
+```bash
+codex mcp add memory -- npx shelbymcp
+```
+
+**Via config file** (`~/.codex/config.toml` — note: **TOML**, not JSON):
+
+```toml
+[mcp_servers.memory]
+command = "npx"
+args = ["shelbymcp"]
+```
+
+Also supports project-level config at `.codex/config.toml` (trusted projects only).
+
+**Memory Protocol:** Paste into `AGENTS.md` in your project root.
+
+### Windsurf
+
+**Via UI:** Settings > Cascade > MCP Servers, or click the MCPs icon in the Cascade panel.
+
+**Via config file** (`~/.codeium/windsurf/mcp_config.json` — global only, no project-level config):
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
+      "command": "npx",
+      "args": ["shelbymcp"]
     }
   }
 }
 ```
 
----
+**Gotcha:** Windsurf has a hard cap of 100 total tools across all MCP servers.
 
-## Gemini CLI
+**Memory Protocol:** Paste into `.windsurfrules` in your project root.
 
-Add to your Gemini CLI MCP configuration:
+### Gemini CLI
+
+Edit `~/.gemini/settings.json` (or `.gemini/settings.json` in your project):
 
 ```json
 {
   "mcpServers": {
-    "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
+    "shelby-memory": {
+      "command": "npx",
+      "args": ["shelbymcp"]
     }
   }
 }
 ```
 
----
+**Gotcha:** Do NOT use underscores in the server name — Gemini's policy parser breaks on them. Use `shelby-memory`, not `shelby_memory`.
 
-## OpenCode
+**Memory Protocol:** Paste into `GEMINI.md` in your project root or `~/.gemini/system.md` (global).
 
-Add to your OpenCode config:
+### Custom Database Path
 
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
-    }
-  }
-}
-```
+All agents default to `~/.shelbymcp/memory.db`. To use a custom path, add `"--db", "/path/to/memory.db"` to the args array (or `args = ["shelbymcp", "--db", "/path/to/memory.db"]` for TOML).
+
+All agents share the same database file by default. A thought captured in Claude Code is immediately searchable in Cursor.
 
 ---
 
-## Any MCP-Compatible Client
+## 2. Memory Protocol
 
-ShelbyMCP uses standard MCP stdio transport. Any client that supports MCP can connect:
+Connecting the server gives your agent memory tools, but **agents won't use them proactively** unless you tell them to. The Memory Protocol is a block of instructions you paste into your agent's rules file.
 
-```json
-{
-  "command": "shelbymcp",
-  "args": ["--db", "/path/to/memory.db"]
-}
-```
+> **Quick setup:** Run `shelbymcp protocol` to print the protocol to your terminal. Pipe it directly: `shelbymcp protocol >> CLAUDE.md`
 
----
+### Where to paste it
 
-## CLI Flags
-
-| Flag | Default | Description |
+| Agent | File | Notes |
 |---|---|---|
-| `--db` | `~/.shelbymcp/memory.db` | Path to the SQLite database file |
-| `--verbose` | `false` | Enable verbose logging to stderr |
-| `--version` | — | Print version and exit |
+| Claude Code CLI | `~/.claude/CLAUDE.md` (global) or `CLAUDE.md` (project) | Survives context compaction |
+| Claude Desktop | N/A | No system prompt file — Desktop agents use memory reactively |
+| Cursor | `.cursor/rules/shelbymcp.mdc` | Must include `alwaysApply: true` frontmatter (see below) |
+| Codex | `AGENTS.md` in project root | |
+| Windsurf | `.windsurfrules` in project root | |
+| Gemini CLI | `GEMINI.md` (project) or `~/.gemini/system.md` (global) | |
+
+### The Protocol
+
+Copy everything inside the fence:
+
+````markdown
+## Memory (ShelbyMCP)
+
+You have persistent memory via ShelbyMCP MCP tools. Memory survives across sessions and is shared across all AI tools the user works with. You MUST use it — do not rely on conversation context alone.
+
+### When to SAVE (mandatory)
+
+You MUST call `capture_thought` after any of these events:
+
+- **Decisions**: Architecture choices, library selections, tradeoffs considered ("We chose CloudKit over Firebase because...")
+- **Preferences**: User likes/dislikes, workflow habits, coding style ("User prefers functional components over class components")
+- **People & roles**: Who does what ("Sarah owns the auth service, Mike handles DevOps")
+- **Project context**: Goals, deadlines, constraints, scope changes ("Launch target is March 15, blocked on API approval")
+- **Bugs & fixes**: Root cause discoveries, workarounds, things that broke ("Memory leak was caused by unclosed DB connections in the edge traversal loop")
+- **Architecture & patterns**: System design, data flow, conventions ("All API responses use the envelope pattern: { data, error, meta }")
+- **Insights**: Non-obvious learnings, things that surprised you ("FTS5 porter tokenizer handles plurals but not acronyms")
+
+Always include: a `summary` (one-line, <100 chars), a `type`, relevant `topics`, and link to `related_to` thoughts when applicable.
+
+### When to SEARCH (mandatory)
+
+You MUST call `search_thoughts` or `list_thoughts` before:
+
+- **Starting work on any task** — check what's already known about this area
+- **Making a decision** — check for prior decisions on the same topic
+- **When something feels familiar** — it probably is; search for it
+- **After context compaction** — immediately search to recover session context
+- **When the user says** "remember", "recall", "what do we know about", "what did we decide"
+
+### What NOT to save
+
+- Ephemeral debugging output (stack traces, log lines you're actively reading)
+- Code content that's already in git (save the *decision* about code, not the code itself)
+- Transient conversation ("let me think about this..." — save the conclusion, not the process)
+- Duplicate information — search first, update existing thoughts instead of creating new ones
+
+### How to save well
+
+1. **Summary first.** Search results only show summaries. A thought without a summary is invisible to search.
+2. **Type accurately.** Use `decision`, `task`, `question`, `reference`, `insight`, or `note`. Don't default everything to `note`.
+3. **Tag topics and people.** These are the primary filters for `list_thoughts`.
+4. **Link related thoughts.** Use `manage_edges` to connect decisions to the tasks they affect, references to the insights they support.
+5. **Update, don't duplicate.** If a thought exists but is outdated, use `update_thought`. Don't create a new one.
+````
+
+> **For Cursor:** Create `.cursor/rules/shelbymcp.mdc` and add this frontmatter before the protocol content:
+> ```
+> ---
+> alwaysApply: true
+> ---
+> ```
 
 ---
 
-## Verifying the Connection
+## 3. Forage Skill (Optional)
 
-Once configured, ask your AI tool:
+The Forage skill is a scheduled task that runs on your AI subscription to continuously improve your memories. It backfills summaries, generates embeddings, merges duplicates, detects contradictions, discovers connections, and produces weekly digests.
+
+> **Quick setup:** Run `shelbymcp forage` to print the Forage prompt to your terminal.
+
+### What Forage Does
+
+| Task | Frequency | What it does |
+|---|---|---|
+| Summary backfill | Daily | Generate one-liners for thoughts missing summaries |
+| Embed backfill | Daily | Generate embeddings for vector search |
+| Auto-classify | Daily | Improve type/topics/people on poorly tagged thoughts |
+| Consolidation | Daily | Find and merge duplicate thoughts |
+| Contradiction detection | Daily | Flag conflicting memories |
+| Connection discovery | Daily | Create edges between related thoughts |
+| Stale sweep | Weekly (Mon) | Flag forgotten action items |
+| Digest | Weekly (Mon) | Summary of the week's thinking by project/topic |
+
+### Platform Compatibility
+
+Not all agents support scheduled tasks equally.
+
+| Platform | Scheduling | How to Run Forage | Gotchas | Docs |
+|---|---|---|---|---|
+| **Claude Desktop** | Local scheduled tasks | Schedule page > Daily | Must keep app open + computer awake. One catch-up for missed runs. Best option for most users. | [Docs](https://support.claude.com/en/articles/13854387-schedule-recurring-tasks-in-cowork) |
+| **Claude Code CLI** | Session-scoped tasks | `CronCreate` or scheduled tasks | **7-day auto-expiry** on recurring tasks. Dies when session ends. Must re-create periodically. | [Docs](https://code.claude.com/docs/en/scheduled-tasks) |
+| **Claude Remote Tasks** | Cloud tasks | claude.ai/code/scheduled | Runs when computer is off. **Cannot access local `~/.shelbymcp/memory.db`** unless DB is on a network path. | [Docs](https://code.claude.com/docs/en/scheduled-tasks) |
+| **Cursor** | Automations | Cursor Automations settings | Cloud-based. MCP access to local servers may not work. | [Docs](https://docs.cursor.com/chat/automations) |
+| **Codex** | Local automations | Codex automation config | Still evolving, limited documentation. | — |
+| **Windsurf** | None | Manual only | No scheduler. Paste the Forage prompt into a conversation when you want to run it. | — |
+| **Gemini CLI** | Scheduled actions | Gemini scheduled actions | Consumer-focused. Max 10 active actions. MCP tool access uncertain. | [Docs](https://support.google.com/gemini/answer/16316416) |
+
+**Recommended:** Claude Desktop local tasks — persistent across restarts, full MCP access, catches up on missed runs.
+
+### Setup: Claude Desktop (Recommended)
+
+1. Open Claude Desktop
+2. Go to the **Schedule** page
+3. Create a new local task, set frequency to **Daily**
+4. Paste the Forage prompt (run `shelbymcp forage` to get it)
+5. Done — runs daily with access to your ShelbyMCP tools
+
+### Setup: Claude Code CLI
+
+```bash
+cp -r node_modules/shelbymcp/skills/shelby-forage ~/.claude/scheduled-tasks/shelby-forage
+```
+
+Or create a scheduled task manually and paste the output of `shelbymcp forage`.
+
+> **Note:** Claude Code CLI scheduled tasks auto-expire after 7 days. Use Claude Desktop for persistent scheduling.
+
+### Setup: Any Other Agent
+
+If your agent supports scheduled tasks or recurring prompts:
+
+1. Create a scheduled task set to run **daily**
+2. Paste the output of `shelbymcp forage` as the task content
+3. Ensure the agent has access to the ShelbyMCP MCP tools
+
+If your agent has no scheduler (Windsurf, older tools), paste the Forage prompt into a conversation whenever you want to run maintenance manually.
+
+### The Forage Prompt
+
+Run `shelbymcp forage` to print this to your terminal, or copy from below:
+
+````markdown
+# Shelby Forage — Memory Maintenance
+
+You are the Forage agent for ShelbyMCP. Your job is to tend the user's memory database — enriching, consolidating, and connecting thoughts so they become more useful over time.
+
+You have access to the ShelbyMCP memory tools. Perform the following tasks in order. Skip any task that has nothing to do.
+
+## Task 1: Summary Backfill
+1. `list_thoughts` — find thoughts where summary is null/empty (limit 50)
+2. `get_thought` for each — read the full content
+3. Write a one-line summary (<100 chars) answering: "What is this about and why does it matter?"
+4. `update_thought` to set the summary
+
+## Task 2: Embed Backfill
+1. `list_thoughts` sorted by created_at desc (limit 50)
+2. For thoughts without embeddings, use `update_thought` to add one
+3. Generate embeddings by summarizing the content into a dense semantic representation
+
+## Task 3: Auto-Classify
+1. `list_thoughts` — find thoughts where type is "note" (default) or topics is empty
+2. Read content, determine: correct type (decision/task/question/reference/insight/note), topics, people
+3. `update_thought` with improved metadata
+
+## Task 4: Consolidation
+1. `search_thoughts` for clusters about the same topic
+2. If 2+ thoughts say essentially the same thing, `capture_thought` a merged version preserving all unique info
+3. `update_thought` on originals to set `consolidated_into` to the new thought ID
+
+## Task 5: Contradiction Detection
+1. Review recent thoughts (last 7 days), search for existing thoughts on same topics
+2. If contradictions found, `capture_thought` a new "question" type flagging the conflict
+3. Link contradicting thoughts with `manage_edges` (edge_type: "refuted_by")
+
+## Task 6: Connection Discovery
+1. Review recent thoughts, search for older thoughts on related topics
+2. Create edges with `manage_edges` using appropriate types: refines, cites, related, follows
+
+## Task 7: Stale Sweep (Mondays only)
+1. `list_thoughts` — type "task", older than 7 days, not recently updated
+2. `capture_thought` a "note" summarizing forgotten items: "Weekly stale task sweep — [date]"
+
+## Task 8: Digest (Mondays only)
+1. `list_thoughts` — all thoughts from past 7 days
+2. Group by project and topic
+3. `capture_thought` a "reference" with structured digest: key decisions, open questions, active tasks, themes
+4. Title: "Weekly digest — [date range]"
+
+## Guidelines
+- Be conservative. Don't merge unless genuinely duplicate.
+- Preserve information. Consolidated thoughts keep everything from originals.
+- Don't create noise. Only flag real contradictions, not wording differences.
+- Respect existing edges. Don't duplicate relationships.
+- If nothing to do for a task, skip it.
+````
+
+---
+
+## 4. Verify the Connection
+
+Ask your AI tool:
 
 > "What memory tools do you have available?"
 
-It should list the ShelbyMCP tools (capture_thought, search_thoughts, etc.). Then try:
+It should list: `capture_thought`, `search_thoughts`, `list_thoughts`, `get_thought`, `update_thought`, `delete_thought`, `manage_edges`, `explore_graph`, `thought_stats`.
+
+Then test the full loop:
 
 > "Remember that I prefer dark mode in all my apps."
 
-And later:
+Wait, then in a **different session or agent**:
 
 > "What do you know about my preferences?"
 
-If it recalls the dark mode preference, ShelbyMCP is working.
+If it recalls the dark mode preference, ShelbyMCP is working and memories are shared.
+
+### Tools Quick Reference
+
+| Tool | Type | What it does |
+|---|---|---|
+| `capture_thought` | Create | Store a thought with summary, metadata, topics, and relationships. Accepts an array for bulk capture. |
+| `search_thoughts` | Read | Full-text search with knowledge graph expansion. Returns summaries, not full content. |
+| `list_thoughts` | Read | Browse/filter by type, topic, person, project, date range. |
+| `get_thought` | Read | Fetch full thought content by ID. |
+| `update_thought` | Update | Update content or metadata. Accepts `ids` array for bulk updates. |
+| `delete_thought` | Delete | Remove a thought and its edges. |
+| `manage_edges` | Write | Create or remove typed relationships (refines, cites, refuted_by, tags, related, follows). |
+| `explore_graph` | Read | Traverse the knowledge graph from a starting thought by depth. |
+| `thought_stats` | Read | Aggregate statistics about your memory database. |
 
 ---
 
-## Surfacing Forage Flags
+## 5. Surfacing Forage Flags
 
 The Forage skill runs in the background and tags items that need user attention with the topic `"needs-attention"` (contradictions it found, tasks that look forgotten, etc.). Since Forage runs unattended, it can't ask the user directly — it leaves these flags for the conversational agent to pick up.
 

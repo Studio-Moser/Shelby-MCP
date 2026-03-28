@@ -1,5 +1,6 @@
 {
   "name": "shelbymcp",
+  "mcpName": "io.github.studio-moser/shelbymcp",
   "version": "0.1.0",
   "description": "Knowledge-graph memory server for AI tools via MCP",
   "type": "module",

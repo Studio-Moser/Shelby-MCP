@@ -7,10 +7,35 @@ export interface ShelbyConfig {
   logFile: string | null;
 }
 
+export interface CliCommand {
+  command: "help" | "setup" | "protocol" | "forage";
+  agent?: string;
+}
+
 const DEFAULT_DB_DIR = resolve(homedir(), ".shelbymcp");
 const DEFAULT_DB_PATH = resolve(DEFAULT_DB_DIR, "memory.db");
 
-export function parseArgs(argv: string[]): ShelbyConfig | "version" {
+export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand {
+  // Check for commands first (before flags)
+  const first = argv[0];
+
+  if (first === "help" || first === "--help" || first === "-h") {
+    return { command: "help" };
+  }
+
+  if (first === "setup") {
+    return { command: "setup", agent: argv[1] };
+  }
+
+  if (first === "protocol") {
+    return { command: "protocol" };
+  }
+
+  if (first === "forage") {
+    return { command: "forage" };
+  }
+
+  // Parse flags for server mode
   const config: ShelbyConfig = {
     dbPath: DEFAULT_DB_PATH,
     verbose: false,

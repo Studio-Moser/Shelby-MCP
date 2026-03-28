@@ -74,15 +74,17 @@ Add to your `~/.claude/mcp.json`:
 }
 ```
 
+### Add the Memory Protocol
+
+The Memory Protocol tells your agent *when* to save and search memory. Without it, your agent has the tools but won't use them proactively.
+
+See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md#2-memory-protocol) for the copy-paste instructions for your agent.
+
 ### (Optional) Install the Forage Skill
 
-The Forage skill runs on Claude Code's scheduler to continuously improve your memories:
+The Forage skill runs daily on your AI subscription to enrich, consolidate, and connect your memories. Works with Claude Desktop, Claude Code, Cursor, and more.
 
-```bash
-cp -r skills/shelby-forage ~/.claude/scheduled-tasks/shelby-forage
-```
-
-That's it. Your AI now remembers.
+See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md#3-forage-skill-optional) for setup instructions and platform compatibility.
 
 ---
 
@@ -172,13 +174,9 @@ ShelbyMCP ships with `shelby-forage`, a scheduled skill that runs on your existi
 | **Stale sweep** | Weekly | Flag old action items that fell through the cracks |
 | **Digest** | Weekly | Generate a summary of the week's thinking |
 
-### Install
+### Setup
 
-```bash
-cp -r skills/shelby-forage ~/.claude/scheduled-tasks/shelby-forage
-```
-
-The skill runs daily by default. Edit the SKILL.md frontmatter to adjust the schedule.
+See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md#3-forage-skill-optional) for full setup instructions, platform compatibility table, and gotchas for each agent.
 
 ### Without the Forage Skill
 
