@@ -22,7 +22,7 @@ async function main() {
         printHelp();
         break;
       case "setup":
-        runSetup(config.agent);
+        runSetup(config.agent, config.forage ?? false);
         break;
       case "protocol":
         printProtocol();

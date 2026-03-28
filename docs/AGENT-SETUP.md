@@ -294,6 +294,23 @@ Run `shelbymcp forage` to print this to your terminal, or copy from below:
 
 Run `shelbymcp forage` to get the full prompt, or see [skills/shelby-forage/SKILL.md](../skills/shelby-forage/SKILL.md) for the canonical version.
 
+### Surfacing Forage Flags
+
+Forage tags items that need user attention with the topic `"needs-attention"` (contradictions it found, tasks that look forgotten, etc.). Since Forage runs unattended, it can't ask the user directly — it leaves flags for the conversational agent to pick up.
+
+To surface them, add something like this to your agent's system prompt alongside the Memory Protocol:
+
+```
+When starting a conversation, check ShelbyMCP for items that need attention:
+use `list_thoughts` with `topic: "needs-attention"` and `limit: 5`.
+If there are any, briefly mention them to the user (e.g., "Forage flagged
+a couple things — a possible contradiction about your database choice,
+and a task from two weeks ago that might have slipped. Want to look at them?").
+If the user resolves one, delete the needs-attention thought — it's served its purpose.
+```
+
+This keeps Forage focused on analysis and the conversational agent focused on communication.
+
 ---
 
 ## 4. Verify the Connection
@@ -328,21 +345,3 @@ If it recalls the dark mode preference, ShelbyMCP is working and memories are sh
 | `explore_graph` | Read | Traverse the knowledge graph from a starting thought by depth. |
 | `thought_stats` | Read | Aggregate statistics about your memory database. |
 
----
-
-## 5. Surfacing Forage Flags
-
-The Forage skill runs in the background and tags items that need user attention with the topic `"needs-attention"` (contradictions it found, tasks that look forgotten, etc.). Since Forage runs unattended, it can't ask the user directly — it leaves these flags for the conversational agent to pick up.
-
-To surface them, add something like this to your agent's system prompt or CLAUDE.md:
-
-```
-When starting a conversation, check ShelbyMCP for items that need attention:
-use `list_thoughts` with `topic: "needs-attention"` and `limit: 5`.
-If there are any, briefly mention them to the user (e.g., "Forage flagged
-a couple things — a possible contradiction about your database choice,
-and a task from two weeks ago that might have slipped. Want to look at them?").
-If the user resolves one, delete the needs-attention thought — it's served its purpose.
-```
-
-This keeps Forage focused on analysis and the conversational agent focused on communication.

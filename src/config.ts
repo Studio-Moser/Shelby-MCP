@@ -10,6 +10,7 @@ export interface ShelbyConfig {
 export interface CliCommand {
   command: "help" | "setup" | "protocol" | "forage";
   agent?: string;
+  forage?: boolean;
 }
 
 const DEFAULT_DB_DIR = resolve(homedir(), ".shelbymcp");
@@ -24,7 +25,9 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
   }
 
   if (first === "setup") {
-    return { command: "setup", agent: argv[1] };
+    const forage = argv.includes("--forage");
+    const agent = argv[1] && !argv[1].startsWith("--") ? argv[1] : undefined;
+    return { command: "setup", agent, forage };
   }
 
   if (first === "protocol") {

@@ -4,6 +4,7 @@ export function printHelp(): void {
 Usage:
   shelbymcp                    Start the MCP server (stdio)
   shelbymcp setup <agent>      Set up ShelbyMCP for an agent
+  shelbymcp setup <agent> --forage  ...and install the Forage skill
   shelbymcp protocol           Print the Memory Protocol
   shelbymcp forage             Print the Forage skill prompt
   shelbymcp help               Show this help
@@ -22,6 +23,7 @@ Flags:
   --version       Print version
 
 Examples:
+  shelbymcp setup claude-code --forage  Configure + install Forage skill
   shelbymcp setup claude-code          Auto-configure Claude Code CLI
   shelbymcp protocol >> CLAUDE.md      Append Memory Protocol to your rules
   shelbymcp forage > forage-task.md    Save Forage prompt for scheduling

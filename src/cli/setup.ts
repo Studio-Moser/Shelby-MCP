@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const AGENTS = [
   "claude-code",
@@ -16,6 +17,17 @@ type AgentName = (typeof AGENTS)[number];
 
 function isAgent(name: string): name is AgentName {
   return (AGENTS as readonly string[]).includes(name);
+}
+
+/** Resolve the package root (where skills/ lives) from the compiled dist/ output */
+function getPackageRoot(): string {
+  const thisFile = fileURLToPath(import.meta.url);
+  // thisFile is dist/cli/setup.js → go up to dist/, then up to package root
+  return resolve(dirname(thisFile), "..", "..");
+}
+
+function getSkillSourcePath(): string {
+  return resolve(getPackageRoot(), "skills", "shelby-forage");
 }
 
 function mergeJsonConfig(filePath: string, serverEntry: Record<string, unknown>): boolean {
@@ -53,7 +65,58 @@ function mergeJsonConfig(filePath: string, serverEntry: Record<string, unknown>)
   return true;
 }
 
-function setupClaudeCode(): void {
+function printForageInstructions(agent: string): void {
+  console.log("\n--- Forage Skill ---\n");
+
+  switch (agent) {
+    case "claude-desktop":
+      console.log("To set up Forage on Claude Desktop:");
+      console.log("  1. Open the Schedule page");
+      console.log("  2. Create a new local task, set frequency to Daily");
+      console.log("  3. Paste the Forage prompt: run `shelbymcp forage` to get it");
+      console.log("");
+      console.log("Also add this to your Profile Preferences (alongside the Memory Protocol):");
+      console.log("");
+      console.log("  When starting a conversation, check ShelbyMCP for items that need attention:");
+      console.log('  use `list_thoughts` with `topic: "needs-attention"` and `limit: 5`.');
+      console.log("  If there are any, briefly mention them to the user.");
+      console.log("  If the user resolves one, delete the needs-attention thought.");
+      break;
+
+    case "cursor":
+      console.log("To set up Forage on Cursor:");
+      console.log("  1. Open Cursor Automations settings");
+      console.log("  2. Create a new automation with a Daily cron schedule");
+      console.log("  3. Paste the Forage prompt: run `shelbymcp forage` to get it");
+      console.log("");
+      console.log("Note: Cursor Automations are cloud-based. MCP access to local");
+      console.log("servers may not work. Test to confirm.");
+      break;
+
+    case "codex":
+      console.log("Codex automation support is still evolving.");
+      console.log("To run Forage manually, paste the output of `shelbymcp forage`");
+      console.log("into a Codex conversation.");
+      break;
+
+    case "windsurf":
+      console.log("Windsurf has no scheduler. To run Forage manually, paste the");
+      console.log("output of `shelbymcp forage` into a Windsurf conversation");
+      console.log("whenever you want to maintain your memories.");
+      break;
+
+    case "gemini":
+      console.log("To set up Forage on Gemini:");
+      console.log("  1. Create a scheduled action set to Daily");
+      console.log("  2. Paste the Forage prompt: run `shelbymcp forage` to get it");
+      console.log("");
+      console.log("Note: Gemini has a max of 10 active scheduled actions.");
+      console.log("MCP tool access in scheduled actions is uncertain — test to confirm.");
+      break;
+  }
+}
+
+function setupClaudeCode(forage: boolean): void {
   try {
     execSync("which claude", { stdio: "ignore" });
   } catch {
@@ -77,9 +140,31 @@ function setupClaudeCode(): void {
 
   console.log("\nNext: Add the Memory Protocol to your rules file:");
   console.log("  shelbymcp protocol >> ~/.claude/CLAUDE.md");
+
+  if (forage) {
+    const skillSource = getSkillSourcePath();
+    const skillDest = resolve(homedir(), ".claude/scheduled-tasks/shelby-forage");
+
+    if (existsSync(resolve(skillDest, "SKILL.md"))) {
+      console.log("\n--- Forage Skill ---\n");
+      console.log(`Forage skill already installed at ${skillDest}`);
+    } else if (existsSync(resolve(skillSource, "SKILL.md"))) {
+      mkdirSync(skillDest, { recursive: true });
+      cpSync(skillSource, skillDest, { recursive: true });
+      console.log("\n--- Forage Skill ---\n");
+      console.log(`Forage skill installed to ${skillDest}`);
+      console.log("It will run daily via Claude Code's scheduler.");
+      console.log("\nNote: Claude Code CLI scheduled tasks auto-expire after 7 days.");
+      console.log("Use Claude Desktop for persistent scheduling.");
+    } else {
+      console.log("\n--- Forage Skill ---\n");
+      console.log("Could not find skills/shelby-forage/SKILL.md in the package.");
+      console.log("Install manually: shelbymcp forage > ~/.claude/scheduled-tasks/shelby-forage/SKILL.md");
+    }
+  }
 }
 
-function setupClaudeDesktop(): void {
+function setupClaudeDesktop(forage: boolean): void {
   const platform = process.platform;
   let configPath: string;
 
@@ -107,9 +192,13 @@ function setupClaudeDesktop(): void {
   console.log("\nNext: Add the Memory Protocol to your Desktop profile:");
   console.log("  Settings > Profile > \"What preferences should Claude consider?\"");
   console.log("  Run: shelbymcp protocol");
+
+  if (forage) {
+    printForageInstructions("claude-desktop");
+  }
 }
 
-function setupCursor(): void {
+function setupCursor(forage: boolean): void {
   const configPath = resolve(homedir(), ".cursor/mcp.json");
 
   const entry = {
@@ -124,9 +213,13 @@ function setupCursor(): void {
   console.log("  mkdir -p .cursor/rules");
   console.log("  echo '---\\nalwaysApply: true\\n---' > .cursor/rules/shelbymcp.mdc");
   console.log("  shelbymcp protocol >> .cursor/rules/shelbymcp.mdc");
+
+  if (forage) {
+    printForageInstructions("cursor");
+  }
 }
 
-function setupCodex(): void {
+function setupCodex(forage: boolean): void {
   try {
     execSync("which codex", { stdio: "ignore" });
   } catch {
@@ -137,6 +230,9 @@ function setupCodex(): void {
     console.log('args = ["shelbymcp"]');
     console.log("\nNext: Add the Memory Protocol:");
     console.log("  shelbymcp protocol >> AGENTS.md");
+    if (forage) {
+      printForageInstructions("codex");
+    }
     return;
   }
 
@@ -154,9 +250,13 @@ function setupCodex(): void {
 
   console.log("\nNext: Add the Memory Protocol:");
   console.log("  shelbymcp protocol >> AGENTS.md");
+
+  if (forage) {
+    printForageInstructions("codex");
+  }
 }
 
-function setupWindsurf(): void {
+function setupWindsurf(forage: boolean): void {
   const platform = process.platform;
   let configPath: string;
 
@@ -176,9 +276,13 @@ function setupWindsurf(): void {
   console.log("\nOr add via UI: Settings > Cascade > MCP Servers");
   console.log("\nNext: Add the Memory Protocol:");
   console.log("  shelbymcp protocol >> .windsurfrules");
+
+  if (forage) {
+    printForageInstructions("windsurf");
+  }
 }
 
-function setupGemini(): void {
+function setupGemini(forage: boolean): void {
   const configPath = resolve(homedir(), ".gemini/settings.json");
 
   const entry = {
@@ -221,11 +325,15 @@ function setupGemini(): void {
 
   console.log("\nNext: Add the Memory Protocol:");
   console.log("  shelbymcp protocol >> GEMINI.md");
+
+  if (forage) {
+    printForageInstructions("gemini");
+  }
 }
 
-export function runSetup(agent: string | undefined): void {
+export function runSetup(agent: string | undefined, forage: boolean): void {
   if (!agent) {
-    console.log("Usage: shelbymcp setup <agent>\n");
+    console.log("Usage: shelbymcp setup <agent> [--forage]\n");
     console.log("Agents:");
     console.log("  claude-code       Claude Code CLI");
     console.log("  claude-desktop    Claude Desktop app");
@@ -233,6 +341,8 @@ export function runSetup(agent: string | undefined): void {
     console.log("  codex             OpenAI Codex");
     console.log("  windsurf          Windsurf (Codeium)");
     console.log("  gemini            Gemini CLI");
+    console.log("\nFlags:");
+    console.log("  --forage          Also set up the Forage enrichment skill");
     return;
   }
 
@@ -244,22 +354,22 @@ export function runSetup(agent: string | undefined): void {
 
   switch (agent) {
     case "claude-code":
-      setupClaudeCode();
+      setupClaudeCode(forage);
       break;
     case "claude-desktop":
-      setupClaudeDesktop();
+      setupClaudeDesktop(forage);
       break;
     case "cursor":
-      setupCursor();
+      setupCursor(forage);
       break;
     case "codex":
-      setupCodex();
+      setupCodex(forage);
       break;
     case "windsurf":
-      setupWindsurf();
+      setupWindsurf(forage);
       break;
     case "gemini":
-      setupGemini();
+      setupGemini(forage);
       break;
   }
 }
