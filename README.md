@@ -35,9 +35,10 @@ Ship it with the **Forage skill**, a scheduled task that runs on your existing A
 |---|---|
 | Every conversation starts from zero | Persistent memory across sessions |
 | Memories are a flat pile of text | Knowledge graph with typed relationships (refines, cites, refuted_by, tags) |
+| Search results blow up your context window | Pre-computed summaries — search returns one-liners, fetch full content on demand |
 | No memory maintenance | Forage skill auto-consolidates, deduplicates, and connects |
 | Vector search requires heavy infra | Forage skill backfills embeddings using your existing AI subscription |
-| Requires Docker/Python/Cloud | Single binary, single SQLite file, zero dependencies |
+| Requires Docker/Python/Cloud | `npx shelbymcp`, single SQLite file |
 
 ---
 
@@ -124,8 +125,8 @@ Forage runs on Claude Code's scheduler:
 
 | Tool | Description |
 |---|---|
-| `capture_thought` | Store a thought with metadata, topics, and relationships |
-| `search_thoughts` | Full-text search with knowledge graph expansion |
+| `capture_thought` | Store a thought with summary, metadata, topics, and relationships |
+| `search_thoughts` | Full-text search with knowledge graph expansion (returns summaries, not full content) |
 | `list_thoughts` | Browse/filter by type, topic, person, project, date range |
 | `get_thought` | Retrieve a specific thought by ID |
 | `update_thought` | Update content or metadata |
@@ -138,6 +139,7 @@ Forage runs on Claude Code's scheduler:
 | `capture_edge` | Create a knowledge graph edge with metadata |
 | `get_graph` | Traverse the knowledge graph from a starting thought |
 | `bulk_capture` | Capture multiple thoughts in one call |
+| `bulk_update` | Update metadata on multiple thoughts in one call (for Forage efficiency) |
 
 ---
 
@@ -271,6 +273,22 @@ ShelbyMCP is the open-source memory server. **[Shelby for Mac](https://github.co
 - Extension discovery and management
 
 ShelbyMCP and Shelby for Mac use the same SQLite database. Start with the MCP server, upgrade to the Mac app when you want more.
+
+---
+
+## Design Principles for Contributors
+
+These are non-negotiable. They exist because MCP servers directly impact token costs for every user on every message.
+
+1. **Tool descriptions MUST be static.** Tool definitions become part of the agent's system prompt and are sent on every message. Dynamic data (counts, timestamps, user-specific info) in descriptions breaks prompt caching — costing 10x more tokens. Put dynamic data in tool *responses*, not descriptions. See [Architecture: Token Efficiency Patterns](docs/ARCHITECTURE.md#token-efficiency-patterns).
+
+2. **Search returns summaries, not full content.** A search hitting 20 thoughts at 2,000 words each = 40K wasted tokens. Search results return the agent-provided `summary` field (one line). The agent calls `get_thought` for full content when it needs it.
+
+3. **All list/search tools have a `limit` parameter.** Default 20, max 100. No unbounded queries.
+
+4. **The server runs zero inference.** Agents provide metadata (type, topics, summary, relationships) at capture time. The Forage skill handles enrichment. The server is pure storage + retrieval.
+
+5. **All logging to stderr.** `console.error` only. stdout is the MCP JSON-RPC channel. A single `console.log` breaks everything.
 
 ---
 

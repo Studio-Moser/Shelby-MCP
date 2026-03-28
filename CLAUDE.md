@@ -26,12 +26,16 @@ ShelbyMCP is an open-source MCP memory server with a knowledge graph. It gives A
 
 ## Key Design Decisions
 
-1. **Smart agent, dumb server.** The server runs zero inference. Agents provide structured metadata at capture time. The Forage skill uses the user's AI subscription.
+1. **Smart agent, dumb server.** The server runs zero inference. Agents provide structured metadata AND summaries at capture time. The Forage skill uses the user's AI subscription for enrichment.
 2. **Knowledge graph is the differentiator.** Typed edges (refines, cites, refuted_by, tags, related, follows) between thoughts. This is what sets ShelbyMCP apart from Engram, Cipher, and Basic Memory.
-3. **better-sqlite3 for synchronous DB access.** MCP tools are request/response — no need for async DB operations. Synchronous is simpler and faster for this workload.
-4. **Official MCP SDK.** Uses `@modelcontextprotocol/sdk` for protocol compliance. Don't reimplement JSON-RPC.
-5. **WAL mode.** Concurrent reads during writes. Important when Forage skill and MCP server share the DB.
-6. **UUID primary keys.** Avoids collisions from concurrent captures across multiple AI tools.
+3. **Search returns summaries, not content.** The `summary` column stores agent-provided one-liners. Search/list tools return summaries + IDs. The agent calls `get_thought` for full content. This prevents 40K+ token blowups on search results.
+4. **Static tool descriptions.** Tool definitions are in the system prompt on every message. Dynamic data in descriptions breaks prompt caching (10x cost). Put dynamic info in tool responses, never descriptions.
+5. **Result limits everywhere.** Every list/search tool has a `limit` param (default 20, max 100). No unbounded queries.
+6. **better-sqlite3 for synchronous DB access.** MCP tools are request/response — no need for async DB operations. Synchronous is simpler and faster for this workload.
+7. **Official MCP SDK.** Uses `@modelcontextprotocol/sdk` for protocol compliance. Don't reimplement JSON-RPC.
+8. **WAL mode.** Concurrent reads during writes. Important when Forage skill and MCP server share the DB.
+9. **UUID primary keys.** Avoids collisions from concurrent captures across multiple AI tools.
+10. **Visibility column (future-ready).** `visibility TEXT DEFAULT 'personal'` exists in the schema but isn't enforced yet. When team/multi-user support comes, the column is already there — no migration needed.
 
 ## Critical Implementation Patterns
 

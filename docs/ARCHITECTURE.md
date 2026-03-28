@@ -54,11 +54,13 @@ The core table. Each row is a captured thought/memory.
 CREATE TABLE thoughts (
     id          TEXT PRIMARY KEY,       -- UUID
     content     TEXT NOT NULL,          -- Raw thought content
+    summary     TEXT,                   -- Agent-provided one-line summary (for search results)
     type        TEXT DEFAULT 'note',    -- note, decision, task, question, reference, insight
     source      TEXT DEFAULT 'unknown', -- claude-code, cursor, codex, quick-capture, forage
     project     TEXT,                   -- Optional project association
     topics      TEXT,                   -- JSON array of topic strings
     people      TEXT,                   -- JSON array of people mentioned
+    visibility  TEXT DEFAULT 'personal', -- personal, project, team, agent_only (future: enforced at query layer)
     metadata    TEXT,                   -- Arbitrary JSON metadata
     embedding   BLOB,                  -- Optional: 1536-dim float32 vector (6KB)
     created_at  TEXT NOT NULL,         -- ISO 8601 timestamp
@@ -113,17 +115,71 @@ CREATE INDEX idx_edges_type ON edges(edge_type);
 
 ---
 
+## Token Efficiency Patterns
+
+These patterns are learned from production agent systems and are critical for ShelbyMCP's usability. An MCP server that wastes tokens on every call will get disabled by users.
+
+### Static Tool Descriptions (Priority: Critical)
+
+Tool definitions from MCP servers become part of the agent's system prompt. If definitions contain dynamic data (e.g., "you have 1,247 thoughts"), they break prompt caching — costing 10x more tokens on every message.
+
+**Rule: Tool descriptions MUST be static.** No dynamic counts, no timestamps, no user-specific data in `registerTool` descriptions. Dynamic stats are returned via the `thought_stats` tool, never baked into descriptions.
+
+```typescript
+// GOOD — static, cacheable
+server.registerTool("thought_stats", {
+  description: "Get aggregate statistics about your memory database",
+  // ...
+});
+
+// BAD — breaks prompt cache on every change
+server.registerTool("thought_stats", {
+  description: "Get stats about your 1,247 thoughts across 5 projects",
+  // ...
+});
+```
+
+### Pre-Computed Summaries (Priority: High)
+
+Search results should not return full thought content — a single search hitting 20 thoughts at 2,000 words each would consume 40K+ tokens. Instead, search returns **agent-provided summaries**.
+
+The `capture_thought` tool accepts an optional `summary` field (one-line description). The capturing agent is already an LLM — providing a summary costs it nothing. The Forage skill backfills summaries for thoughts that don't have them.
+
+Search results return: `id`, `summary`, `type`, `topics`, `created_at`. The agent calls `get_thought` with a specific ID to retrieve full content when needed.
+
+### Result Limits (Priority: High)
+
+All list/search tools enforce limits to prevent context blowup:
+
+- `limit` param on every list/search tool (default: 20, max: 100)
+- Results sorted by relevance (search) or recency (list) so the most useful results come first
+- Response includes `total_count` so the agent knows if there are more results
+
+### Concise Tool Descriptions (Priority: Medium)
+
+Keep `registerTool` descriptions short. Don't explain the full schema in every tool description. The agent will learn the tool's behavior through use. Long descriptions waste tokens on every message.
+
+### Bulk Operations (Priority: Medium)
+
+The Forage skill needs to update many thoughts per run (backfill summaries, update metadata, create edges). Individual tool calls are expensive — each one is a full MCP round-trip. Provide bulk operations:
+
+- `bulk_capture` — Capture multiple thoughts in one call
+- `bulk_update` — Update metadata on multiple thoughts in one call
+
+---
+
 ## MCP Tool Design
 
 ### Capture Flow
 
-When an AI tool calls `capture_thought`, the agent (not the server) provides structured metadata:
+When an AI tool calls `capture_thought`, the agent (not the server) provides structured metadata including an optional summary:
 
 ```json
 {
   "tool": "capture_thought",
   "arguments": {
-    "content": "We decided to use CloudKit for sync instead of Firebase",
+    "content": "We decided to use CloudKit for sync instead of Firebase because CloudKit is free for our scale, works offline, and doesn't add a third-party dependency. Firebase would require a Google Cloud account and has per-read pricing that could get expensive with cross-device sync.",
+    "summary": "Chose CloudKit over Firebase for sync — free, offline-capable, no third-party dependency",
     "type": "decision",
     "project": "shelby",
     "topics": ["sync", "cloud", "infrastructure"],
@@ -135,12 +191,12 @@ When an AI tool calls `capture_thought`, the agent (not the server) provides str
 
 The server:
 1. Generates a UUID
-2. Stores the thought in SQLite
+2. Stores the thought (content + summary) in SQLite
 3. Updates the FTS5 index
 4. Creates edge records for `related_to` references
 5. Returns the new thought ID
 
-**No inference happens in the server.** The agent is an LLM — it classifies, extracts topics, and identifies relationships as part of its normal reasoning.
+**No inference happens in the server.** The agent is an LLM — it classifies, extracts topics, provides a summary, and identifies relationships as part of its normal reasoning.
 
 ### Search Flow
 
@@ -150,6 +206,7 @@ The server:
 2. For each match, traverse edges to find connected thoughts (1 hop by default)
 3. Return matches + connected thoughts, ranked by relevance
 4. If embeddings exist, optionally rerank by cosine similarity
+5. **Results return summaries, not full content** — agent calls `get_thought` for full content when needed
 
 ### Graph Traversal
 
