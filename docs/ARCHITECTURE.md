@@ -1,19 +1,19 @@
 # Architecture
 
 > **Status**: Design document — implementation in progress
-> **Language**: Go
-> **Database**: SQLite + FTS5
-> **Protocol**: MCP (stdio JSON-RPC)
+> **Language**: TypeScript
+> **Database**: SQLite (better-sqlite3) + FTS5
+> **Protocol**: MCP (official @modelcontextprotocol/sdk)
 
 ---
 
 ## Design Principles
 
-1. **Zero dependencies.** Single binary, single SQLite file. No Docker, no Python, no Node.js, no cloud accounts.
+1. **Minimal dependencies.** `npx shelbymcp` and you're running. Single SQLite file. No Docker, no Python, no cloud accounts.
 2. **Smart agent, dumb server.** The MCP server runs zero inference. The AI tools calling the tools are already LLMs — they provide structured metadata at capture time. The Forage skill uses the user's existing AI subscription for enrichment.
 3. **Knowledge graph as a first-class citizen.** Thoughts aren't isolated. Typed edges (refines, cites, refuted_by, tags, related, follows) connect memories into a navigable graph.
 4. **Single file for portability.** The entire database is one SQLite file. Easy to back up, sync (CloudKit, Dropbox, git), or move between machines.
-5. **Cross-platform from day one.** Go compiles to macOS, Linux, and Windows. The same binary works everywhere.
+5. **Native to the MCP ecosystem.** Built with the official MCP TypeScript SDK and better-sqlite3 — the same tools the MCP community already uses.
 
 ---
 
@@ -218,32 +218,32 @@ The skill:
 
 ```
 shelbymcp/
-├── cmd/
-│   └── shelbymcp/
-│       └── main.go            # Entry point, CLI flags, server startup
-├── internal/
+├── src/
+│   ├── index.ts               # Entry point, CLI flags, server startup
 │   ├── db/
-│   │   ├── db.go              # SQLite connection, migrations, WAL mode
-│   │   ├── thoughts.go        # Thought CRUD operations
-│   │   ├── edges.go           # Knowledge graph edge operations
-│   │   ├── fts.go             # FTS5 search operations
-│   │   ├── vectors.go         # Vector storage and cosine similarity
-│   │   └── migrations.go      # Schema versioning
+│   │   ├── database.ts        # SQLite connection, migrations, WAL mode
+│   │   ├── thoughts.ts        # Thought CRUD operations
+│   │   ├── edges.ts           # Knowledge graph edge operations
+│   │   ├── fts.ts             # FTS5 search operations
+│   │   ├── vectors.ts         # Vector storage and cosine similarity
+│   │   └── migrations.ts      # Schema versioning
 │   ├── mcp/
-│   │   ├── server.go          # MCP stdio JSON-RPC server
-│   │   ├── protocol.go        # MCP protocol types
-│   │   └── tools.go           # Tool definitions and routing
+│   │   ├── server.ts          # MCP server via @modelcontextprotocol/sdk
+│   │   └── tools.ts           # Tool definitions and routing
 │   ├── tools/
-│   │   ├── capture.go         # capture_thought, bulk_capture
-│   │   ├── search.go          # search_thoughts, search_by_embedding
-│   │   ├── list.go            # list_thoughts
-│   │   ├── get.go             # get_thought
-│   │   ├── update.go          # update_thought
-│   │   ├── delete.go          # delete_thought
-│   │   ├── graph.go           # link_thoughts, unlink_thoughts, get_connections, get_graph, capture_edge
-│   │   └── stats.go           # thought_stats
-│   └── config/
-│       └── config.go          # CLI flags, env vars, defaults
+│   │   ├── capture.ts         # capture_thought, bulk_capture
+│   │   ├── search.ts          # search_thoughts, search_by_embedding
+│   │   ├── list.ts            # list_thoughts
+│   │   ├── get.ts             # get_thought
+│   │   ├── update.ts          # update_thought
+│   │   ├── delete.ts          # delete_thought
+│   │   ├── graph.ts           # link_thoughts, unlink_thoughts, get_connections, get_graph, capture_edge
+│   │   └── stats.ts           # thought_stats
+│   └── config.ts              # CLI flags, env vars, defaults
+├── tests/
+│   ├── db/                    # Database layer tests
+│   ├── tools/                 # Tool handler tests
+│   └── mcp/                   # Protocol tests
 ├── skills/
 │   └── shelby-forage/
 │       └── SKILL.md           # Scheduled Forage skill for Claude Code
@@ -259,15 +259,15 @@ shelbymcp/
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   └── workflows/
 │       ├── ci.yml             # Tests on PR
-│       └── release.yml        # Build + publish
+│       └── release.yml        # Build + publish to npm
 ├── README.md
 ├── LICENSE                    # MIT
 ├── CONTRIBUTING.md
 ├── CHANGELOG.md
 ├── SECURITY.md
 ├── CODE_OF_CONDUCT.md
-├── go.mod
-├── go.sum
+├── package.json
+├── tsconfig.json
 └── .gitignore
 ```
 
@@ -290,7 +290,6 @@ Zero migration. The Mac app reads and writes the same tables.
 ## Future Considerations
 
 - **HTTP API**: Optional REST endpoint alongside MCP stdio (for non-MCP clients)
-- **TUI**: Terminal UI for browsing and managing memories (Engram has one, users love it)
-- **sqlite-vec integration**: When the Go bindings mature, replace custom cosine similarity with sqlite-vec's optimized implementation
+- **sqlite-vec integration**: When the npm package matures, replace custom cosine similarity with sqlite-vec's optimized implementation
 - **Plugin system**: Allow community-built Forage tasks
 - **Multi-user**: Scoped memory access for team scenarios

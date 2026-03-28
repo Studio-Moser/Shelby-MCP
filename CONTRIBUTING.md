@@ -8,7 +8,7 @@ Thanks for your interest in contributing! ShelbyMCP is an open-source project an
 
 Before writing code, open an issue describing what you want to do. This lets us discuss the approach before you invest time.
 
-- **Bug reports**: Include steps to reproduce, expected vs. actual behavior, and your environment (OS, Go version, AI tool).
+- **Bug reports**: Include steps to reproduce, expected vs. actual behavior, and your environment (OS, Node version, AI tool).
 - **Feature requests**: Describe the use case, not just the solution. What problem are you trying to solve?
 - **New Forage tasks**: Propose new scheduled enrichment tasks with a clear description of what they do and why they're valuable.
 
@@ -16,8 +16,8 @@ Before writing code, open an issue describing what you want to do. This lets us 
 
 1. Fork the repo and create a branch from `main`
 2. Write your code with tests
-3. Run `go test ./...` and ensure all tests pass
-4. Run `go vet ./...` and fix any warnings
+3. Run `npm test` and ensure all tests pass
+4. Run `npm run lint` and fix any warnings
 5. Open a PR that references the issue (`Closes #N`)
 6. Fill out the PR template
 
@@ -31,22 +31,24 @@ Before writing code, open an issue describing what you want to do. This lets us 
 
 ### Code Style
 
-- Standard Go formatting (`gofmt`)
+- TypeScript strict mode
+- ESM modules
+- Zod schemas for tool input validation
 - Descriptive variable and function names
 - Comments for non-obvious logic
 - Table-driven tests where appropriate
-- Error handling: wrap errors with context (`fmt.Errorf("doing X: %w", err)`)
 
 ## Development Setup
 
 ```bash
 git clone https://github.com/Studio-Moser/shelbymcp.git
 cd shelbymcp
-go build ./...
-go test ./...
+npm install
+npm run build
+npm test
 ```
 
-Requires Go 1.22+.
+Requires Node.js 20+.
 
 ## License
 

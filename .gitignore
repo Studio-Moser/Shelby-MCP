@@ -1,16 +1,8 @@
-# Binary
-shelbymcp
-shelbymcp-*
+# Dependencies
+node_modules/
 
-# Go
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-vendor/
+# Build output
+dist/
 
 # IDE
 .idea/
@@ -31,3 +23,9 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Coverage
+coverage/
+
+# npm
+*.tgz

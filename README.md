@@ -46,13 +46,16 @@ Ship it with the **Forage skill**, a scheduled task that runs on your existing A
 ### Install
 
 ```bash
-# Go install (recommended)
-go install github.com/Studio-Moser/shelbymcp@latest
+# npx (no install needed)
+npx shelbymcp
+
+# Or install globally
+npm install -g shelbymcp
 
 # Or build from source
 git clone https://github.com/Studio-Moser/shelbymcp.git
 cd shelbymcp
-go build -o shelbymcp ./cmd/shelbymcp
+npm install && npm run build
 ```
 
 ### Connect to Claude Code
@@ -63,8 +66,8 @@ Add to your `~/.claude/mcp.json`:
 {
   "mcpServers": {
     "memory": {
-      "command": "shelbymcp",
-      "args": ["--db", "~/.shelbymcp/memory.db"]
+      "command": "npx",
+      "args": ["shelbymcp", "--db", "~/.shelbymcp/memory.db"]
     }
   }
 }
@@ -250,7 +253,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full technical design.
 | **Vector search** | Via Forage skill | No | Built-in | Optional | No |
 | **Memory maintenance** | Forage skill (daily) | No | Built-in | No | No |
 | **Contradiction detection** | Forage skill | No | No | No | No |
-| **Single binary** | Yes (Go) | Yes (Go) | No | No | No |
+| **Zero-install** | `npx shelbymcp` | `go install` | No | `pip install` | `npm install` |
 | **Single file DB** | Yes | Yes | No | No (Markdown files) | No |
 
 ---
@@ -274,14 +277,17 @@ ShelbyMCP and Shelby for Mac use the same SQLite database. Start with the MCP se
 ## Development
 
 ```bash
+# Install dependencies
+npm install
+
 # Build
-go build -o shelbymcp ./cmd/shelbymcp
+npm run build
 
 # Run tests
-go test ./...
+npm test
 
-# Run with verbose logging
-./shelbymcp --db ./test.db --verbose
+# Run in development
+npm run dev -- --db ./test.db --verbose
 ```
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full development guide.

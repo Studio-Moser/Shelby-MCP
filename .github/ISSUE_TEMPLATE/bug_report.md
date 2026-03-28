@@ -17,7 +17,7 @@ What should have happened.
 
 **Environment**
 - OS: [e.g., macOS 15.4, Ubuntu 24.04]
-- Go version: [e.g., 1.22]
+- Node version: [e.g., 20.11]
 - ShelbyMCP version: [e.g., v0.1.0]
 - AI tool: [e.g., Claude Code, Cursor]
 

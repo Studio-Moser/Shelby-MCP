@@ -10,8 +10,8 @@ Closes #
 
 ## Test Plan
 
-- [ ] `go test ./...` passes
-- [ ] `go vet ./...` clean
+- [ ] `npm test` passes
+- [ ] `npm run lint` clean
 - [ ] New tests added for new functionality
 - [ ] README/docs updated if applicable
 - [ ] CHANGELOG.md updated
