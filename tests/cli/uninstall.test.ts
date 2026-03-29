@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
+import { MEMORY_PROTOCOL } from "../../src/cli/protocol.js";
 
 // Mock child_process
 vi.mock("node:child_process", () => ({
@@ -61,15 +62,24 @@ describe("runUninstall", () => {
 });
 
 describe("uninstallClaudeCode", () => {
-  it("calls claude mcp remove and mentions manual CLAUDE.md cleanup", () => {
+  it("calls claude mcp remove and removes protocol from CLAUDE.md", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation(() => Buffer.from(""));
+
+    // Create CLAUDE.md with existing content + protocol
+    const claudeMdPath = resolve(tempDir, ".claude/CLAUDE.md");
+    mkdirSync(resolve(tempDir, ".claude"), { recursive: true });
+    writeFileSync(claudeMdPath, "# My Config\n\nSome rules here.\n\n" + MEMORY_PROTOCOL + "\n");
 
     runUninstall("claude-code");
 
     expect(mockExec).toHaveBeenCalledWith("which claude", { stdio: "ignore" });
     expect(mockExec).toHaveBeenCalledWith("claude mcp remove shelbymcp", { stdio: "inherit" });
-    expect(getOutput()).toContain("CLAUDE.md");
+    expect(getOutput()).toContain("Removed Memory Protocol");
+
+    const remaining = readFileSync(claudeMdPath, "utf-8");
+    expect(remaining).toContain("# My Config");
+    expect(remaining).not.toContain("## Memory (ShelbyMCP)");
     expect(getOutput()).toContain("memories are safe");
   });
 
@@ -120,7 +130,6 @@ describe("uninstallCodex", () => {
 
     expect(mockExec).toHaveBeenCalledWith("which codex", { stdio: "ignore" });
     expect(mockExec).toHaveBeenCalledWith("codex mcp remove shelbymcp", { stdio: "inherit" });
-    expect(getOutput()).toContain("~/.codex/AGENTS.md");
     expect(getOutput()).toContain("memories are safe");
   });
 
@@ -143,29 +152,39 @@ describe("uninstallCodex", () => {
 });
 
 describe("uninstallWindsurf", () => {
-  it("removes memory entry and mentions global_rules.md cleanup", () => {
+  it("removes memory entry and protocol from global_rules.md", () => {
     const configPath = resolve(tempDir, ".codeium/windsurf/mcp_config.json");
-    mkdirSync(resolve(tempDir, ".codeium/windsurf"), { recursive: true });
+    const rulesPath = resolve(tempDir, ".codeium/windsurf/memories/global_rules.md");
+    mkdirSync(resolve(tempDir, ".codeium/windsurf/memories"), { recursive: true });
     writeFileSync(configPath, JSON.stringify({ mcpServers: { shelbymcp: { command: "npx" } } }));
+    writeFileSync(rulesPath, "# My Rules\n\n" + MEMORY_PROTOCOL + "\n");
 
     runUninstall("windsurf");
 
     expect(getOutput()).toContain("Removed");
-    expect(getOutput()).toContain("global_rules.md");
+    expect(getOutput()).toContain("Removed Memory Protocol");
+    const remaining = readFileSync(rulesPath, "utf-8");
+    expect(remaining).toContain("# My Rules");
+    expect(remaining).not.toContain("## Memory (ShelbyMCP)");
     expect(getOutput()).toContain("memories are safe");
   });
 });
 
 describe("uninstallGemini", () => {
-  it("uses gemini mcp remove CLI when available", () => {
+  it("uses gemini mcp remove CLI and removes protocol from GEMINI.md", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation(() => Buffer.from(""));
+
+    const geminiMdPath = resolve(tempDir, ".gemini/GEMINI.md");
+    mkdirSync(resolve(tempDir, ".gemini"), { recursive: true });
+    writeFileSync(geminiMdPath, MEMORY_PROTOCOL + "\n");
 
     runUninstall("gemini");
 
     expect(mockExec).toHaveBeenCalledWith("which gemini", { stdio: "ignore" });
     expect(mockExec).toHaveBeenCalledWith("gemini mcp remove shelbymcp", { stdio: "inherit" });
-    expect(getOutput()).toContain("GEMINI.md");
+    // Protocol-only file should be deleted entirely
+    expect(existsSync(geminiMdPath)).toBe(false);
     expect(getOutput()).toContain("memories are safe");
   });
 
@@ -188,15 +207,20 @@ describe("uninstallGemini", () => {
 });
 
 describe("uninstallAntigravity", () => {
-  it("removes memory entry from antigravity mcp_config.json", () => {
+  it("removes memory entry and protocol from GEMINI.md", () => {
     const configPath = resolve(tempDir, ".gemini/antigravity/mcp_config.json");
+    const geminiMdPath = resolve(tempDir, ".gemini/GEMINI.md");
     mkdirSync(resolve(tempDir, ".gemini/antigravity"), { recursive: true });
     writeFileSync(configPath, JSON.stringify({ mcpServers: { shelbymcp: { command: "npx" } } }));
+    writeFileSync(geminiMdPath, "# Gemini Config\n\n" + MEMORY_PROTOCOL + "\n");
 
     runUninstall("antigravity");
 
     expect(getOutput()).toContain("Removed");
-    expect(getOutput()).toContain("GEMINI.md");
+    expect(getOutput()).toContain("Removed Memory Protocol");
+    const remaining = readFileSync(geminiMdPath, "utf-8");
+    expect(remaining).toContain("# Gemini Config");
+    expect(remaining).not.toContain("## Memory (ShelbyMCP)");
     expect(getOutput()).toContain("memories are safe");
   });
 });

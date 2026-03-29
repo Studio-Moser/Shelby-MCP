@@ -25,6 +25,27 @@ function isAgent(name: string): name is AgentName {
   return (AGENTS as readonly string[]).includes(name);
 }
 
+/** Remove the Memory Protocol section from a file where setup auto-appended it */
+function removeProtocolFromFile(filePath: string): void {
+  if (!existsSync(filePath)) return;
+
+  const content = readFileSync(filePath, "utf-8");
+  if (!content.includes("## Memory (ShelbyMCP)")) return;
+
+  // Match from "## Memory (ShelbyMCP)" to the next level-2 heading or end of file.
+  // Protocol subsections use ### so they won't terminate the match early.
+  const cleaned = content.replace(/\n*## Memory \(ShelbyMCP\)\n[\s\S]*?(?=\n## (?!#)|$)/, "").trimEnd();
+
+  if (cleaned.length === 0) {
+    // File contained only the protocol — remove the file
+    rmSync(filePath);
+    console.log(`Removed ${filePath} (was only the Memory Protocol)`);
+  } else {
+    writeFileSync(filePath, cleaned + "\n");
+    console.log(`Removed Memory Protocol from ${filePath}`);
+  }
+}
+
 function removeFromJsonConfig(filePath: string, serverKey = "shelbymcp"): boolean {
   if (!existsSync(filePath)) {
     console.log(`Config file not found: ${filePath}`);
@@ -74,8 +95,11 @@ function uninstallClaudeCode(): void {
     console.log(`\nRemoved Forage skill from ${skillPath}`);
   }
 
-  console.log("\nNote: The Memory Protocol in ~/.claude/CLAUDE.md must be removed manually.");
-  console.log("The database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
+  // Remove Memory Protocol from ~/.claude/CLAUDE.md
+  const claudeMdPath = resolve(homedir(), ".claude/CLAUDE.md");
+  removeProtocolFromFile(claudeMdPath);
+
+  console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
 function uninstallClaudeDesktop(): void {
@@ -137,8 +161,10 @@ function uninstallCodex(): void {
     }
   }
 
-  console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from ~/.codex/AGENTS.md");
+  // Remove Memory Protocol from ~/.codex/AGENTS.md
+  const agentsMdPath = resolve(homedir(), ".codex/AGENTS.md");
+  removeProtocolFromFile(agentsMdPath);
+
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
@@ -146,8 +172,10 @@ function uninstallWindsurf(): void {
   const configPath = resolve(homedir(), ".codeium/windsurf/mcp_config.json");
   removeFromJsonConfig(configPath);
 
-  console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from ~/.codeium/windsurf/memories/global_rules.md");
+  // Remove Memory Protocol from global rules
+  const globalRulesPath = resolve(homedir(), ".codeium/windsurf/memories/global_rules.md");
+  removeProtocolFromFile(globalRulesPath);
+
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
@@ -167,8 +195,11 @@ function uninstallGemini(): void {
     removeFromJsonConfig(configPath);
   }
 
+  // Remove Memory Protocol from ~/.gemini/GEMINI.md
+  const geminiMdPath = resolve(homedir(), ".gemini/GEMINI.md");
+  removeProtocolFromFile(geminiMdPath);
+
   console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from ~/.gemini/GEMINI.md");
   console.log("  - Delete any Forage scheduled actions (if added)");
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
@@ -177,8 +208,10 @@ function uninstallAntigravity(): void {
   const configPath = resolve(homedir(), ".gemini/antigravity/mcp_config.json");
   removeFromJsonConfig(configPath);
 
-  console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from ~/.gemini/GEMINI.md");
+  // Remove Memory Protocol from ~/.gemini/GEMINI.md (shared with Gemini CLI)
+  const geminiMdPath2 = resolve(homedir(), ".gemini/GEMINI.md");
+  removeProtocolFromFile(geminiMdPath2);
+
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
