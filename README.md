@@ -44,7 +44,7 @@ Ship it with the **Forage skill**, a scheduled task that runs on your existing A
 
 ## Quick Start
 
-### Install
+### 1. Install
 
 ```bash
 # npx (no install needed)
@@ -55,36 +55,43 @@ npm install -g shelbymcp
 
 # Or build from source
 git clone https://github.com/Studio-Moser/shelbymcp.git
-cd shelbymcp
-npm install && npm run build
+cd shelbymcp && npm install && npm run build
 ```
 
-### Connect to Claude Code
+### 2. Set Up Your Agent
 
-Add to your `~/.claude/mcp.json`:
+The CLI auto-configures everything — MCP server registration, Memory Protocol, and optional Forage skill:
 
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "npx",
-      "args": ["shelbymcp", "--db", "~/.shelbymcp/memory.db"]
-    }
-  }
-}
+```bash
+shelbymcp setup claude-code --forage    # Claude Code CLI
+shelbymcp setup claude-desktop --forage # Claude Desktop app
+shelbymcp setup cursor --forage         # Cursor IDE
+shelbymcp setup codex --forage          # OpenAI Codex
+shelbymcp setup windsurf --forage       # Windsurf (Codeium)
+shelbymcp setup gemini --forage         # Gemini CLI
 ```
 
-### Add the Memory Protocol
+Drop `--forage` if you just want the MCP server without the scheduled enrichment skill.
 
-The Memory Protocol tells your agent *when* to save and search memory. Without it, your agent has the tools but won't use them proactively.
+That's it. The CLI registers the MCP server, prints where to paste the Memory Protocol, and installs the Forage skill. See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) for manual config and platform-specific details.
 
-See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md#2-memory-protocol) for the copy-paste instructions for your agent.
+### 3. Add the Memory Protocol
 
-### (Optional) Install the Forage Skill
+The CLI will tell you where to paste it, but in short:
 
-The Forage skill runs daily on your AI subscription to enrich, consolidate, and connect your memories. Works with Claude Desktop, Claude Code, Cursor, and more.
+```bash
+shelbymcp protocol >> ~/.claude/CLAUDE.md       # Claude Code
+shelbymcp protocol >> GEMINI.md                  # Gemini CLI
+shelbymcp protocol >> .windsurfrules             # Windsurf
+```
 
-See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md#3-forage-skill-optional) for setup instructions and platform compatibility.
+For Cursor, create `.cursor/rules/shelbymcp.mdc` with `alwaysApply: true` frontmatter. For Codex, append to `AGENTS.md`. The Memory Protocol tells your agent *when* to save and search — without it, the tools are available but won't be used proactively.
+
+### 4. Verify
+
+Ask your agent: *"What memory tools do you have available?"*
+
+It should list 9 tools. Then test: *"Remember that I prefer dark mode in all my apps."* — and in a new session: *"What do you know about my preferences?"*
 
 ---
 
@@ -185,17 +192,24 @@ ShelbyMCP works fine without it — you get persistent storage, FTS5 search, and
 
 ---
 
-## Agent Setup
+## CLI Reference
 
-ShelbyMCP works with any MCP-compatible AI tool. See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) for setup guides:
+```
+shelbymcp                          Start the MCP server (stdio)
+shelbymcp setup <agent>            Set up ShelbyMCP for an agent
+shelbymcp setup <agent> --forage   ...and install the Forage skill
+shelbymcp uninstall <agent>        Remove ShelbyMCP from an agent
+shelbymcp protocol                 Print the Memory Protocol
+shelbymcp forage                   Print the Forage skill prompt
+shelbymcp help                     Show help
+shelbymcp --version                Print version
+```
 
-- Claude Code
-- Cursor
-- Codex
-- Windsurf
-- Gemini CLI
-- OpenCode
-- Any MCP-compatible client
+**Supported agents:** `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`
+
+**Server flags:** `--db <path>` (custom database path), `--verbose` (debug logging)
+
+See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) for manual config, platform-specific details, and setup for other MCP-compatible clients.
 
 ---
 

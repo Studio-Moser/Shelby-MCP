@@ -6,25 +6,40 @@ ShelbyMCP works with any MCP-compatible AI tool. Setup has three parts:
 2. **Add the Memory Protocol** — tell your agent when and how to use memory
 3. **(Optional) Set up Forage** — scheduled enrichment that makes memories smarter over time
 
-> **Quick setup:** Run `shelbymcp setup <agent>` to auto-configure. See `shelbymcp help` for available agents.
+## The Fast Way
+
+The CLI handles everything — MCP registration, Memory Protocol instructions, and Forage skill installation:
+
+```bash
+shelbymcp setup <agent> --forage
+```
+
+Supported agents: `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`
+
+Drop `--forage` if you only want the MCP server. To remove: `shelbymcp uninstall <agent>`.
 
 ---
 
 ## 1. Connect the MCP Server
 
-Each agent has its own config system. Pick yours below.
+Each agent has its own config system. The CLI handles most of this automatically, but manual setup is documented below for reference.
 
 > **Important:** Claude Code CLI and Claude Desktop are **separate apps** with **separate configs**. Adding a server to one does NOT make it available in the other.
 
 ### Claude Code CLI
 
-The fastest way — one command:
+```bash
+shelbymcp setup claude-code --forage
+```
+
+This runs `claude mcp add -s user -t stdio memory -- npx shelbymcp` to register the server at user scope (available across all projects), prints where to paste the Memory Protocol, and copies the Forage skill to `~/.claude/scheduled-tasks/shelby-forage/`.
+
+<details>
+<summary>Manual setup</summary>
 
 ```bash
 claude mcp add -s user -t stdio memory -- npx shelbymcp
 ```
-
-This adds ShelbyMCP to your user-scoped config (`~/.claude.json`), available across all projects.
 
 **Scopes:**
 - `user` — available in all projects (recommended)
@@ -32,12 +47,20 @@ This adds ShelbyMCP to your user-scoped config (`~/.claude.json`), available acr
 - `local` — (default) private to you, only in the current project
 
 **Verify:** Run `claude mcp list` or type `/mcp` inside a session.
+</details>
 
-**Memory Protocol:** Paste into `~/.claude/CLAUDE.md` (global) or `CLAUDE.md` in your project root.
+**Memory Protocol:** `shelbymcp protocol >> ~/.claude/CLAUDE.md`
 
 ### Claude Desktop
 
-Claude Desktop uses a separate config file from the CLI.
+```bash
+shelbymcp setup claude-desktop --forage
+```
+
+The CLI prints the JSON config to paste and where to add the Memory Protocol. Claude Desktop requires a manual config edit and restart.
+
+<details>
+<summary>Manual setup</summary>
 
 1. Open Claude Desktop
 2. Go to **Settings > Developer > Edit Config**
@@ -58,10 +81,20 @@ Claude Desktop uses a separate config file from the CLI.
 
 **Config path (macOS):** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Config path (Windows):** `%APPDATA%\Claude\claude_desktop_config.json`
+</details>
 
 **Memory Protocol:** Go to Settings > Profile and paste the Memory Protocol (see Section 2) into the "What preferences should Claude consider?" field. This applies to all conversations and syncs across devices.
 
 ### Cursor
+
+```bash
+shelbymcp setup cursor --forage
+```
+
+The CLI merges the MCP server entry into `~/.cursor/mcp.json` and prints instructions for the Memory Protocol and Forage.
+
+<details>
+<summary>Manual setup</summary>
 
 **Via UI:** Settings > Tools & MCP > New MCP Server
 
@@ -77,12 +110,22 @@ Claude Desktop uses a separate config file from the CLI.
   }
 }
 ```
+</details>
 
 Also supports project-level config at `.cursor/mcp.json` in your project root.
 
 **Memory Protocol:** Create `.cursor/rules/shelbymcp.mdc` in your project with `alwaysApply: true` frontmatter (see Section 2).
 
 ### Codex (OpenAI)
+
+```bash
+shelbymcp setup codex --forage
+```
+
+The CLI runs `codex mcp add memory -- npx shelbymcp` if the Codex CLI is installed, or prints TOML config to paste manually.
+
+<details>
+<summary>Manual setup</summary>
 
 **Via CLI:**
 
@@ -99,10 +142,20 @@ args = ["shelbymcp"]
 ```
 
 Also supports project-level config at `.codex/config.toml` (trusted projects only).
+</details>
 
 **Memory Protocol:** Paste into `AGENTS.md` in your project root.
 
 ### Windsurf
+
+```bash
+shelbymcp setup windsurf --forage
+```
+
+The CLI merges the MCP server entry into the Windsurf config file.
+
+<details>
+<summary>Manual setup</summary>
 
 **Via UI:** Settings > Cascade > MCP Servers, or click the MCPs icon in the Cascade panel.
 
@@ -118,12 +171,22 @@ Also supports project-level config at `.codex/config.toml` (trusted projects onl
   }
 }
 ```
+</details>
 
 **Gotcha:** Windsurf has a hard cap of 100 total tools across all MCP servers.
 
-**Memory Protocol:** Paste into `.windsurfrules` in your project root.
+**Memory Protocol:** `shelbymcp protocol >> .windsurfrules`
 
 ### Gemini CLI
+
+```bash
+shelbymcp setup gemini --forage
+```
+
+The CLI merges the MCP server entry into `~/.gemini/settings.json`.
+
+<details>
+<summary>Manual setup</summary>
 
 Edit `~/.gemini/settings.json` (or `.gemini/settings.json` in your project):
 
@@ -139,6 +202,7 @@ Edit `~/.gemini/settings.json` (or `.gemini/settings.json` in your project):
 ```
 
 **Gotcha:** Do NOT use underscores in the server name — Gemini's policy parser breaks on them. Use `shelby-memory`, not `shelby_memory`.
+</details>
 
 **Memory Protocol:** Paste into `GEMINI.md` in your project root or `~/.gemini/system.md` (global).
 
