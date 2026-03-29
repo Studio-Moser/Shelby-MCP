@@ -90,6 +90,52 @@ function appendProtocolToFile(filePath: string): void {
   console.log(`\nMemory Protocol added to ${filePath}`);
 }
 
+/**
+ * Build the TOML block for a Codex MCP server entry.
+ * Handles nvm detection the same way buildServerCommand() does for JSON configs.
+ */
+function buildTomlBlock(serverKey = "shelbymcp"): string {
+  const cmd = buildServerCommand();
+  const lines = [`[mcp_servers.${serverKey}]`];
+  lines.push(`command = ${JSON.stringify(cmd.command)}`);
+  lines.push(`args = ${JSON.stringify(cmd.args)}`);
+  if (cmd.env) {
+    lines.push("[mcp_servers." + serverKey + ".env]");
+    for (const [k, v] of Object.entries(cmd.env)) {
+      lines.push(`${k} = ${JSON.stringify(v)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Merge a ShelbyMCP server entry into a TOML config file.
+ * Does a simple text-based check/append — avoids pulling in a TOML parser dependency.
+ */
+function mergeTomlConfig(filePath: string, serverKey = "shelbymcp"): boolean {
+  let existing = "";
+
+  if (existsSync(filePath)) {
+    existing = readFileSync(filePath, "utf-8");
+    if (existing.includes(`[mcp_servers.${serverKey}]`)) {
+      console.log(`"${serverKey}" server already exists in ${filePath}`);
+      console.log("To reconfigure, remove the existing entry first.");
+      return false;
+    }
+  }
+
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  const block = buildTomlBlock(serverKey);
+  const content = existing ? existing.trimEnd() + "\n\n" + block + "\n" : block + "\n";
+  writeFileSync(filePath, content);
+  console.log(`Added ShelbyMCP to ${filePath}`);
+  return true;
+}
+
 function mergeJsonConfig(filePath: string, serverEntry: Record<string, unknown>, serverKey = "shelbymcp"): boolean {
   let config: Record<string, unknown> = {};
 
@@ -135,7 +181,8 @@ function printForageInstructions(agent: string): void {
       console.log("  2. Create a new local task, set frequency to Daily");
       console.log("  3. Paste the Forage prompt: run `shelbymcp forage` to get it");
       console.log("");
-      console.log("Also add this to your Profile Preferences (alongside the Memory Protocol):");
+      console.log("Optional: Add this to your Profile Preferences");
+      console.log("  (Settings > General > personal preferences):");
       console.log("");
       console.log("  When starting a conversation, check ShelbyMCP for items that need attention:");
       console.log('  use `list_thoughts` with `topic: "needs-attention"` and `limit: 5`.');
@@ -208,9 +255,9 @@ function setupClaudeCode(forage: boolean): void {
     console.log("  claude mcp add -s user -t stdio shelbymcp -- npx shelbymcp");
   }
 
-  // Auto-append Memory Protocol to ~/.claude/CLAUDE.md
-  const claudeMdPath = resolve(homedir(), ".claude/CLAUDE.md");
-  appendProtocolToFile(claudeMdPath);
+  // Claude Code supports MCP prompts — the Memory Protocol is served
+  // directly from the MCP server. No need to append to CLAUDE.md.
+  console.log("\nMemory Protocol is available via MCP prompts (no rules file needed).");
 
   if (!forage) {
     console.log("\nShelbyMCP installed for Claude Code!");
@@ -269,11 +316,8 @@ function setupClaudeDesktop(forage: boolean): void {
   console.log("\nIMPORTANT: Quit and restart Claude Desktop after editing.");
   console.log("\nNote: Claude Desktop and Claude Code CLI have separate configs.");
   console.log("Setting up one does NOT configure the other.");
-  console.log("\nNext: Add the Memory Protocol to your Desktop profile:");
-  console.log("  1. Run: shelbymcp protocol");
-  console.log("  2. Copy the output");
-  console.log("  3. Open Settings > General > \"What personal preferences should Claude consider in responses?\"");
-  console.log("  4. Paste the protocol text into that field");
+  // Claude Desktop supports MCP prompts — no need to paste protocol manually.
+  console.log("\nMemory Protocol is available via MCP prompts (no manual paste needed).");
 
   if (forage) {
     printForageInstructions("claude-desktop");
@@ -290,16 +334,8 @@ function setupCursor(forage: boolean): void {
   mergeJsonConfig(configPath, entry);
 
   console.log("\nOr add via UI: Settings > Tools & MCP > New MCP Server");
-
-  console.log("\nNext: Add the Memory Protocol to Cursor:");
-  console.log("  1. Open Cursor Settings > Rules");
-  console.log("  2. Under \"User Rules\", paste the output of: shelbymcp protocol");
-  console.log("  (This applies the Memory Protocol to all your Cursor projects)");
-  console.log("");
-  console.log("  Or, to add per-project instead, run from your project root:");
-  console.log("  mkdir -p .cursor/rules");
-  console.log("  shelbymcp protocol > .cursor/rules/shelbymcp.mdc");
-  console.log("  (Then prepend '---\\nalwaysApply: true\\n---\\n' to the file)");
+  // Cursor supports MCP prompts — no need to add rules files.
+  console.log("\nMemory Protocol is available via MCP prompts (no rules file needed).");
 
   if (forage) {
     printForageInstructions("cursor");
@@ -309,48 +345,38 @@ function setupCursor(forage: boolean): void {
 }
 
 function setupCodex(forage: boolean): void {
+  const configPath = resolve(homedir(), ".codex/config.toml");
+  let installed = false;
+
+  // Try the CLI first, fall back to direct file write
   try {
     execSync(whichCmd("codex"), { stdio: "ignore" });
-  } catch {
-    console.log("Codex CLI not found.\n");
-    console.log("Add this to ~/.codex/config.toml:\n");
-    console.log("[mcp_servers.shelbymcp]");
-    console.log('command = "npx"');
-    console.log('args = ["shelbymcp"]');
-
-    // Auto-append Memory Protocol to ~/.codex/AGENTS.md
-    const agentsMdPath = resolve(homedir(), ".codex/AGENTS.md");
-    appendProtocolToFile(agentsMdPath);
-
-    if (forage) {
-      printForageInstructions("codex");
+    console.log("Adding ShelbyMCP to Codex...\n");
+    try {
+      const cmd = buildServerCommand();
+      const addCmd = `codex mcp add shelbymcp -- ${cmd.command} ${cmd.args.join(" ")}`;
+      execSync(addCmd, { stdio: "inherit" });
+      console.log("\nShelbyMCP added to Codex.");
+      installed = true;
+    } catch {
+      console.log("\nCould not add via CLI. Writing config directly...");
     }
-
-    console.log("\nShelbyMCP installed for Codex!");
-    return;
-  }
-
-  console.log("Adding ShelbyMCP to Codex...\n");
-
-  try {
-    execSync("codex mcp add shelbymcp -- npx shelbymcp", { stdio: "inherit" });
-    console.log("\nShelbyMCP added to Codex.");
   } catch {
-    console.log("\nCould not add automatically. Add to ~/.codex/config.toml:\n");
-    console.log("[mcp_servers.shelbymcp]");
-    console.log('command = "npx"');
-    console.log('args = ["shelbymcp"]');
+    // Codex CLI not found — write directly
   }
 
-  // Auto-append Memory Protocol to ~/.codex/AGENTS.md
-  const agentsMdPath = resolve(homedir(), ".codex/AGENTS.md");
-  appendProtocolToFile(agentsMdPath);
+  if (!installed) {
+    mergeTomlConfig(configPath);
+  }
+
+  // Codex supports MCP prompts — no need to append to AGENTS.md.
+  console.log("\nMemory Protocol is available via MCP prompts (no rules file needed).");
 
   if (forage) {
     printForageInstructions("codex");
   }
 
-  console.log("\nShelbyMCP installed for Codex!");
+  console.log("\nShelbyMCP installed for Codex (CLI, Desktop & IDE Extension)!");
 }
 
 function setupWindsurf(forage: boolean): void {
