@@ -14,7 +14,7 @@ The CLI handles everything — MCP registration, Memory Protocol instructions, a
 shelbymcp setup <agent> --forage
 ```
 
-Supported agents: `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`
+Supported agents: `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`, `antigravity`
 
 Drop `--forage` if you only want the MCP server. To remove: `shelbymcp uninstall <agent>`.
 
@@ -32,13 +32,13 @@ Each agent has its own config system. The CLI handles most of this automatically
 shelbymcp setup claude-code --forage
 ```
 
-This runs `claude mcp add -s user -t stdio memory -- npx shelbymcp` to register the server at user scope (available across all projects), prints where to paste the Memory Protocol, and copies the Forage skill to `~/.claude/scheduled-tasks/shelby-forage/`.
+This runs `claude mcp add -s user -t stdio shelbymcp -- npx shelbymcp` to register the server at user scope (available across all projects), appends the Memory Protocol to `~/.claude/CLAUDE.md`, and copies the Forage skill to `~/.claude/scheduled-tasks/shelby-forage/`.
 
 <details>
 <summary>Manual setup</summary>
 
 ```bash
-claude mcp add -s user -t stdio memory -- npx shelbymcp
+claude mcp add -s user -t stdio shelbymcp -- npx shelbymcp
 ```
 
 **Scopes:**
@@ -64,12 +64,12 @@ The CLI prints the JSON config to paste and where to add the Memory Protocol. Cl
 
 1. Open Claude Desktop
 2. Go to **Settings > Developer > Edit Config**
-3. Add the `memory` entry to the `mcpServers` object:
+3. Add the `shelbymcp` entry to the `mcpServers` object:
 
 ```json
 {
   "mcpServers": {
-    "memory": {
+    "shelbymcp": {
       "command": "npx",
       "args": ["shelbymcp"]
     }
@@ -103,7 +103,8 @@ The CLI merges the MCP server entry into `~/.cursor/mcp.json` and prints instruc
 ```json
 {
   "mcpServers": {
-    "memory": {
+    "shelbymcp": {
+      "type": "stdio",
       "command": "npx",
       "args": ["shelbymcp"]
     }
@@ -114,7 +115,7 @@ The CLI merges the MCP server entry into `~/.cursor/mcp.json` and prints instruc
 
 Also supports project-level config at `.cursor/mcp.json` in your project root.
 
-**Memory Protocol:** Create `.cursor/rules/shelbymcp.mdc` in your project with `alwaysApply: true` frontmatter (see Section 2).
+**Memory Protocol:** Go to **Cursor Settings > Rules > User Rules** and paste the Memory Protocol (see Section 2). This applies globally across all projects.
 
 ### Codex (OpenAI)
 
@@ -122,7 +123,7 @@ Also supports project-level config at `.cursor/mcp.json` in your project root.
 shelbymcp setup codex --forage
 ```
 
-The CLI runs `codex mcp add memory -- npx shelbymcp` if the Codex CLI is installed, or prints TOML config to paste manually.
+The CLI runs `codex mcp add shelbymcp -- npx shelbymcp` if the Codex CLI is installed, or prints TOML config to paste manually.
 
 <details>
 <summary>Manual setup</summary>
@@ -130,13 +131,13 @@ The CLI runs `codex mcp add memory -- npx shelbymcp` if the Codex CLI is install
 **Via CLI:**
 
 ```bash
-codex mcp add memory -- npx shelbymcp
+codex mcp add shelbymcp -- npx shelbymcp
 ```
 
 **Via config file** (`~/.codex/config.toml` — note: **TOML**, not JSON):
 
 ```toml
-[mcp_servers.memory]
+[mcp_servers.shelbymcp]
 command = "npx"
 args = ["shelbymcp"]
 ```
@@ -144,7 +145,7 @@ args = ["shelbymcp"]
 Also supports project-level config at `.codex/config.toml` (trusted projects only).
 </details>
 
-**Memory Protocol:** Paste into `AGENTS.md` in your project root.
+**Memory Protocol:** The CLI auto-appends to `~/.codex/AGENTS.md`. To do it manually: `shelbymcp protocol >> ~/.codex/AGENTS.md`
 
 ### Windsurf
 
@@ -164,7 +165,7 @@ The CLI merges the MCP server entry into the Windsurf config file.
 ```json
 {
   "mcpServers": {
-    "memory": {
+    "shelbymcp": {
       "command": "npx",
       "args": ["shelbymcp"]
     }
@@ -175,7 +176,7 @@ The CLI merges the MCP server entry into the Windsurf config file.
 
 **Gotcha:** Windsurf has a hard cap of 100 total tools across all MCP servers.
 
-**Memory Protocol:** `shelbymcp protocol >> .windsurfrules`
+**Memory Protocol:** The CLI auto-appends to `~/.codeium/windsurf/memories/global_rules.md`. To do it manually: `shelbymcp protocol >> ~/.codeium/windsurf/memories/global_rules.md`
 
 ### Gemini CLI
 
@@ -183,28 +184,59 @@ The CLI merges the MCP server entry into the Windsurf config file.
 shelbymcp setup gemini --forage
 ```
 
-The CLI merges the MCP server entry into `~/.gemini/settings.json`.
+The CLI uses `gemini mcp add shelbymcp --scope user -- npx shelbymcp` when the Gemini CLI is installed. If not, it falls back to writing `~/.gemini/settings.json` directly. The Memory Protocol is appended to `~/.gemini/GEMINI.md`.
 
 <details>
 <summary>Manual setup</summary>
 
-Edit `~/.gemini/settings.json` (or `.gemini/settings.json` in your project):
+**Via CLI:**
+
+```bash
+gemini mcp add shelbymcp --scope user -- npx shelbymcp
+```
+
+**Via config file** (`~/.gemini/settings.json`):
 
 ```json
 {
   "mcpServers": {
-    "shelby-memory": {
+    "shelbymcp": {
       "command": "npx",
       "args": ["shelbymcp"]
     }
   }
 }
 ```
-
-**Gotcha:** Do NOT use underscores in the server name — Gemini's policy parser breaks on them. Use `shelby-memory`, not `shelby_memory`.
 </details>
 
-**Memory Protocol:** Paste into `GEMINI.md` in your project root or `~/.gemini/system.md` (global).
+**Memory Protocol:** The CLI auto-appends to `~/.gemini/GEMINI.md`. To do it manually: `shelbymcp protocol >> ~/.gemini/GEMINI.md`
+
+### Antigravity (Google)
+
+```bash
+shelbymcp setup antigravity --forage
+```
+
+The CLI merges the MCP server entry into `~/.gemini/antigravity/mcp_config.json` and appends the Memory Protocol to `~/.gemini/GEMINI.md` (shared with Gemini CLI).
+
+<details>
+<summary>Manual setup</summary>
+
+Edit `~/.gemini/antigravity/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "shelbymcp": {
+      "command": "npx",
+      "args": ["shelbymcp"]
+    }
+  }
+}
+```
+</details>
+
+**Memory Protocol:** Shared with Gemini CLI at `~/.gemini/GEMINI.md`. The CLI auto-appends it if not already present.
 
 ### Custom Database Path
 
@@ -224,12 +256,13 @@ Connecting the server gives your agent memory tools, but **agents won't use them
 
 | Agent | Where to paste | Notes |
 |---|---|---|
-| Claude Code CLI | `~/.claude/CLAUDE.md` (global) or `CLAUDE.md` (project) | Survives context compaction |
+| Claude Code CLI | `~/.claude/CLAUDE.md` | Auto-added by setup CLI. Survives context compaction. |
 | Claude Desktop | Settings > Profile > "What preferences should Claude consider?" | Account-level, syncs across devices, applies to all conversations |
-| Cursor | `.cursor/rules/shelbymcp.mdc` | Must include `alwaysApply: true` frontmatter (see below) |
-| Codex | `AGENTS.md` in project root | |
-| Windsurf | `.windsurfrules` in project root | |
-| Gemini CLI | `GEMINI.md` (project) or `~/.gemini/system.md` (global) | |
+| Cursor | **Settings > Rules > User Rules** | Global across all projects |
+| Codex | `~/.codex/AGENTS.md` | Auto-added by setup CLI |
+| Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | Auto-added by setup CLI |
+| Gemini CLI | `~/.gemini/GEMINI.md` | Auto-added by setup CLI |
+| Antigravity | `~/.gemini/GEMINI.md` (shared with Gemini CLI) | Auto-added by setup CLI |
 
 ### The Protocol
 
@@ -280,12 +313,7 @@ You MUST call `search_thoughts` or `list_thoughts` before:
 5. **Update, don't duplicate.** If a thought exists but is outdated, use `update_thought`. Don't create a new one.
 ````
 
-> **For Cursor:** Create `.cursor/rules/shelbymcp.mdc` and add this frontmatter before the protocol content:
-> ```
-> ---
-> alwaysApply: true
-> ---
-> ```
+> **For Cursor:** Go to **Settings > Rules > User Rules** and paste the protocol text directly. This applies globally across all projects without needing `.mdc` files.
 
 ---
 
@@ -321,6 +349,7 @@ Not all agents support scheduled tasks equally.
 | **Codex** | Local automations | Codex automation config | Still evolving, limited documentation. | — |
 | **Windsurf** | None | Manual only | No scheduler. Paste the Forage prompt into a conversation when you want to run it. | — |
 | **Gemini CLI** | Scheduled actions | Gemini scheduled actions | Consumer-focused. Max 10 active actions. MCP tool access uncertain. | [Docs](https://support.google.com/gemini/answer/16316416) |
+| **Antigravity** | None | Manual only | No scheduler. Paste the Forage prompt into a conversation when you want to run it. | — |
 
 **Recommended:** Claude Desktop local tasks — persistent across restarts, full MCP access, catches up on missed runs.
 

@@ -137,3 +137,4 @@ main().catch((error) => {
 This repo is the standalone open-source memory server. The Shelby Mac app (separate repo) wraps the same database schema with a native macOS UI, CloudKit sync, always-on embedding pipeline, and heartbeat system.
 
 The databases are interoperable — same schema, same file.
+

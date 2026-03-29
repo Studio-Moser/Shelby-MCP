@@ -17,6 +17,7 @@ Setup agents:
   codex             OpenAI Codex
   windsurf          Windsurf (Codeium)
   gemini            Gemini CLI
+  antigravity       Antigravity (Google)
 
 Flags:
   --db <path>     Database path (default: ~/.shelbymcp/memory.db)

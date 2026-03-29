@@ -3,6 +3,12 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 
+const isWindows = process.platform === "win32";
+
+function whichCmd(bin: string): string {
+  return isWindows ? `where ${bin}` : `which ${bin}`;
+}
+
 const AGENTS = [
   "claude-code",
   "claude-desktop",
@@ -10,6 +16,7 @@ const AGENTS = [
   "codex",
   "windsurf",
   "gemini",
+  "antigravity",
 ] as const;
 
 type AgentName = (typeof AGENTS)[number];
@@ -18,7 +25,7 @@ function isAgent(name: string): name is AgentName {
   return (AGENTS as readonly string[]).includes(name);
 }
 
-function removeFromJsonConfig(filePath: string, serverKey: string): boolean {
+function removeFromJsonConfig(filePath: string, serverKey = "shelbymcp"): boolean {
   if (!existsSync(filePath)) {
     console.log(`Config file not found: ${filePath}`);
     return false;
@@ -47,14 +54,14 @@ function removeFromJsonConfig(filePath: string, serverKey: string): boolean {
 function uninstallClaudeCode(): void {
   // Remove MCP server via CLI
   try {
-    execSync("which claude", { stdio: "ignore" });
+    execSync(whichCmd("claude"), { stdio: "ignore" });
     console.log("Removing ShelbyMCP from Claude Code CLI...\n");
     try {
-      execSync("claude mcp remove memory", { stdio: "inherit" });
+      execSync("claude mcp remove shelbymcp", { stdio: "inherit" });
       console.log("\nRemoved MCP server from Claude Code CLI.");
     } catch {
       console.log("\nCould not remove automatically. Run manually:");
-      console.log("  claude mcp remove memory");
+      console.log("  claude mcp remove shelbymcp");
     }
   } catch {
     console.log("Claude Code CLI not found — skipping MCP server removal.");
@@ -83,7 +90,7 @@ function uninstallClaudeDesktop(): void {
     configPath = resolve(homedir(), ".config/Claude/claude_desktop_config.json");
   }
 
-  removeFromJsonConfig(configPath, "memory");
+  removeFromJsonConfig(configPath);
 
   console.log("\nIMPORTANT: Quit and restart Claude Desktop after editing.");
   console.log("\nManual steps:");
@@ -94,60 +101,84 @@ function uninstallClaudeDesktop(): void {
 
 function uninstallCursor(): void {
   const globalPath = resolve(homedir(), ".cursor/mcp.json");
-  removeFromJsonConfig(globalPath, "memory");
+  removeFromJsonConfig(globalPath);
 
   console.log("\nManual steps:");
-  console.log("  - Delete .cursor/rules/shelbymcp.mdc (if created)");
+  console.log("  - Remove the Memory Protocol from Cursor Settings > Rules > User Rules");
+  console.log("  - Or delete .cursor/rules/shelbymcp.mdc if using per-project rules");
   console.log("  - Remove any Cursor Automations for Forage (if added)");
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
 function uninstallCodex(): void {
-  const configPath = resolve(homedir(), ".codex/config.toml");
-
-  if (existsSync(configPath)) {
-    const content = readFileSync(configPath, "utf-8");
-    // Remove the [mcp_servers.memory] section
-    const cleaned = content.replace(/\[mcp_servers\.memory\]\n(?:.*\n)*?(?=\[|$)/g, "").trim();
-    if (cleaned !== content.trim()) {
-      writeFileSync(configPath, cleaned + "\n");
-      console.log(`Removed [mcp_servers.memory] from ${configPath}`);
-    } else {
-      console.log(`"memory" server not found in ${configPath}`);
+  // Try CLI removal first
+  try {
+    execSync(whichCmd("codex"), { stdio: "ignore" });
+    try {
+      execSync("codex mcp remove shelbymcp", { stdio: "inherit" });
+      console.log("Removed MCP server from Codex.");
+    } catch {
+      console.log("Could not remove via CLI. Check ~/.codex/config.toml manually.");
     }
-  } else {
-    console.log(`Config file not found: ${configPath}`);
+  } catch {
+    // Fall back to manual TOML removal
+    const configPath = resolve(homedir(), ".codex/config.toml");
+    if (existsSync(configPath)) {
+      const content = readFileSync(configPath, "utf-8");
+      const cleaned = content.replace(/\[mcp_servers\.shelbymcp\]\n(?:.*\n)*?(?=\[|$)/g, "").trim();
+      if (cleaned !== content.trim()) {
+        writeFileSync(configPath, cleaned + "\n");
+        console.log(`Removed [mcp_servers.shelbymcp] from ${configPath}`);
+      } else {
+        console.log(`"shelbymcp" server not found in ${configPath}`);
+      }
+    } else {
+      console.log(`Config file not found: ${configPath}`);
+    }
   }
 
   console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from AGENTS.md");
+  console.log("  - Remove the Memory Protocol from ~/.codex/AGENTS.md");
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
 function uninstallWindsurf(): void {
-  const platform = process.platform;
-  let configPath: string;
-
-  if (platform === "win32") {
-    configPath = resolve(process.env.USERPROFILE ?? homedir(), ".codeium/windsurf/mcp_config.json");
-  } else {
-    configPath = resolve(homedir(), ".codeium/windsurf/mcp_config.json");
-  }
-
-  removeFromJsonConfig(configPath, "memory");
+  const configPath = resolve(homedir(), ".codeium/windsurf/mcp_config.json");
+  removeFromJsonConfig(configPath);
 
   console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from .windsurfrules");
+  console.log("  - Remove the Memory Protocol from ~/.codeium/windsurf/memories/global_rules.md");
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
 function uninstallGemini(): void {
-  const configPath = resolve(homedir(), ".gemini/settings.json");
-  removeFromJsonConfig(configPath, "shelby-memory");
+  // Try CLI removal first
+  try {
+    execSync(whichCmd("gemini"), { stdio: "ignore" });
+    try {
+      execSync("gemini mcp remove shelbymcp", { stdio: "inherit" });
+      console.log("Removed MCP server from Gemini CLI.");
+    } catch {
+      console.log("Could not remove via CLI.");
+    }
+  } catch {
+    // Fall back to manual JSON removal
+    const configPath = resolve(homedir(), ".gemini/settings.json");
+    removeFromJsonConfig(configPath);
+  }
 
   console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from GEMINI.md");
+  console.log("  - Remove the Memory Protocol from ~/.gemini/GEMINI.md");
   console.log("  - Delete any Forage scheduled actions (if added)");
+  console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
+}
+
+function uninstallAntigravity(): void {
+  const configPath = resolve(homedir(), ".gemini/antigravity/mcp_config.json");
+  removeFromJsonConfig(configPath);
+
+  console.log("\nManual steps:");
+  console.log("  - Remove the Memory Protocol from ~/.gemini/GEMINI.md");
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
 
@@ -163,6 +194,7 @@ export function runUninstall(agent: string | undefined): void {
     console.log("  codex             OpenAI Codex");
     console.log("  windsurf          Windsurf (Codeium)");
     console.log("  gemini            Gemini CLI");
+    console.log("  antigravity       Antigravity (Google)");
     return;
   }
 
@@ -190,6 +222,9 @@ export function runUninstall(agent: string | undefined): void {
       break;
     case "gemini":
       uninstallGemini();
+      break;
+    case "antigravity":
+      uninstallAntigravity();
       break;
   }
 }

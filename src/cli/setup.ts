@@ -1,8 +1,39 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, cpSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { MEMORY_PROTOCOL } from "./protocol.js";
+
+const isWindows = process.platform === "win32";
+
+/** Use `where` on Windows, `which` elsewhere to locate a CLI binary */
+function whichCmd(bin: string): string {
+  return isWindows ? `where ${bin}` : `which ${bin}`;
+}
+
+/**
+ * Detect whether nvm (Node Version Manager) is active.
+ * On macOS/Linux, nvm sets NVM_DIR and modifies PATH in the shell profile.
+ * Apps that launch processes directly (Claude Desktop, Cursor, Windsurf, Antigravity)
+ * don't source the shell profile, so `npx` resolves to the wrong Node version.
+ */
+function hasNvm(): boolean {
+  if (isWindows) return false; // nvm-windows modifies system PATH directly
+  return Boolean(process.env.NVM_DIR) || existsSync(resolve(homedir(), ".nvm"));
+}
+
+/**
+ * Build the MCP server command entry for JSON configs.
+ * When nvm is detected, wraps in a login shell so the profile is sourced
+ * and the correct Node version is used.
+ */
+function buildServerCommand(): { command: string; args: string[] } {
+  if (hasNvm()) {
+    return { command: "/bin/bash", args: ["-l", "-c", "npx shelbymcp"] };
+  }
+  return { command: "npx", args: ["shelbymcp"] };
+}
 
 const AGENTS = [
   "claude-code",
@@ -11,6 +42,7 @@ const AGENTS = [
   "codex",
   "windsurf",
   "gemini",
+  "antigravity",
 ] as const;
 
 type AgentName = (typeof AGENTS)[number];
@@ -30,7 +62,25 @@ function getSkillSourcePath(): string {
   return resolve(getPackageRoot(), "skills", "shelby-forage");
 }
 
-function mergeJsonConfig(filePath: string, serverEntry: Record<string, unknown>): boolean {
+function appendProtocolToFile(filePath: string): void {
+  if (existsSync(filePath)) {
+    const existing = readFileSync(filePath, "utf-8");
+    if (existing.includes("## Memory (ShelbyMCP)")) {
+      console.log(`\nMemory Protocol already present in ${filePath}`);
+      return;
+    }
+  }
+
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  appendFileSync(filePath, "\n" + MEMORY_PROTOCOL + "\n");
+  console.log(`\nMemory Protocol added to ${filePath}`);
+}
+
+function mergeJsonConfig(filePath: string, serverEntry: Record<string, unknown>, serverKey = "shelbymcp"): boolean {
   let config: Record<string, unknown> = {};
 
   if (existsSync(filePath)) {
@@ -47,13 +97,13 @@ function mergeJsonConfig(filePath: string, serverEntry: Record<string, unknown>)
 
   const servers = config.mcpServers as Record<string, unknown>;
 
-  if (servers.memory) {
-    console.log(`"memory" server already exists in ${filePath}`);
+  if (servers[serverKey]) {
+    console.log(`"${serverKey}" server already exists in ${filePath}`);
     console.log("To reconfigure, remove the existing entry first.");
     return false;
   }
 
-  servers.memory = serverEntry;
+  servers[serverKey] = serverEntry;
 
   const dir = dirname(filePath);
   if (!existsSync(dir)) {
@@ -113,33 +163,48 @@ function printForageInstructions(agent: string): void {
       console.log("Note: Gemini has a max of 10 active scheduled actions.");
       console.log("MCP tool access in scheduled actions is uncertain — test to confirm.");
       break;
+
+    case "antigravity":
+      console.log("Antigravity has no scheduler. To run Forage manually, paste the");
+      console.log("output of `shelbymcp forage` into an Antigravity conversation");
+      console.log("whenever you want to maintain your memories.");
+      break;
   }
 }
 
+// ---------------------------------------------------------------------------
+// Agent setup functions
+// ---------------------------------------------------------------------------
+
 function setupClaudeCode(forage: boolean): void {
   try {
-    execSync("which claude", { stdio: "ignore" });
+    execSync(whichCmd("claude"), { stdio: "ignore" });
   } catch {
     console.log("Claude Code CLI not found. Install it from https://code.claude.com\n");
     console.log("Once installed, run:");
-    console.log("  claude mcp add -s user -t stdio memory -- npx shelbymcp");
+    console.log("  claude mcp add -s user -t stdio shelbymcp -- npx shelbymcp");
     return;
   }
 
   console.log("Adding ShelbyMCP to Claude Code CLI (user scope)...\n");
 
   try {
-    execSync("claude mcp add -s user -t stdio memory -- npx shelbymcp", {
+    execSync("claude mcp add -s user -t stdio shelbymcp -- npx shelbymcp", {
       stdio: "inherit",
     });
     console.log("\nShelbyMCP added to Claude Code CLI.");
   } catch {
     console.log("\nCould not add automatically. Run manually:");
-    console.log("  claude mcp add -s user -t stdio memory -- npx shelbymcp");
+    console.log("  claude mcp add -s user -t stdio shelbymcp -- npx shelbymcp");
   }
 
-  console.log("\nNext: Add the Memory Protocol to your rules file:");
-  console.log("  shelbymcp protocol >> ~/.claude/CLAUDE.md");
+  // Auto-append Memory Protocol to ~/.claude/CLAUDE.md
+  const claudeMdPath = resolve(homedir(), ".claude/CLAUDE.md");
+  appendProtocolToFile(claudeMdPath);
+
+  if (!forage) {
+    console.log("\nShelbyMCP installed for Claude Code!");
+  }
 
   if (forage) {
     const skillSource = getSkillSourcePath();
@@ -161,6 +226,8 @@ function setupClaudeCode(forage: boolean): void {
       console.log("Could not find skills/shelby-forage/SKILL.md in the package.");
       console.log("Install manually: shelbymcp forage > ~/.claude/scheduled-tasks/shelby-forage/SKILL.md");
     }
+
+    console.log("\nShelbyMCP installed for Claude Code!");
   }
 }
 
@@ -181,155 +248,202 @@ function setupClaudeDesktop(forage: boolean): void {
   console.log("Open Claude Desktop > Settings > Developer > Edit Config");
   console.log("Add this to the mcpServers object:\n");
   console.log(JSON.stringify({
-    memory: {
-      command: "npx",
-      args: ["shelbymcp"],
-    },
+    shelbymcp: buildServerCommand(),
   }, null, 2));
   console.log("\nIMPORTANT: Quit and restart Claude Desktop after editing.");
   console.log("\nNote: Claude Desktop and Claude Code CLI have separate configs.");
   console.log("Setting up one does NOT configure the other.");
   console.log("\nNext: Add the Memory Protocol to your Desktop profile:");
-  console.log("  Settings > Profile > \"What preferences should Claude consider?\"");
-  console.log("  Run: shelbymcp protocol");
+  console.log("  1. Run: shelbymcp protocol");
+  console.log("  2. Copy the output");
+  console.log("  3. Open Settings > Profile > \"What preferences should Claude consider?\"");
+  console.log("  4. Paste the protocol text into that field");
 
   if (forage) {
     printForageInstructions("claude-desktop");
   }
+
+  console.log("\nFollow the steps above to finish installing ShelbyMCP for Claude Desktop.");
 }
 
 function setupCursor(forage: boolean): void {
   const configPath = resolve(homedir(), ".cursor/mcp.json");
 
-  const entry = {
-    command: "npx",
-    args: ["shelbymcp"],
-  };
+  const entry = { type: "stdio", ...buildServerCommand() };
 
   mergeJsonConfig(configPath, entry);
 
   console.log("\nOr add via UI: Settings > Tools & MCP > New MCP Server");
-  console.log("\nNext: Add the Memory Protocol for Cursor:");
+
+  console.log("\nNext: Add the Memory Protocol to Cursor:");
+  console.log("  1. Open Cursor Settings > Rules");
+  console.log("  2. Under \"User Rules\", paste the output of: shelbymcp protocol");
+  console.log("  (This applies the Memory Protocol to all your Cursor projects)");
+  console.log("");
+  console.log("  Or, to add per-project instead, run from your project root:");
   console.log("  mkdir -p .cursor/rules");
-  console.log("  echo '---\\nalwaysApply: true\\n---' > .cursor/rules/shelbymcp.mdc");
-  console.log("  shelbymcp protocol >> .cursor/rules/shelbymcp.mdc");
+  console.log("  shelbymcp protocol > .cursor/rules/shelbymcp.mdc");
+  console.log("  (Then prepend '---\\nalwaysApply: true\\n---\\n' to the file)");
 
   if (forage) {
     printForageInstructions("cursor");
   }
+
+  console.log("\nShelbyMCP MCP server installed for Cursor!");
 }
 
 function setupCodex(forage: boolean): void {
   try {
-    execSync("which codex", { stdio: "ignore" });
+    execSync(whichCmd("codex"), { stdio: "ignore" });
   } catch {
     console.log("Codex CLI not found.\n");
     console.log("Add this to ~/.codex/config.toml:\n");
-    console.log("[mcp_servers.memory]");
+    console.log("[mcp_servers.shelbymcp]");
     console.log('command = "npx"');
     console.log('args = ["shelbymcp"]');
-    console.log("\nNext: Add the Memory Protocol:");
-    console.log("  shelbymcp protocol >> AGENTS.md");
+
+    // Auto-append Memory Protocol to ~/.codex/AGENTS.md
+    const agentsMdPath = resolve(homedir(), ".codex/AGENTS.md");
+    appendProtocolToFile(agentsMdPath);
+
     if (forage) {
       printForageInstructions("codex");
     }
+
+    console.log("\nShelbyMCP installed for Codex!");
     return;
   }
 
   console.log("Adding ShelbyMCP to Codex...\n");
 
   try {
-    execSync("codex mcp add memory -- npx shelbymcp", { stdio: "inherit" });
+    execSync("codex mcp add shelbymcp -- npx shelbymcp", { stdio: "inherit" });
     console.log("\nShelbyMCP added to Codex.");
   } catch {
     console.log("\nCould not add automatically. Add to ~/.codex/config.toml:\n");
-    console.log("[mcp_servers.memory]");
+    console.log("[mcp_servers.shelbymcp]");
     console.log('command = "npx"');
     console.log('args = ["shelbymcp"]');
   }
 
-  console.log("\nNext: Add the Memory Protocol:");
-  console.log("  shelbymcp protocol >> AGENTS.md");
+  // Auto-append Memory Protocol to ~/.codex/AGENTS.md
+  const agentsMdPath = resolve(homedir(), ".codex/AGENTS.md");
+  appendProtocolToFile(agentsMdPath);
 
   if (forage) {
     printForageInstructions("codex");
   }
+
+  console.log("\nShelbyMCP installed for Codex!");
 }
 
 function setupWindsurf(forage: boolean): void {
-  const platform = process.platform;
-  let configPath: string;
+  const configPath = resolve(homedir(), ".codeium/windsurf/mcp_config.json");
 
-  if (platform === "win32") {
-    configPath = resolve(process.env.USERPROFILE ?? homedir(), ".codeium/windsurf/mcp_config.json");
-  } else {
-    configPath = resolve(homedir(), ".codeium/windsurf/mcp_config.json");
-  }
-
-  const entry = {
-    command: "npx",
-    args: ["shelbymcp"],
-  };
-
-  mergeJsonConfig(configPath, entry);
+  mergeJsonConfig(configPath, buildServerCommand());
 
   console.log("\nOr add via UI: Settings > Cascade > MCP Servers");
-  console.log("\nNext: Add the Memory Protocol:");
-  console.log("  shelbymcp protocol >> .windsurfrules");
+
+  // Auto-append Memory Protocol to global rules
+  const globalRulesPath = resolve(homedir(), ".codeium/windsurf/memories/global_rules.md");
+  appendProtocolToFile(globalRulesPath);
 
   if (forage) {
     printForageInstructions("windsurf");
   }
+
+  console.log("\nShelbyMCP installed for Windsurf!");
 }
 
 function setupGemini(forage: boolean): void {
-  const configPath = resolve(homedir(), ".gemini/settings.json");
+  try {
+    execSync(whichCmd("gemini"), { stdio: "ignore" });
+  } catch {
+    // Gemini CLI not found — fall back to manual JSON config
+    const configPath = resolve(homedir(), ".gemini/settings.json");
+    const entry = buildServerCommand();
 
-  const entry = {
-    command: "npx",
-    args: ["shelbymcp"],
-  };
-
-  // Gemini stores mcpServers inside settings.json alongside other settings
-  let config: Record<string, unknown> = {};
-
-  if (existsSync(configPath)) {
-    try {
-      config = JSON.parse(readFileSync(configPath, "utf-8"));
-    } catch {
-      console.error(`Warning: Could not parse ${configPath}. Creating new file.`);
-    }
-  }
-
-  if (!config.mcpServers || typeof config.mcpServers !== "object") {
-    config.mcpServers = {};
-  }
-
-  const servers = config.mcpServers as Record<string, unknown>;
-
-  if (servers["shelby-memory"]) {
-    console.log(`"shelby-memory" server already exists in ${configPath}`);
-    console.log("To reconfigure, remove the existing entry first.");
-  } else {
-    servers["shelby-memory"] = entry;
-
-    const dir = dirname(configPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+    let config: Record<string, unknown> = {};
+    if (existsSync(configPath)) {
+      try {
+        config = JSON.parse(readFileSync(configPath, "utf-8"));
+      } catch {
+        console.error(`Warning: Could not parse ${configPath}. Creating new file.`);
+      }
     }
 
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-    console.log(`Added ShelbyMCP as "shelby-memory" to ${configPath}`);
-    console.log('(Using hyphens, not underscores — Gemini\'s parser breaks on underscores)');
+    if (!config.mcpServers || typeof config.mcpServers !== "object") {
+      config.mcpServers = {};
+    }
+
+    const servers = config.mcpServers as Record<string, unknown>;
+    if (servers.shelbymcp) {
+      console.log(`"shelbymcp" server already exists in ${configPath}`);
+      console.log("To reconfigure, remove the existing entry first.");
+    } else {
+      servers.shelbymcp = entry;
+      const dir = dirname(configPath);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+      console.log(`Added ShelbyMCP to ${configPath}`);
+    }
+
+    // Auto-append Memory Protocol to ~/.gemini/GEMINI.md
+    const geminiMdPath = resolve(homedir(), ".gemini/GEMINI.md");
+    appendProtocolToFile(geminiMdPath);
+
+    if (forage) {
+      printForageInstructions("gemini");
+    }
+
+    console.log("\nShelbyMCP installed for Gemini CLI!");
+    return;
   }
 
-  console.log("\nNext: Add the Memory Protocol:");
-  console.log("  shelbymcp protocol >> GEMINI.md");
+  console.log("Adding ShelbyMCP to Gemini CLI (user scope)...\n");
+
+  try {
+    execSync("gemini mcp add shelbymcp --scope user -- npx shelbymcp", { stdio: "inherit" });
+    console.log("\nShelbyMCP added to Gemini CLI.");
+  } catch {
+    console.log("\nCould not add automatically. Run manually:");
+    console.log("  gemini mcp add shelbymcp --scope user -- npx shelbymcp");
+  }
+
+  // Auto-append Memory Protocol to ~/.gemini/GEMINI.md
+  const geminiMdPath = resolve(homedir(), ".gemini/GEMINI.md");
+  appendProtocolToFile(geminiMdPath);
 
   if (forage) {
     printForageInstructions("gemini");
   }
+
+  console.log("\nShelbyMCP installed for Gemini CLI!");
 }
+
+function setupAntigravity(forage: boolean): void {
+  const configPath = resolve(homedir(), ".gemini/antigravity/mcp_config.json");
+
+  mergeJsonConfig(configPath, buildServerCommand());
+
+  console.log("\nOr add via UI: Agent panel > MCP Servers > Manage MCP Servers");
+
+  // Auto-append Memory Protocol to ~/.gemini/GEMINI.md (shared with Gemini CLI)
+  const geminiMdPath = resolve(homedir(), ".gemini/GEMINI.md");
+  appendProtocolToFile(geminiMdPath);
+
+  if (forage) {
+    printForageInstructions("antigravity");
+  }
+
+  console.log("\nShelbyMCP installed for Antigravity!");
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 
 export function runSetup(agent: string | undefined, forage: boolean): void {
   if (!agent) {
@@ -341,6 +455,7 @@ export function runSetup(agent: string | undefined, forage: boolean): void {
     console.log("  codex             OpenAI Codex");
     console.log("  windsurf          Windsurf (Codeium)");
     console.log("  gemini            Gemini CLI");
+    console.log("  antigravity       Antigravity (Google)");
     console.log("\nFlags:");
     console.log("  --forage          Also set up the Forage enrichment skill");
     return;
@@ -370,6 +485,9 @@ export function runSetup(agent: string | undefined, forage: boolean): void {
       break;
     case "gemini":
       setupGemini(forage);
+      break;
+    case "antigravity":
+      setupAntigravity(forage);
       break;
   }
 }

@@ -26,10 +26,18 @@ describe("printProtocol", () => {
     expect(output).toContain("capture_thought");
   });
 
-  it("outputs instructions to stderr (not stdout)", () => {
+  it("shows hint on stderr only when stdout is a TTY", () => {
+    // Non-TTY (piped): no stderr hint
     printProtocol();
+    expect(errorSpy).not.toHaveBeenCalled();
 
+    // TTY: shows hint
+    const originalIsTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+    printProtocol();
     const stderrOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(stderrOutput).toContain("Paste this into");
+    expect(stderrOutput).toContain("Copy the output below");
+    expect(stderrOutput).toContain("shelbymcp protocol >> CLAUDE.md");
+    process.stdout.isTTY = originalIsTTY;
   });
 });

@@ -1,4 +1,4 @@
-const MEMORY_PROTOCOL = `## Memory (ShelbyMCP)
+export const MEMORY_PROTOCOL = `## Memory (ShelbyMCP)
 
 You have persistent memory via ShelbyMCP MCP tools. Memory survives across sessions and is shared across all AI tools the user works with. You MUST use it — do not rely on conversation context alone.
 
@@ -42,9 +42,12 @@ You MUST call \`search_thoughts\` or \`list_thoughts\` before:
 5. **Update, don't duplicate.** If a thought exists but is outdated, use \`update_thought\`. Don't create a new one.`;
 
 export function printProtocol(): void {
-  console.error(
-    "Paste this into your agent's rules file (CLAUDE.md, .cursorrules, AGENTS.md, etc.)\n" +
-    "Pipe directly: shelbymcp protocol >> CLAUDE.md\n"
-  );
+  // Only show the hint when output is going to a terminal (not piped to a file)
+  if (process.stdout.isTTY) {
+    console.error(
+      "Copy the output below and paste it into your agent's rules file.\n" +
+      "Or pipe directly: shelbymcp protocol >> CLAUDE.md\n"
+    );
+  }
   console.log(MEMORY_PROTOCOL);
 }

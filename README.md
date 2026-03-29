@@ -25,7 +25,7 @@
 
 Every AI memory server is a bag of embeddings. **ShelbyMCP connects your thoughts.**
 
-ShelbyMCP is a zero-dependency MCP memory server with a built-in knowledge graph. It gives Claude Code, Cursor, Codex, Windsurf, and any MCP-compatible AI tool persistent memory that understands how your thoughts are related — not just what they contain.
+ShelbyMCP is a zero-dependency MCP memory server with a built-in knowledge graph. It gives Claude Code, Cursor, Codex, Windsurf, Gemini, Antigravity, and any MCP-compatible AI tool persistent memory that understands how your thoughts are related — not just what they contain.
 
 Ship it with the **Forage skill**, a scheduled task that runs on your existing AI subscription to continuously enrich, consolidate, and connect your memories. No Docker. No Python. No cloud accounts. Just a binary and a database file.
 
@@ -69,23 +69,25 @@ shelbymcp setup cursor --forage         # Cursor IDE
 shelbymcp setup codex --forage          # OpenAI Codex
 shelbymcp setup windsurf --forage       # Windsurf (Codeium)
 shelbymcp setup gemini --forage         # Gemini CLI
+shelbymcp setup antigravity --forage    # Antigravity (Google)
 ```
 
 Drop `--forage` if you just want the MCP server without the scheduled enrichment skill.
 
-That's it. The CLI registers the MCP server, prints where to paste the Memory Protocol, and installs the Forage skill. See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) for manual config and platform-specific details.
+That's it. The CLI registers the MCP server, adds the Memory Protocol to the right place, and installs the Forage skill. See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) for manual config and platform-specific details.
 
 ### 3. Add the Memory Protocol
 
-The CLI will tell you where to paste it, but in short:
+Most agents get the Memory Protocol added automatically during setup. For agents that require manual steps, the CLI will tell you exactly what to do. Here's where it goes:
 
 ```bash
-shelbymcp protocol >> ~/.claude/CLAUDE.md       # Claude Code
-shelbymcp protocol >> GEMINI.md                  # Gemini CLI
-shelbymcp protocol >> .windsurfrules             # Windsurf
+shelbymcp protocol >> ~/.claude/CLAUDE.md                              # Claude Code (auto)
+shelbymcp protocol >> ~/.codex/AGENTS.md                               # Codex (auto)
+shelbymcp protocol >> ~/.codeium/windsurf/memories/global_rules.md     # Windsurf (auto)
+shelbymcp protocol >> ~/.gemini/GEMINI.md                              # Gemini CLI / Antigravity (auto)
 ```
 
-For Cursor, create `.cursor/rules/shelbymcp.mdc` with `alwaysApply: true` frontmatter. For Codex, append to `AGENTS.md`. The Memory Protocol tells your agent *when* to save and search — without it, the tools are available but won't be used proactively.
+For Cursor, paste into **Settings > Rules > User Rules**. For Claude Desktop, paste into **Settings > Profile**. The Memory Protocol tells your agent *when* to save and search — without it, the tools are available but won't be used proactively.
 
 ### 4. Verify
 
@@ -205,7 +207,7 @@ shelbymcp help                     Show help
 shelbymcp --version                Print version
 ```
 
-**Supported agents:** `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`
+**Supported agents:** `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`, `antigravity`
 
 **Server flags:** `--db <path>` (custom database path), `--verbose` (debug logging)
 
