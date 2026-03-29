@@ -223,7 +223,8 @@ describe("setupCursor", () => {
     expect(config.mcpServers.shelbymcp.type).toBe("stdio");
     // Should use absolute paths instead of bare "npx"
     expect(config.mcpServers.shelbymcp.command).toBe(process.execPath);
-    expect(config.mcpServers.shelbymcp.args[1]).toBe("shelbymcp");
+    // args[0] is the direct shelbymcp binary path (no npx wrapper)
+    expect(config.mcpServers.shelbymcp.args[0]).toMatch(/\/shelbymcp$/);
   });
 
   it("does not overwrite existing memory MCP entry", () => {
