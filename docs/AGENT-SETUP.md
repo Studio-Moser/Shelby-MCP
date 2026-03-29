@@ -1,10 +1,11 @@
 # Agent Setup
 
-ShelbyMCP works with any MCP-compatible AI tool. Setup has three parts:
+ShelbyMCP works with any MCP-compatible AI tool. Setup has four parts:
 
 1. **Connect the server** — register ShelbyMCP with your agent
 2. **Add the Memory Protocol** — tell your agent when and how to use memory
 3. **(Optional) Set up Forage** — scheduled enrichment that makes memories smarter over time
+4. **(Recommended) Seed your memory** — run the onboarding interview or import from another AI
 
 ## The Fast Way
 
@@ -406,7 +407,39 @@ This keeps Forage focused on analysis and the conversational agent focused on co
 
 ---
 
-## 4. Verify the Connection
+## 4. Seed Your Memory (Recommended)
+
+After setup, your memory database is empty. To get immediate value, seed it with foundational context about yourself and your work.
+
+### Option A: Onboard Interview (5 minutes)
+
+Run the onboarding prompt in your primary agent. It asks a few rounds of conversational questions and saves 15-30 memories covering your identity, projects, team, preferences, and anti-patterns.
+
+```bash
+shelbymcp onboard
+```
+
+Paste the output into a conversation with your ShelbyMCP-connected agent and follow along. Memories are captured after each round — you'll see confirmations as they're saved.
+
+If you already have some memories (from prior use or a migration), the onboard skill checks `thought_stats` first and fills gaps instead of starting from scratch.
+
+### Option B: Import from Another AI
+
+If you've been using ChatGPT, Claude, Gemini, or another AI that already knows about you, export that context:
+
+```bash
+shelbymcp migrate
+```
+
+This prints a prompt to paste into your other AI tool. That tool will output everything it knows about you in a structured format. Copy the response and paste it into your ShelbyMCP-connected agent — either during the onboard interview (it has a migration import step) or in any conversation with a request like "import these memories into ShelbyMCP."
+
+### Option C: Just Start Working
+
+Memories accumulate naturally as you work. The Memory Protocol tells your agent to save decisions, preferences, and context as they come up. The onboard and migrate options just accelerate the process.
+
+---
+
+## 5. Verify the Connection
 
 Ask your AI tool:
 

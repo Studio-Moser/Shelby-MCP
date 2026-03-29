@@ -89,7 +89,25 @@ shelbymcp protocol >> ~/.gemini/GEMINI.md                              # Gemini 
 
 For Cursor, paste into **Settings > Rules > User Rules**. For Claude Desktop, paste into **Settings > General > "What personal preferences should Claude consider in responses?"**. The Memory Protocol tells your agent *when* to save and search — without it, the tools are available but won't be used proactively.
 
-### 4. Verify
+### 4. Seed Your Memory
+
+Your database is empty after install. There are three ways to make it useful immediately:
+
+```bash
+# Option A: Run the onboarding interview (recommended)
+# Paste this into a conversation — it asks a few questions and saves 15-30 memories
+shelbymcp onboard
+
+# Option B: Import from another AI tool
+# Paste this prompt into ChatGPT/Claude/Gemini, copy the response back
+shelbymcp migrate
+
+# Option C: Just start working — memories accumulate naturally over time
+```
+
+The **onboard** skill runs a conversational interview covering who you are, what you're building, your team, preferences, and anti-patterns. Takes about 5 minutes. The **migrate** prompt tells your other AI tools to export everything they know about you in a structured format that ShelbyMCP can import.
+
+### 5. Verify
 
 Ask your agent: *"What memory tools do you have available?"*
 
@@ -194,6 +212,41 @@ ShelbyMCP works fine without it — you get persistent storage, FTS5 search, and
 
 ---
 
+## Getting Started: Onboard & Migrate
+
+An empty memory database is a cold start problem — your AI tools can't personalize until they know something about you. ShelbyMCP ships with two tools to solve this:
+
+### The Onboard Skill (recommended)
+
+A one-time conversational interview that seeds 15-30 foundational memories. Paste the prompt into a conversation with your primary AI tool:
+
+```bash
+shelbymcp onboard
+```
+
+It covers:
+- **Who you are** — name, role, expertise
+- **What you're building** — projects, goals, tech stack
+- **Who you work with** — team, roles, stakeholders
+- **How you like to work** — communication style, coding preferences, AI interaction style
+- **What to avoid** — anti-patterns, pet peeves, past frustrations
+
+Takes about 5 minutes. The skill adapts its questions based on your answers — if you're a solo founder, it won't ask about team structure. Memories are saved after each round so you can see them accumulate in real time.
+
+### The Migrate Prompt
+
+Already have context stored in ChatGPT, Claude, Gemini, or another AI? Export it:
+
+```bash
+shelbymcp migrate
+```
+
+This prints a prompt you paste into your other AI tool. That tool dumps everything it knows about you in a structured format. Copy the response back into your ShelbyMCP-connected agent — the onboard skill will parse and import it, or you can just paste it into any conversation and ask the agent to import it.
+
+Works with any AI that has memory or conversation history about you. Run it once per tool you're migrating from.
+
+---
+
 ## CLI Reference
 
 ```
@@ -203,6 +256,8 @@ shelbymcp setup <agent> --forage   ...and install the Forage skill
 shelbymcp uninstall <agent>        Remove ShelbyMCP from an agent
 shelbymcp protocol                 Print the Memory Protocol
 shelbymcp forage                   Print the Forage skill prompt
+shelbymcp onboard                  Print the onboarding interview prompt
+shelbymcp migrate                  Print the migration prompt for other AI tools
 shelbymcp help                     Show help
 shelbymcp --version                Print version
 ```

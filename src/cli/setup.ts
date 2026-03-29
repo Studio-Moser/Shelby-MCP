@@ -461,9 +461,24 @@ function setupAntigravity(forage: boolean): void {
 // Entry point
 // ---------------------------------------------------------------------------
 
-export function runSetup(agent: string | undefined, forage: boolean): void {
+function printOnboardInstructions(): void {
+  console.log("\n--- Get Started ---\n");
+  console.log("Your memory database is empty. To seed it with foundational context:");
+  console.log("");
+  console.log("  Option 1: Run the onboarding interview");
+  console.log("    Paste the output of `shelbymcp onboard` into a conversation.");
+  console.log("    It will ask a few questions and save 15-30 memories about you.");
+  console.log("");
+  console.log("  Option 2: Import from another AI tool");
+  console.log("    Run `shelbymcp migrate` and paste the prompt into ChatGPT/Gemini/etc.");
+  console.log("    Copy the response back into your ShelbyMCP-connected agent.");
+  console.log("");
+  console.log("  Or just start working — memories will accumulate naturally over time.");
+}
+
+export function runSetup(agent: string | undefined, forage: boolean, onboard?: boolean): void {
   if (!agent) {
-    console.log("Usage: shelbymcp setup <agent> [--forage]\n");
+    console.log("Usage: shelbymcp setup <agent> [--forage] [--onboard]\n");
     console.log("Agents:");
     console.log("  claude-code       Claude Code CLI");
     console.log("  claude-desktop    Claude Desktop app");
@@ -474,6 +489,7 @@ export function runSetup(agent: string | undefined, forage: boolean): void {
     console.log("  antigravity       Antigravity (Google)");
     console.log("\nFlags:");
     console.log("  --forage          Also set up the Forage enrichment skill");
+    console.log("  --onboard         Show onboarding instructions after setup");
     return;
   }
 
@@ -505,5 +521,9 @@ export function runSetup(agent: string | undefined, forage: boolean): void {
     case "antigravity":
       setupAntigravity(forage);
       break;
+  }
+
+  if (onboard) {
+    printOnboardInstructions();
   }
 }

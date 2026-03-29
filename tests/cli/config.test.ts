@@ -28,6 +28,7 @@ describe("parseArgs", () => {
         command: "setup",
         agent: "claude-code",
         forage: false,
+        onboard: false,
       });
     });
 
@@ -36,6 +37,7 @@ describe("parseArgs", () => {
         command: "setup",
         agent: "cursor",
         forage: true,
+        onboard: false,
       });
     });
 
@@ -44,6 +46,7 @@ describe("parseArgs", () => {
         command: "setup",
         agent: undefined,
         forage: false,
+        onboard: false,
       });
     });
 
@@ -53,7 +56,16 @@ describe("parseArgs", () => {
         command: "setup",
         agent: undefined,
         forage: true,
+        onboard: false,
       });
+    });
+
+    it("parses 'onboard' command", () => {
+      expect(parseArgs(["onboard"])).toEqual({ command: "onboard" });
+    });
+
+    it("parses 'migrate' command", () => {
+      expect(parseArgs(["migrate"])).toEqual({ command: "migrate" });
     });
 
     it("parses 'uninstall' with agent", () => {

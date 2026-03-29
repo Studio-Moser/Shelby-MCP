@@ -6,6 +6,8 @@ import { createServer } from "./mcp/server.js";
 import { printHelp } from "./cli/help.js";
 import { printProtocol } from "./cli/protocol.js";
 import { printForage } from "./cli/forage.js";
+import { printOnboard } from "./cli/onboard.js";
+import { printMigrate } from "./cli/migrate.js";
 import { runSetup } from "./cli/setup.js";
 import { runUninstall } from "./cli/uninstall.js";
 
@@ -23,7 +25,7 @@ async function main() {
         printHelp();
         break;
       case "setup":
-        runSetup(config.agent, config.forage ?? false);
+        runSetup(config.agent, config.forage ?? false, config.onboard);
         break;
       case "uninstall":
         runUninstall(config.agent);
@@ -33,6 +35,12 @@ async function main() {
         break;
       case "forage":
         printForage();
+        break;
+      case "onboard":
+        printOnboard();
+        break;
+      case "migrate":
+        printMigrate();
         break;
     }
     process.exit(0);

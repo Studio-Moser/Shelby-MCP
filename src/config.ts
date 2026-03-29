@@ -8,9 +8,10 @@ export interface ShelbyConfig {
 }
 
 export interface CliCommand {
-  command: "help" | "setup" | "uninstall" | "protocol" | "forage";
+  command: "help" | "setup" | "uninstall" | "protocol" | "forage" | "onboard" | "migrate";
   agent?: string;
   forage?: boolean;
+  onboard?: boolean;
 }
 
 const DEFAULT_DB_DIR = resolve(homedir(), ".shelbymcp");
@@ -26,8 +27,9 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
 
   if (first === "setup") {
     const forage = argv.includes("--forage");
+    const onboard = argv.includes("--onboard");
     const agent = argv[1] && !argv[1].startsWith("--") ? argv[1] : undefined;
-    return { command: "setup", agent, forage };
+    return { command: "setup", agent, forage, onboard };
   }
 
   if (first === "uninstall") {
@@ -41,6 +43,14 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
 
   if (first === "forage") {
     return { command: "forage" };
+  }
+
+  if (first === "onboard") {
+    return { command: "onboard" };
+  }
+
+  if (first === "migrate") {
+    return { command: "migrate" };
   }
 
   // Parse flags for server mode
