@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.studio-moser/shelbymcp",
+  "name": "io.github.Studio-Moser/shelbymcp",
   "description": "Knowledge-graph memory server for AI tools via MCP",
   "repository": {
     "url": "https://github.com/Studio-Moser/shelbymcp.git",
