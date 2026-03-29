@@ -34,11 +34,12 @@ function buildServerCommand(): { command: string; args: string[]; env?: Record<s
   if (hasNvm()) {
     const nodePath = process.execPath;
     const nodeBinDir = dirname(nodePath);
-    const npxPath = resolve(nodeBinDir, "npx");
+    // Use the direct shelbymcp binary instead of going through npx.
+    // npx internally spawns `sh` which fails in Claude Desktop's restricted environment.
+    const shelbymcpBin = resolve(nodeBinDir, "shelbymcp");
     return {
       command: nodePath,
-      args: [npxPath, "shelbymcp"],
-      env: { PATH: `${nodeBinDir}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin` },
+      args: [shelbymcpBin],
     };
   }
   return { command: "npx", args: ["shelbymcp"] };
@@ -256,16 +257,22 @@ function setupClaudeDesktop(forage: boolean): void {
   console.log(`Config file: ${configPath}\n`);
   console.log("Open Claude Desktop > Settings > Developer > Edit Config");
   console.log("Add this to the mcpServers object:\n");
-  console.log(JSON.stringify({
-    shelbymcp: buildServerCommand(),
-  }, null, 2));
+  const fullJson = JSON.stringify({ shelbymcp: buildServerCommand() }, null, 2);
+  // Strip the outer { } and unindent so the user can paste just the key-value
+  // pair directly into the existing mcpServers object.
+  const snippet = fullJson
+    .split("\n")
+    .slice(1, -1)
+    .map((line) => line.slice(2))
+    .join("\n");
+  console.log(snippet + ",");
   console.log("\nIMPORTANT: Quit and restart Claude Desktop after editing.");
   console.log("\nNote: Claude Desktop and Claude Code CLI have separate configs.");
   console.log("Setting up one does NOT configure the other.");
   console.log("\nNext: Add the Memory Protocol to your Desktop profile:");
   console.log("  1. Run: shelbymcp protocol");
   console.log("  2. Copy the output");
-  console.log("  3. Open Settings > Profile > \"What preferences should Claude consider?\"");
+  console.log("  3. Open Settings > General > \"What personal preferences should Claude consider in responses?\"");
   console.log("  4. Paste the protocol text into that field");
 
   if (forage) {

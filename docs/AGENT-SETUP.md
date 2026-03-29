@@ -83,7 +83,7 @@ The CLI prints the JSON config to paste and where to add the Memory Protocol. Cl
 **Config path (Windows):** `%APPDATA%\Claude\claude_desktop_config.json`
 </details>
 
-**Memory Protocol:** Go to Settings > Profile and paste the Memory Protocol (see Section 2) into the "What preferences should Claude consider?" field. This applies to all conversations and syncs across devices.
+**Memory Protocol:** Go to **Settings > General** and paste the Memory Protocol (see Section 2) into the "What personal preferences should Claude consider in responses?" field. This applies to all conversations and syncs across devices.
 
 ### Cursor
 
@@ -257,7 +257,7 @@ Connecting the server gives your agent memory tools, but **agents won't use them
 | Agent | Where to paste | Notes |
 |---|---|---|
 | Claude Code CLI | `~/.claude/CLAUDE.md` | Auto-added by setup CLI. Survives context compaction. |
-| Claude Desktop | Settings > Profile > "What preferences should Claude consider?" | Account-level, syncs across devices, applies to all conversations |
+| Claude Desktop | Settings > General > "What personal preferences should Claude consider in responses?" | Account-level, syncs across devices, applies to all conversations |
 | Cursor | **Settings > Rules > User Rules** | Global across all projects |
 | Codex | `~/.codex/AGENTS.md` | Auto-added by setup CLI |
 | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | Auto-added by setup CLI |

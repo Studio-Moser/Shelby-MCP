@@ -87,7 +87,7 @@ shelbymcp protocol >> ~/.codeium/windsurf/memories/global_rules.md     # Windsur
 shelbymcp protocol >> ~/.gemini/GEMINI.md                              # Gemini CLI / Antigravity (auto)
 ```
 
-For Cursor, paste into **Settings > Rules > User Rules**. For Claude Desktop, paste into **Settings > Profile**. The Memory Protocol tells your agent *when* to save and search — without it, the tools are available but won't be used proactively.
+For Cursor, paste into **Settings > Rules > User Rules**. For Claude Desktop, paste into **Settings > General > "What personal preferences should Claude consider in responses?"**. The Memory Protocol tells your agent *when* to save and search — without it, the tools are available but won't be used proactively.
 
 ### 4. Verify
 

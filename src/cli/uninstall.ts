@@ -118,7 +118,7 @@ function uninstallClaudeDesktop(): void {
 
   console.log("\nIMPORTANT: Quit and restart Claude Desktop after editing.");
   console.log("\nManual steps:");
-  console.log("  - Remove the Memory Protocol from Settings > Profile");
+  console.log("  - Remove the Memory Protocol from Settings > General > \"What personal preferences should Claude consider in responses?\"");
   console.log("  - Delete the Forage scheduled task from the Schedule page (if added)");
   console.log("\nThe database at ~/.shelbymcp/memory.db is NOT deleted — your memories are safe.");
 }
