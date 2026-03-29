@@ -3,8 +3,6 @@ import { existsSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
-import { MEMORY_PROTOCOL } from "../../src/cli/protocol.js";
-
 // Mock child_process so execSync doesn't run real commands
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
@@ -72,7 +70,7 @@ describe("runSetup", () => {
 });
 
 describe("setupClaudeCode", () => {
-  it("registers MCP server, appends protocol, and prints completion", () => {
+  it("registers MCP server and mentions prompts (no rules file)", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation(() => Buffer.from(""));
 
@@ -84,48 +82,15 @@ describe("setupClaudeCode", () => {
       { stdio: "inherit" },
     );
 
+    // Protocol should NOT be written to CLAUDE.md (served via MCP prompts)
     const claudeMdPath = resolve(tempDir, ".claude/CLAUDE.md");
-    expect(existsSync(claudeMdPath)).toBe(true);
-    const content = readFileSync(claudeMdPath, "utf-8");
-    expect(content).toContain("## Memory (ShelbyMCP)");
-    expect(content).toContain("capture_thought");
+    expect(existsSync(claudeMdPath)).toBe(false);
 
-    expect(getOutput()).toContain("Memory Protocol added to");
+    expect(getOutput()).toContain("MCP prompts");
     expect(getOutput()).toContain("ShelbyMCP installed for Claude Code!");
   });
 
-  it("does not duplicate protocol if already present", () => {
-    const mockExec = execSync as ReturnType<typeof vi.fn>;
-    mockExec.mockImplementation(() => Buffer.from(""));
-
-    const claudeDir = resolve(tempDir, ".claude");
-    mkdirSync(claudeDir, { recursive: true });
-    writeFileSync(resolve(claudeDir, "CLAUDE.md"), "# My Rules\n\n" + MEMORY_PROTOCOL + "\n");
-
-    runSetup("claude-code", false);
-
-    expect(getOutput()).toContain("Memory Protocol already present");
-    const content = readFileSync(resolve(claudeDir, "CLAUDE.md"), "utf-8");
-    expect(content.match(/## Memory \(ShelbyMCP\)/g)).toHaveLength(1);
-  });
-
-  it("appends protocol to existing CLAUDE.md without overwriting", () => {
-    const mockExec = execSync as ReturnType<typeof vi.fn>;
-    mockExec.mockImplementation(() => Buffer.from(""));
-
-    const claudeDir = resolve(tempDir, ".claude");
-    mkdirSync(claudeDir, { recursive: true });
-    writeFileSync(resolve(claudeDir, "CLAUDE.md"), "# Existing Rules\n\nDo not delete this.\n");
-
-    runSetup("claude-code", false);
-
-    const content = readFileSync(resolve(claudeDir, "CLAUDE.md"), "utf-8");
-    expect(content).toContain("# Existing Rules");
-    expect(content).toContain("Do not delete this.");
-    expect(content).toContain("## Memory (ShelbyMCP)");
-  });
-
-  it("prints fallback when claude CLI is not found and does not write protocol", () => {
+  it("prints fallback when claude CLI is not found", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation((cmd: string) => {
       if (cmd === "which claude") throw new Error("not found");
@@ -135,10 +100,9 @@ describe("setupClaudeCode", () => {
     runSetup("claude-code", false);
 
     expect(getOutput()).toContain("Claude Code CLI not found");
-    expect(existsSync(resolve(tempDir, ".claude/CLAUDE.md"))).toBe(false);
   });
 
-  it("still writes protocol when claude mcp add fails", () => {
+  it("handles claude mcp add failure gracefully", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation((cmd: string) => {
       if (cmd.includes("mcp add")) throw new Error("already exists");
@@ -148,8 +112,6 @@ describe("setupClaudeCode", () => {
     runSetup("claude-code", false);
 
     expect(getOutput()).toContain("Could not add automatically");
-    const content = readFileSync(resolve(tempDir, ".claude/CLAUDE.md"), "utf-8");
-    expect(content).toContain("## Memory (ShelbyMCP)");
   });
 
   it("installs forage skill when --forage and prints completion", () => {
@@ -177,15 +139,14 @@ describe("setupClaudeCode", () => {
 });
 
 describe("setupClaudeDesktop", () => {
-  it("prints setup instructions with clear protocol steps", () => {
+  it("prints setup instructions and mentions MCP prompts", () => {
     runSetup("claude-desktop", false);
 
     expect(getOutput()).toContain("Claude Desktop setup");
     expect(getOutput()).toContain("Settings > Developer > Edit Config");
     expect(getOutput()).toContain("Quit and restart");
-    expect(getOutput()).toContain("Run: shelbymcp protocol");
-    expect(getOutput()).toContain("Copy the output");
-    expect(getOutput()).toContain("Paste the protocol text");
+    // Protocol is served via MCP prompts, not manual paste
+    expect(getOutput()).toContain("MCP prompts");
     expect(getOutput()).toContain("Follow the steps above to finish installing ShelbyMCP");
   });
 
@@ -199,7 +160,7 @@ describe("setupClaudeDesktop", () => {
 });
 
 describe("setupCursor", () => {
-  it("merges mcp.json with stdio type and prints protocol instructions", () => {
+  it("merges mcp.json with stdio type and mentions MCP prompts", () => {
     runSetup("cursor", false);
 
     const configPath = resolve(tempDir, ".cursor/mcp.json");
@@ -207,9 +168,8 @@ describe("setupCursor", () => {
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
     expect(config.mcpServers.shelbymcp).toEqual({ type: "stdio", command: "npx", args: ["shelbymcp"] });
 
-    expect(getOutput()).toContain("Cursor Settings > Rules");
-    expect(getOutput()).toContain("User Rules");
-    expect(getOutput()).toContain("shelbymcp protocol");
+    // Protocol is served via MCP prompts, not rules files
+    expect(getOutput()).toContain("MCP prompts");
     expect(getOutput()).toContain("ShelbyMCP MCP server installed for Cursor!");
   });
 
@@ -248,25 +208,27 @@ describe("setupCursor", () => {
 });
 
 describe("setupCodex", () => {
-  it("registers MCP server and appends protocol to ~/.codex/AGENTS.md", () => {
+  it("registers MCP server via CLI and mentions MCP prompts", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation(() => Buffer.from(""));
 
     runSetup("codex", false);
 
     expect(mockExec).toHaveBeenCalledWith("which codex", { stdio: "ignore" });
-    expect(mockExec).toHaveBeenCalledWith("codex mcp add shelbymcp -- npx shelbymcp", { stdio: "inherit" });
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.stringContaining("codex mcp add shelbymcp"),
+      { stdio: "inherit" },
+    );
 
-    // Protocol should go to ~/.codex/AGENTS.md, not cwd
+    // Protocol should NOT be written to AGENTS.md (served via MCP prompts)
     const agentsMdPath = resolve(tempDir, ".codex/AGENTS.md");
-    expect(existsSync(agentsMdPath)).toBe(true);
-    const content = readFileSync(agentsMdPath, "utf-8");
-    expect(content).toContain("## Memory (ShelbyMCP)");
+    expect(existsSync(agentsMdPath)).toBe(false);
 
-    expect(getOutput()).toContain("ShelbyMCP installed for Codex!");
+    expect(getOutput()).toContain("MCP prompts");
+    expect(getOutput()).toContain("ShelbyMCP installed for Codex");
   });
 
-  it("still appends protocol when codex CLI is not found", () => {
+  it("writes config.toml directly when codex CLI is not found", () => {
     const mockExec = execSync as ReturnType<typeof vi.fn>;
     mockExec.mockImplementation((cmd: string) => {
       if (cmd === "which codex") throw new Error("not found");
@@ -275,13 +237,35 @@ describe("setupCodex", () => {
 
     runSetup("codex", false);
 
-    expect(getOutput()).toContain("Codex CLI not found");
-    expect(getOutput()).toContain("config.toml");
+    // Should write config.toml directly instead of just printing instructions
+    const configPath = resolve(tempDir, ".codex/config.toml");
+    expect(existsSync(configPath)).toBe(true);
+    const content = readFileSync(configPath, "utf-8");
+    expect(content).toContain("[mcp_servers.shelbymcp]");
+    expect(content).toContain('command = "npx"');
 
-    const agentsMdPath = resolve(tempDir, ".codex/AGENTS.md");
-    expect(existsSync(agentsMdPath)).toBe(true);
+    expect(getOutput()).toContain("ShelbyMCP installed for Codex");
+  });
 
-    expect(getOutput()).toContain("ShelbyMCP installed for Codex!");
+  it("does not overwrite existing config.toml entry", () => {
+    const mockExec = execSync as ReturnType<typeof vi.fn>;
+    mockExec.mockImplementation((cmd: string) => {
+      if (cmd === "which codex") throw new Error("not found");
+      return Buffer.from("");
+    });
+
+    const configDir = resolve(tempDir, ".codex");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      resolve(configDir, "config.toml"),
+      '[mcp_servers.shelbymcp]\ncommand = "custom"\n',
+    );
+
+    runSetup("codex", false);
+
+    const content = readFileSync(resolve(configDir, "config.toml"), "utf-8");
+    expect(content).toContain('command = "custom"');
+    expect(getOutput()).toContain("already exists");
   });
 });
 

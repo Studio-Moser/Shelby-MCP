@@ -132,6 +132,53 @@ main().catch((error) => {
 - better-sqlite3 synchronous API (no async needed for DB ops)
 - Pagination: all list/search responses include `{ results, total_count, has_more, offset }`
 
+## MCP Capabilities
+
+The server registers these MCP capabilities:
+
+- **Tools** — 8 tools for capturing, searching, browsing, updating, deleting thoughts, managing graph edges, and stats
+- **Resources** — `shelbymcp://status` health check (also satisfies clients that call `resources/list` unconditionally)
+- **Prompts** — `memory-protocol`, `save-guide`, `tool-guide` teach agents how to use the memory system
+- **Completions** — Auto-complete for `topic`, `people`, `project`, `type`, `source`, `edge_type` arguments
+- **Logging** — Structured log notifications on every tool invocation (level, logger name, event data). Clients can adjust verbosity via `logging/setLevel`.
+
+## Future MCP Enhancements
+
+### Sampling (Server-Initiated LLM Calls)
+
+The MCP sampling capability lets the server ask the client's LLM to generate completions via `sampling/createMessage`. This would let ShelbyMCP autonomously summarize, consolidate, or reason over stored knowledge without the user orchestrating it — effectively making Forage a built-in server capability instead of an external scheduled skill.
+
+**Why not now:** Few clients support sampling yet (Goose is the notable exception). Claude Code, Cursor, and Codex don't support it as of March 2026. The human-in-the-loop approval requirement also adds UX friction. We'll revisit when at least 2 major clients support it.
+
+- [MCP Sampling Spec](https://modelcontextprotocol.io/specification/draft/client/sampling)
+- [Goose Sampling Blog](https://block.github.io/goose/blog/2025/12/04/mcp-sampling/)
+
+### Resource Subscriptions
+
+The MCP resource subscription pattern lets clients subscribe to a resource URI and receive `notifications/resources/updated` when it changes. ShelbyMCP could notify connected agents when new memories are captured, thoughts are updated, or new connections are discovered in the graph.
+
+**Why not now:** No major clients consume resource subscriptions meaningfully yet. The notification is also fire-and-forget (the client must re-read the resource), so the benefit over polling is marginal for a local SQLite database. We'll add this when clients start using subscriptions for real-time awareness.
+
+- [MCP Resources Spec](https://modelcontextprotocol.io/specification/2025-03-26/server/resources)
+
+### Elicitation (Server-to-User Input)
+
+Added to the MCP spec in June 2025, elicitation lets the server ask the user for structured input via forms. ShelbyMCP could use this to resolve ambiguous or conflicting memories ("You have two decisions about auth strategy — which is current?").
+
+**Why not now:** Very few clients support elicitation. The use case is also niche — most ambiguities can be resolved by the agent asking the user directly.
+
+- [MCP Elicitation Spec](https://modelcontextprotocol.io/specification/draft/client/elicitation)
+- [WorkOS Elicitation Guide](https://workos.com/blog/mcp-elicitation)
+
+### Tasks (Async Long-Running Operations)
+
+Added in November 2025, MCP tasks let servers create async work handles with progress updates. Background memory consolidation, re-indexing, or graph analysis could run as tasks rather than blocking tool calls.
+
+**Why not now:** The feature is experimental and client support is minimal. Our current operations are fast enough to run synchronously (SQLite queries are sub-millisecond).
+
+- [MCP November 2025 Update](https://blog.modelcontextprotocol.io/posts/2025-11-25-first-mcp-anniversary/)
+- [WorkOS Spec Update](https://workos.com/blog/mcp-2025-11-25-spec-update)
+
 ## Relationship to Shelby Mac App
 
 This repo is the standalone open-source memory server. The Shelby Mac app (separate repo) wraps the same database schema with a native macOS UI, CloudKit sync, always-on embedding pipeline, and heartbeat system.

@@ -1,4 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { CompleteRequestSchema, SetLevelRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { LoggingLevel } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { ShelbyConfig } from "../config.js";
 import { ThoughtDatabase } from "../db/database.js";
@@ -11,8 +13,14 @@ import { handleUpdateThought } from "../tools/update.js";
 import { handleDeleteThought } from "../tools/delete.js";
 import { handleManageEdges, handleExploreGraph } from "../tools/graph.js";
 import { handleThoughtStats } from "../tools/stats.js";
+import type { ToolResult } from "../tools/helpers.js";
 
 const VERSION = "0.1.0";
+
+// Logging levels in order of severity (syslog-style)
+const LOG_LEVELS: LoggingLevel[] = [
+  "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency",
+];
 
 export function createServer(config: ShelbyConfig): { server: McpServer; db: ThoughtDatabase } {
   const server = new McpServer({
@@ -21,6 +29,55 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
   });
 
   const db = new ThoughtDatabase(config.dbPath);
+
+  // ---------------------------------------------------------------------------
+  // Logging
+  // ---------------------------------------------------------------------------
+  // Register the logging capability so clients know we emit structured logs.
+  // The client can adjust verbosity via logging/setLevel.
+
+  let currentLogLevel: LoggingLevel = "info";
+
+  server.server.registerCapabilities({ logging: {} });
+  server.server.setRequestHandler(SetLevelRequestSchema, async (request) => {
+    currentLogLevel = request.params.level;
+    return {};
+  });
+
+  function shouldLog(level: LoggingLevel): boolean {
+    return LOG_LEVELS.indexOf(level) >= LOG_LEVELS.indexOf(currentLogLevel);
+  }
+
+  function log(level: LoggingLevel, logger: string, data: unknown): void {
+    if (!shouldLog(level)) return;
+    server.sendLoggingMessage({ level, logger, data }).catch(() => {
+      // Swallow — client may have disconnected
+    });
+  }
+
+  /**
+   * Wrap a tool handler to emit structured log messages on invocation and completion.
+   */
+  function withLogging<T extends Record<string, unknown>>(
+    toolName: string,
+    handler: (args: T) => ToolResult | Promise<ToolResult>,
+  ) {
+    return async (args: T): Promise<ToolResult> => {
+      log("debug", toolName, { event: "invoked", args });
+      try {
+        const result = await handler(args);
+        if (result.isError) {
+          log("warning", toolName, { event: "error", message: result.content[0]?.text });
+        } else {
+          log("info", toolName, { event: "completed" });
+        }
+        return result;
+      } catch (err) {
+        log("error", toolName, { event: "exception", message: String(err) });
+        throw err;
+      }
+    };
+  }
 
   // --- capture_thought ---
 
@@ -66,9 +123,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
           .optional(),
       },
     },
-    async (args) => {
-      return handleCaptureThought(db, args as Record<string, unknown>);
-    },
+    withLogging("capture_thought", (args) => handleCaptureThought(db, args as Record<string, unknown>)),
   );
 
   // --- search_thoughts ---
@@ -97,9 +152,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         project: z.string().describe("Filter by project").optional(),
       },
     },
-    async (args) => {
-      return handleSearchThoughts(db, args as Record<string, unknown>);
-    },
+    withLogging("search_thoughts", (args) => handleSearchThoughts(db, args as Record<string, unknown>)),
   );
 
   // --- list_thoughts ---
@@ -128,9 +181,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         offset: z.number().describe("Pagination offset").optional(),
       },
     },
-    async (args) => {
-      return handleListThoughts(db, args as Record<string, unknown>);
-    },
+    withLogging("list_thoughts", (args) => handleListThoughts(db, args as Record<string, unknown>)),
   );
 
   // --- get_thought ---
@@ -150,9 +201,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         id: z.string().describe("Thought UUID"),
       },
     },
-    async (args) => {
-      return handleGetThought(db, args as Record<string, unknown>);
-    },
+    withLogging("get_thought", (args) => handleGetThought(db, args as Record<string, unknown>)),
   );
 
   // --- update_thought ---
@@ -182,9 +231,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         visibility: z.string().describe("New visibility").optional(),
       },
     },
-    async (args) => {
-      return handleUpdateThought(db, args as Record<string, unknown>);
-    },
+    withLogging("update_thought", (args) => handleUpdateThought(db, args as Record<string, unknown>)),
   );
 
   // --- delete_thought ---
@@ -204,9 +251,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         id: z.string().describe("Thought UUID to delete"),
       },
     },
-    async (args) => {
-      return handleDeleteThought(db, args as Record<string, unknown>);
-    },
+    withLogging("delete_thought", (args) => handleDeleteThought(db, args as Record<string, unknown>)),
   );
 
   // --- manage_edges ---
@@ -232,9 +277,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
         metadata: z.record(z.unknown()).describe("Edge metadata").optional(),
       },
     },
-    async (args) => {
-      return handleManageEdges(db, args as Record<string, unknown>);
-    },
+    withLogging("manage_edges", (args) => handleManageEdges(db, args as Record<string, unknown>)),
   );
 
   // --- explore_graph ---
@@ -262,9 +305,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
           .optional(),
       },
     },
-    async (args) => {
-      return handleExploreGraph(db, args as Record<string, unknown>);
-    },
+    withLogging("explore_graph", (args) => handleExploreGraph(db, args as Record<string, unknown>)),
   );
 
   // --- thought_stats ---
@@ -282,9 +323,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
       },
       inputSchema: {},
     },
-    async () => {
-      return handleThoughtStats(db);
-    },
+    withLogging("thought_stats", () => handleThoughtStats(db)),
   );
 
   // --- Resources ---
@@ -412,6 +451,58 @@ Call \`search_thoughts\` or \`list_thoughts\` before:
       },
     }],
   }));
+
+  // ---------------------------------------------------------------------------
+  // Completion
+  // ---------------------------------------------------------------------------
+  // Provides auto-complete suggestions for prompt arguments and resource
+  // template variables. Agents can call completion/complete to get matching
+  // topics, people, projects, types, and sources from the database.
+
+  server.server.registerCapabilities({ completions: {} });
+  server.server.setRequestHandler(CompleteRequestSchema, async (request) => {
+    const { argument } = request.params;
+    const prefix = argument.value ?? "";
+    let values: string[] = [];
+
+    switch (argument.name) {
+      case "topic":
+      case "topics":
+        values = db.getDistinctArrayValues("topics", prefix);
+        break;
+      case "person":
+      case "people":
+        values = db.getDistinctArrayValues("people", prefix);
+        break;
+      case "project":
+        values = db.getDistinctValues("project", prefix);
+        break;
+      case "type":
+        // Static list — filter by prefix
+        values = ["note", "decision", "task", "question", "reference", "insight"]
+          .filter((t) => t.startsWith(prefix.toLowerCase()));
+        break;
+      case "source":
+        values = db.getDistinctValues("source", prefix);
+        break;
+      case "edge_type":
+        values = (VALID_EDGE_TYPES as readonly string[])
+          .filter((t) => t.startsWith(prefix.toLowerCase()));
+        break;
+      default:
+        break;
+    }
+
+    return {
+      completion: {
+        values,
+        hasMore: false,
+        total: values.length,
+      },
+    };
+  });
+
+  log("info", "server", { event: "started", version: VERSION, db: config.dbPath });
 
   return { server, db };
 }
