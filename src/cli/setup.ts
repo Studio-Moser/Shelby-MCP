@@ -25,12 +25,21 @@ function hasNvm(): boolean {
 
 /**
  * Build the MCP server command entry for JSON configs.
- * When nvm is detected, wraps in a login shell so the profile is sourced
- * and the correct Node version is used.
+ * When nvm is detected, uses absolute paths to the current Node binary and npx,
+ * and sets PATH so that child processes spawned by npx also find the correct Node.
+ * Without the PATH override, npx's child `node` resolves to an old nvm version
+ * that doesn't support modern syntax like `?.` or `??`.
  */
-function buildServerCommand(): { command: string; args: string[] } {
+function buildServerCommand(): { command: string; args: string[]; env?: Record<string, string> } {
   if (hasNvm()) {
-    return { command: "/bin/bash", args: ["-l", "-c", "npx shelbymcp"] };
+    const nodePath = process.execPath;
+    const nodeBinDir = dirname(nodePath);
+    const npxPath = resolve(nodeBinDir, "npx");
+    return {
+      command: nodePath,
+      args: [npxPath, "shelbymcp"],
+      env: { PATH: `${nodeBinDir}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin` },
+    };
   }
   return { command: "npx", args: ["shelbymcp"] };
 }

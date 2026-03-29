@@ -213,18 +213,17 @@ describe("setupCursor", () => {
     expect(getOutput()).toContain("ShelbyMCP MCP server installed for Cursor!");
   });
 
-  it("uses login shell wrapper when nvm is detected", () => {
+  it("uses absolute node/npx paths when nvm is detected", () => {
     process.env.NVM_DIR = "/Users/fake/.nvm";
 
     runSetup("cursor", false);
 
     const configPath = resolve(tempDir, ".cursor/mcp.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    expect(config.mcpServers.shelbymcp).toEqual({
-      type: "stdio",
-      command: "/bin/bash",
-      args: ["-l", "-c", "npx shelbymcp"],
-    });
+    expect(config.mcpServers.shelbymcp.type).toBe("stdio");
+    // Should use absolute paths instead of bare "npx"
+    expect(config.mcpServers.shelbymcp.command).toBe(process.execPath);
+    expect(config.mcpServers.shelbymcp.args[1]).toBe("shelbymcp");
   });
 
   it("does not overwrite existing memory MCP entry", () => {
