@@ -184,7 +184,7 @@ function uninstallGemini(): void {
   try {
     execSync(whichCmd("gemini"), { stdio: "ignore" });
     try {
-      execSync("gemini mcp remove shelbymcp", { stdio: "inherit" });
+      execSync("gemini mcp remove shelbymcp --scope user", { stdio: "inherit" });
       console.log("Removed MCP server from Gemini CLI.");
     } catch {
       console.log("Could not remove via CLI.");

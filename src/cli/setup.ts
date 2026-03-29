@@ -405,11 +405,11 @@ function setupGemini(forage: boolean): void {
   console.log("Adding ShelbyMCP to Gemini CLI (user scope)...\n");
 
   try {
-    execSync("gemini mcp add shelbymcp --scope user -- npx shelbymcp", { stdio: "inherit" });
+    execSync("gemini mcp add shelbymcp npx --scope user -- shelbymcp", { stdio: "inherit" });
     console.log("\nShelbyMCP added to Gemini CLI.");
   } catch {
     console.log("\nCould not add automatically. Run manually:");
-    console.log("  gemini mcp add shelbymcp --scope user -- npx shelbymcp");
+    console.log("  gemini mcp add shelbymcp npx --scope user -- shelbymcp");
   }
 
   // Auto-append Memory Protocol to ~/.gemini/GEMINI.md

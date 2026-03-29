@@ -321,7 +321,7 @@ describe("setupGemini", () => {
 
     expect(mockExec).toHaveBeenCalledWith("which gemini", { stdio: "ignore" });
     expect(mockExec).toHaveBeenCalledWith(
-      "gemini mcp add shelbymcp --scope user -- npx shelbymcp",
+      "gemini mcp add shelbymcp npx --scope user -- shelbymcp",
       { stdio: "inherit" },
     );
 

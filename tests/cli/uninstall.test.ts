@@ -182,7 +182,7 @@ describe("uninstallGemini", () => {
     runUninstall("gemini");
 
     expect(mockExec).toHaveBeenCalledWith("which gemini", { stdio: "ignore" });
-    expect(mockExec).toHaveBeenCalledWith("gemini mcp remove shelbymcp", { stdio: "inherit" });
+    expect(mockExec).toHaveBeenCalledWith("gemini mcp remove shelbymcp --scope user", { stdio: "inherit" });
     // Protocol-only file should be deleted entirely
     expect(existsSync(geminiMdPath)).toBe(false);
     expect(getOutput()).toContain("memories are safe");

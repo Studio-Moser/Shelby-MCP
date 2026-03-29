@@ -184,7 +184,7 @@ The CLI merges the MCP server entry into the Windsurf config file.
 shelbymcp setup gemini --forage
 ```
 
-The CLI uses `gemini mcp add shelbymcp --scope user -- npx shelbymcp` when the Gemini CLI is installed. If not, it falls back to writing `~/.gemini/settings.json` directly. The Memory Protocol is appended to `~/.gemini/GEMINI.md`.
+The CLI uses `gemini mcp add shelbymcp npx --scope user -- shelbymcp` when the Gemini CLI is installed. If not, it falls back to writing `~/.gemini/settings.json` directly. The Memory Protocol is appended to `~/.gemini/GEMINI.md`.
 
 <details>
 <summary>Manual setup</summary>
@@ -192,7 +192,7 @@ The CLI uses `gemini mcp add shelbymcp --scope user -- npx shelbymcp` when the G
 **Via CLI:**
 
 ```bash
-gemini mcp add shelbymcp --scope user -- npx shelbymcp
+gemini mcp add shelbymcp npx --scope user -- shelbymcp
 ```
 
 **Via config file** (`~/.gemini/settings.json`):
