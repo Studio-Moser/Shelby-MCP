@@ -1,5 +1,5 @@
 node_modules
-src
+dist
 tests
 .git
 .claude
