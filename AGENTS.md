@@ -71,6 +71,7 @@ Use `McpServer` + `registerTool()`, NOT the older `Server` + `setRequestHandler(
 ```typescript
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
 const server = new McpServer({
@@ -107,18 +108,24 @@ server.registerTool(
 ### Logging
 ALL logging to `console.error` (stderr). NEVER `console.log` — stdout is the MCP JSON-RPC channel.
 
-### Server startup
+### Server startup (dual transport)
+ShelbyMCP supports two transports selected via `--transport` flag:
+- **stdio** (default): `StdioServerTransport` — local subprocess, one client per process
+- **http**: `StreamableHTTPServerTransport` — HTTP server on configurable host/port, supports multiple concurrent clients
+
+The `McpServer` instance is transport-agnostic — tool registration is identical for both.
+
 ```typescript
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("ShelbyMCP running on stdio");
-}
-main().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exit(1);
-});
+// stdio (default)
+const transport = new StdioServerTransport();
+await server.connect(transport);
+
+// http (--transport http)
+import { startHttpTransport } from "./mcp/http-transport.js";
+await startHttpTransport(server, config.httpHost, config.httpPort);
 ```
+
+The HTTP transport uses Node's built-in `http` module (no Express) in **stateless mode** — each request creates a fresh transport context. This works because ShelbyMCP's state lives in SQLite, not in-memory.
 
 ## Conventions
 

@@ -5,6 +5,10 @@ export interface ShelbyConfig {
   dbPath: string;
   verbose: boolean;
   logFile: string | null;
+  transport: "stdio" | "http";
+  httpPort: number;
+  httpHost: string;
+  apiKey: string | null;
 }
 
 export interface CliCommand {
@@ -53,11 +57,16 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
     return { command: "migrate" };
   }
 
-  // Parse flags for server mode
+  // Parse flags for server mode — env vars provide defaults, CLI flags override
+  const envTransport = process.env.SHELBY_TRANSPORT;
   const config: ShelbyConfig = {
-    dbPath: DEFAULT_DB_PATH,
+    dbPath: process.env.SHELBY_DB_PATH ? resolve(process.env.SHELBY_DB_PATH) : DEFAULT_DB_PATH,
     verbose: false,
     logFile: null,
+    transport: envTransport === "http" || envTransport === "stdio" ? envTransport : "stdio",
+    httpPort: parseInt(process.env.PORT ?? "3100", 10),
+    httpHost: process.env.HOST ?? "127.0.0.1",
+    apiKey: process.env.SHELBY_API_KEY ?? null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -72,9 +81,30 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
       case "--log-file":
         config.logFile = resolve(argv[++i] ?? "");
         break;
+      case "--transport": {
+        const val = argv[++i];
+        if (val === "stdio" || val === "http") {
+          config.transport = val;
+        } else {
+          console.error(`[ERROR] Invalid transport "${val}". Use "stdio" or "http".`);
+          process.exit(1);
+        }
+        break;
+      }
+      case "--port":
+        config.httpPort = parseInt(argv[++i] ?? "3100", 10);
+        break;
+      case "--host":
+        config.httpHost = argv[++i] ?? "127.0.0.1";
+        break;
       case "--version":
         return "version";
     }
+  }
+
+  // Default to 0.0.0.0 for HTTP transport (needed for containers) unless explicitly set
+  if (config.transport === "http" && !process.env.HOST && !argv.includes("--host")) {
+    config.httpHost = "0.0.0.0";
   }
 
   return config;

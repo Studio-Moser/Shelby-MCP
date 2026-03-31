@@ -251,6 +251,7 @@ Works with any AI that has memory or conversation history about you. Run it once
 
 ```
 shelbymcp                          Start the MCP server (stdio)
+shelbymcp --transport http         Start as HTTP server (Streamable HTTP)
 shelbymcp setup <agent>            Set up ShelbyMCP for an agent
 shelbymcp setup <agent> --forage   ...and install the Forage skill
 shelbymcp uninstall <agent>        Remove ShelbyMCP from an agent
@@ -264,20 +265,82 @@ shelbymcp --version                Print version
 
 **Supported agents:** `claude-code`, `claude-desktop`, `cursor`, `codex`, `windsurf`, `gemini`, `antigravity`
 
-**Server flags:** `--db <path>` (custom database path), `--verbose` (debug logging)
+**Server flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--db <path>` | `~/.shelbymcp/memory.db` | Custom database path |
+| `--verbose` | off | Debug logging |
+| `--transport <stdio\|http>` | `stdio` | Transport mode |
+| `--port <number>` | `3100` | HTTP port (only with `--transport http`) |
+| `--host <address>` | `127.0.0.1` | HTTP bind address (only with `--transport http`) |
+
+**Remote server example (Streamable HTTP):**
+
+```bash
+# Start ShelbyMCP as an HTTP server
+shelbymcp --transport http --port 3100
+
+# Connect from Claude Code
+claude mcp add --transport http shelby http://localhost:3100/mcp
+```
 
 See [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) for manual config, platform-specific details, and setup for other MCP-compatible clients.
 
 ---
 
+## Cloud Deployment
+
+ShelbyMCP can run as a remote HTTP server, letting you share one memory database across multiple machines. All configuration is via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `SHELBY_TRANSPORT` | `stdio` | Set to `http` for remote server mode |
+| `PORT` | `3100` | HTTP port (most cloud platforms inject this) |
+| `HOST` | `0.0.0.0` (http) / `127.0.0.1` (stdio) | Bind address |
+| `SHELBY_DB_PATH` | `~/.shelbymcp/memory.db` | SQLite database path (use a persistent volume) |
+| `SHELBY_API_KEY` | *(none)* | Bearer token for auth — **set this for any internet-facing deployment** |
+
+CLI flags (`--transport`, `--port`, `--host`, `--db`) override env vars when both are set.
+
+### Docker
+
+```bash
+docker build -t shelbymcp .
+docker run -d \
+  -e SHELBY_TRANSPORT=http \
+  -e SHELBY_API_KEY=your-secret-key \
+  -v shelby-data:/data \
+  -e SHELBY_DB_PATH=/data/memory.db \
+  -p 3100:3100 \
+  shelbymcp
+```
+
+### Connect from Claude Code
+
+```bash
+claude mcp add --transport http shelby-cloud https://your-server.example.com/mcp \
+  --header "Authorization: Bearer your-secret-key"
+```
+
+### Health Check
+
+`GET /health` returns `200 {"status": "ok"}` (unauthenticated). Configure this as your platform's health check endpoint.
+
+### Auth
+
+When `SHELBY_API_KEY` is set, all requests to `/mcp` require an `Authorization: Bearer <key>` header. Without the key, requests return `401`. If `SHELBY_API_KEY` is not set, auth is disabled (suitable for local-only use).
+
+---
+
 ## Architecture
 
-ShelbyMCP is a single binary that communicates via MCP (stdio JSON-RPC) and stores everything in a single SQLite file.
+ShelbyMCP is a single binary that communicates via MCP and stores everything in a single SQLite file. Supports both **stdio** (local, default) and **Streamable HTTP** (remote/multi-client) transports.
 
 ```
 AI Tool (Claude Code, Cursor, etc.)
     │
-    │ MCP (stdio JSON-RPC)
+    │ MCP (stdio or Streamable HTTP)
     │
     ▼
 ┌──────────────────────┐
@@ -285,7 +348,7 @@ AI Tool (Claude Code, Cursor, etc.)
 │                        │
 │  ┌──────────────────┐ │
 │  │   MCP Protocol    │ │  ← JSON-RPC request/response
-│  │   (stdio)         │ │
+│  │ (stdio or HTTP)   │ │
 │  └────────┬─────────┘ │
 │           │            │
 │  ┌────────▼─────────┐ │

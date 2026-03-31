@@ -17,6 +17,17 @@
         { "type": "positional", "value": "shelbymcp" }
       ],
       "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "npm",
+      "identifier": "shelbymcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "runtimeArguments": [
+        { "type": "positional", "value": "shelbymcp" },
+        { "type": "flag", "name": "--transport", "value": "http" }
+      ],
+      "transport": { "type": "streamableHttp" }
     }
   ]
 }

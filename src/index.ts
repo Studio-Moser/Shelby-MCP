@@ -3,6 +3,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { parseArgs } from "./config.js";
 import { createServer } from "./mcp/server.js";
+import { startHttpTransport } from "./mcp/http-transport.js";
 import { printHelp } from "./cli/help.js";
 import { printProtocol } from "./cli/protocol.js";
 import { printForage } from "./cli/forage.js";
@@ -51,10 +52,15 @@ async function main() {
     console.error(`[INFO] Database: ${config.dbPath}`);
   }
 
-  const { server } = createServer(config);
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("[INFO] ShelbyMCP running on stdio");
+  const { server, db } = createServer(config);
+
+  if (config.transport === "http") {
+    await startHttpTransport(db, config.httpHost, config.httpPort, config.apiKey);
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("[INFO] ShelbyMCP running on stdio");
+  }
 }
 
 main().catch((error) => {

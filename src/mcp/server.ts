@@ -23,12 +23,15 @@ const LOG_LEVELS: LoggingLevel[] = [
 ];
 
 export function createServer(config: ShelbyConfig): { server: McpServer; db: ThoughtDatabase } {
+  const db = new ThoughtDatabase(config.dbPath);
+  return { server: createServerWithDb(db), db };
+}
+
+export function createServerWithDb(db: ThoughtDatabase): McpServer {
   const server = new McpServer({
     name: "shelbymcp",
     version: VERSION,
   });
-
-  const db = new ThoughtDatabase(config.dbPath);
 
   // ---------------------------------------------------------------------------
   // Logging
@@ -85,7 +88,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "capture_thought",
     {
       title: "Capture Thought",
-      description: "Store a thought with metadata, topics, and relationships",
+      description: "Save a note, decision, insight, task, question, or reference to persistent memory. Supports rich metadata (topics, people, project, source) and bulk capture. Use this whenever you learn something worth remembering across sessions — decisions made, user preferences, architecture choices, or project context.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -132,8 +135,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "search_thoughts",
     {
       title: "Search Thoughts",
-      description:
-        "Full-text search with optional vector reranking. Returns summaries, not full content.",
+      description: "Search persistent memory by keyword or semantic similarity. Use before starting work on any topic to recall prior decisions, context, and preferences. Returns summaries — call get_thought for full content. Supports filtering by type and project.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -161,7 +163,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "list_thoughts",
     {
       title: "List Thoughts",
-      description: "Browse and filter thoughts by type, topic, person, project, or date range",
+      description: "Browse and filter memories by type, topic, person, project, source, or date range. Use to see what's been captured recently, find all decisions for a project, or list thoughts mentioning a specific person. Complementary to search_thoughts — this filters by structured fields rather than free-text.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -190,7 +192,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "get_thought",
     {
       title: "Get Thought",
-      description: "Retrieve a specific thought by ID with full content",
+      description: "Retrieve the full content of a specific memory by its UUID. Use after search_thoughts or list_thoughts return a summary you need to read in full. Returns all fields including content, metadata, topics, people, and timestamps.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -210,7 +212,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "update_thought",
     {
       title: "Update Thought",
-      description: "Update content or metadata on one or more thoughts",
+      description: "Update an existing memory's content, summary, type, topics, people, project, or metadata. Use to correct outdated information instead of creating duplicates. Supports bulk updates by passing multiple IDs.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -240,7 +242,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "delete_thought",
     {
       title: "Delete Thought",
-      description: "Remove a thought and its edges",
+      description: "Permanently delete a memory and all its relationship edges. Use to remove outdated, incorrect, or duplicate entries. This is destructive and cannot be undone.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -260,7 +262,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "manage_edges",
     {
       title: "Manage Edges",
-      description: "Create or remove typed relationships between thoughts",
+      description: "Link or unlink two memories with a typed relationship (refines, cites, refuted_by, tags, related, follows). Use to build a knowledge graph — connect decisions to the tasks they affect, references to the insights they support, or chain a sequence of related thoughts.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -286,7 +288,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "explore_graph",
     {
       title: "Explore Graph",
-      description: "Traverse the knowledge graph from a starting thought",
+      description: "Walk the knowledge graph outward from a starting memory. Returns connected thoughts up to a configurable depth (max 5). Use to discover related context — e.g., find all decisions linked to a task, or trace how an insight connects to references and other notes.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -314,7 +316,7 @@ export function createServer(config: ShelbyConfig): { server: McpServer; db: Tho
     "thought_stats",
     {
       title: "Thought Stats",
-      description: "Aggregate statistics about the memory database",
+      description: "Get a summary of the memory database — total thoughts, breakdowns by type/project/topic, edge counts, and recent activity. Use to understand the current state of memory or verify captures are working.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -502,7 +504,7 @@ Call \`search_thoughts\` or \`list_thoughts\` before:
     };
   });
 
-  log("info", "server", { event: "started", version: VERSION, db: config.dbPath });
+  log("info", "server", { event: "started", version: VERSION });
 
-  return { server, db };
+  return server;
 }
