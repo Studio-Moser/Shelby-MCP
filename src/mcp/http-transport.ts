@@ -1,41 +1,79 @@
-import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ThoughtDatabase } from "../db/database.js";
 import { createServerWithDb } from "./server.js";
+import { createOAuthHandlers, verifyBearerToken } from "./oauth.js";
 
 const MCP_PATH = "/mcp";
 const HEALTH_PATH = "/health";
+const OAUTH_METADATA_PATH = "/.well-known/oauth-authorization-server";
+const REGISTER_PATH = "/register";
+const AUTHORIZE_PATH = "/authorize";
+const TOKEN_PATH = "/token";
 
 export async function startHttpTransport(
   db: ThoughtDatabase,
   host: string,
   port: number,
   apiKey: string | null,
-): Promise<void> {
+): Promise<Server> {
+  const oauthHandlers = apiKey ? createOAuthHandlers(db, apiKey) : null;
+
   const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const path = url.pathname;
 
-    // Health check — always unauthenticated
-    if (url.pathname === HEALTH_PATH && req.method === "GET") {
+    // --- Health check ---
+    if (path === HEALTH_PATH && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
 
-    if (url.pathname !== MCP_PATH) {
+    // --- OAuth endpoints (503 if apiKey not configured) ---
+    if (path === OAUTH_METADATA_PATH && req.method === "GET") {
+      if (!oauthHandlers) { return sendOAuthNotConfigured(res); }
+      oauthHandlers.handleMetadata(req, res);
+      return;
+    }
+
+    if (path === REGISTER_PATH && req.method === "POST") {
+      if (!oauthHandlers) { return sendOAuthNotConfigured(res); }
+      await oauthHandlers.handleRegister(req, res);
+      return;
+    }
+
+    if (path === AUTHORIZE_PATH && (req.method === "GET" || req.method === "POST")) {
+      if (!oauthHandlers) { return sendOAuthNotConfigured(res); }
+      await oauthHandlers.handleAuthorize(req, res);
+      return;
+    }
+
+    if (path === TOKEN_PATH && req.method === "POST") {
+      if (!oauthHandlers) { return sendOAuthNotConfigured(res); }
+      await oauthHandlers.handleToken(req, res);
+      return;
+    }
+
+    // --- MCP endpoint ---
+    if (path !== MCP_PATH) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Not found" }));
       return;
     }
 
-    // Bearer token auth
-    if (apiKey && !verifyAuth(req, apiKey)) {
-      res.writeHead(401, {
-        "Content-Type": "application/json",
-        "WWW-Authenticate": "Bearer",
-      });
-      res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null }));
-      return;
+    // Bearer token auth for MCP
+    if (apiKey) {
+      const header = req.headers.authorization ?? "";
+      const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+      if (!verifyBearerToken(token, apiKey)) {
+        res.writeHead(401, {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer",
+        });
+        res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null }));
+        return;
+      }
     }
 
     if (req.method === "POST") {
@@ -73,13 +111,16 @@ export async function startHttpTransport(
     res.end(JSON.stringify({ error: "Method not allowed" }));
   });
 
-  httpServer.listen(port, host, () => {
-    console.error(`[INFO] ShelbyMCP running on http://${host}:${port}${MCP_PATH}`);
-    if (apiKey) {
-      console.error("[INFO] Bearer token auth enabled");
-    } else {
-      console.error("[WARN] No SHELBY_API_KEY set — running without auth");
-    }
+  await new Promise<void>((resolve) => {
+    httpServer.listen(port, host, () => {
+      console.error(`[INFO] ShelbyMCP running on http://${host}:${port}${MCP_PATH}`);
+      if (apiKey) {
+        console.error("[INFO] Bearer token auth enabled (OAuth + legacy Bearer)");
+      } else {
+        console.error("[WARN] No SHELBY_API_KEY set — running without auth");
+      }
+      resolve();
+    });
   });
 
   const shutdown = () => {
@@ -89,13 +130,16 @@ export async function startHttpTransport(
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  return httpServer;
 }
 
-function verifyAuth(req: IncomingMessage, apiKey: string): boolean {
-  const header = req.headers.authorization;
-  if (!header) return false;
-  const [scheme, token] = header.split(" ", 2);
-  return scheme === "Bearer" && token === apiKey;
+function sendOAuthNotConfigured(res: ServerResponse): void {
+  res.writeHead(503, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({
+    error: "oauth_not_configured",
+    error_description: "Set SHELBY_API_KEY to enable OAuth",
+  }));
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
