@@ -28,7 +28,7 @@ describe("ThoughtDatabase", () => {
 
   it("runs migrations to latest version", () => {
     db = new ThoughtDatabase(":memory:");
-    expect(db.getSchemaVersion()).toBe(1);
+    expect(db.getSchemaVersion()).toBe(2);
   });
 
   it("creates thoughts table", () => {
@@ -59,6 +59,14 @@ describe("ThoughtDatabase", () => {
     db = new ThoughtDatabase(":memory:");
     // Simulate re-running migrations on same version
     const version = db.getSchemaVersion();
-    expect(version).toBe(1);
+    expect(version).toBe(2);
+  });
+
+  it("creates oauth_clients table after migration", () => {
+    db = new ThoughtDatabase(":memory:");
+    const tables = db.db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_clients'`)
+      .all() as { name: string }[];
+    expect(tables).toHaveLength(1);
   });
 });

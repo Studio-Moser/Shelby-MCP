@@ -74,6 +74,20 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    description: "OAuth 2.1 — oauth_clients table",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+          client_id     TEXT PRIMARY KEY,
+          client_name   TEXT,
+          redirect_uris TEXT NOT NULL,
+          registered_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function getSchemaVersion(db: Database.Database): number {
