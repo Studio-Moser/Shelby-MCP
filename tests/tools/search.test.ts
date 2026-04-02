@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleSearchThoughts } from "../../src/tools/search.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
+import { handleManageEdges } from "../../src/tools/graph.js";
 import { storeEmbedding } from "../../src/db/vectors.js";
 
 let db: ThoughtDatabase;
@@ -83,5 +84,76 @@ describe("handleSearchThoughts", () => {
     const result = handleSearchThoughts(db, { query: "testing search limit", limit: 2 });
     const data = parseResult(result);
     expect(data.results.length).toBeLessThanOrEqual(2);
+  });
+
+  it("graph_depth: 0 (default) returns no graph_related field", () => {
+    captureId("Node alpha for graph test");
+    const result = handleSearchThoughts(db, { query: "alpha graph" });
+    const data = parseResult(result);
+    expect(data.graph_related).toBeUndefined();
+  });
+
+  it("graph_depth: 1 returns connected thoughts in graph_related", () => {
+    // idA is the FTS match; idB uses completely different vocabulary so it
+    // won't appear in the FTS results — only via graph traversal.
+    const idA = captureId("Zephyr constellation discovery alpha");
+    const idB = captureId("Unrelated vocabulary fjord tundra xylophone");
+
+    // Link A -> B
+    handleManageEdges(db, {
+      action: "link",
+      source_id: idA,
+      target_id: idB,
+      edge_type: "related",
+    });
+
+    const result = handleSearchThoughts(db, { query: "zephyr constellation", graph_depth: 1 });
+    const data = parseResult(result);
+    expect(data.graph_related).toBeDefined();
+    expect(Array.isArray(data.graph_related)).toBe(true);
+    const relatedIds = data.graph_related.map((r: { id: string }) => r.id);
+    expect(relatedIds).toContain(idB);
+  });
+
+  it("graph_related thoughts include depth and edge metadata", () => {
+    // Again use vocabulary that separates the FTS match from the graph neighbor
+    const idA = captureId("Quasar nebula spectral alpha source");
+    const idB = captureId("Completely different fjord vocabulary neighbor");
+
+    handleManageEdges(db, {
+      action: "link",
+      source_id: idA,
+      target_id: idB,
+      edge_type: "follows",
+    });
+
+    const result = handleSearchThoughts(db, { query: "quasar nebula spectral", graph_depth: 1 });
+    const data = parseResult(result);
+    const neighbor = data.graph_related?.find((r: { id: string }) => r.id === idB);
+    expect(neighbor).toBeDefined();
+    expect(neighbor.depth).toBe(1);
+    expect(neighbor.via_edge_type).toBe("follows");
+    expect(neighbor.direction).toBeDefined();
+  });
+
+  it("graph_related does not duplicate results already in the main result set", () => {
+    const idA = captureId("Unique node for dedup check");
+    const idB = captureId("Unique node secondary dedup check");
+
+    handleManageEdges(db, {
+      action: "link",
+      source_id: idA,
+      target_id: idB,
+      edge_type: "related",
+    });
+
+    const result = handleSearchThoughts(db, { query: "unique node", graph_depth: 1 });
+    const data = parseResult(result);
+    const resultIds = data.results.map((r: { id: string }) => r.id);
+    const graphIds = (data.graph_related ?? []).map((r: { id: string }) => r.id);
+    // No ID should appear in both lists
+    for (const id of graphIds) {
+      expect(resultIds).not.toContain(id);
+    }
   });
 });
