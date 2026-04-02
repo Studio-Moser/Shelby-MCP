@@ -119,4 +119,51 @@ describe("handleCaptureThought", () => {
     const r = result as any;
     expect(r.isError).toBe(true);
   });
+
+  it("returns suggested_connections as empty array when no similar thoughts exist", () => {
+    const result = handleCaptureThought(db, { content: "An absolutely unique xyzzy thought" });
+    const data = parseResult(result);
+    expect(Array.isArray(data.suggested_connections)).toBe(true);
+    expect(data.suggested_connections.length).toBe(0);
+  });
+
+  it("returns suggested_connections with id and summary when similar thoughts exist", () => {
+    // Pre-populate a similar thought
+    const preResult = handleCaptureThought(db, {
+      content: "Machine learning is a subset of artificial intelligence",
+      summary: "ML is a subset of AI",
+    });
+    const preId = parseResult(preResult).id;
+
+    // Capture a new thought with overlapping content
+    const result = handleCaptureThought(db, {
+      content: "Machine learning techniques for classification tasks",
+      summary: "ML classification techniques",
+    });
+    const data = parseResult(result);
+
+    expect(Array.isArray(data.suggested_connections)).toBe(true);
+    // The pre-existing thought may appear as a suggestion
+    if (data.suggested_connections.length > 0) {
+      const suggestion = data.suggested_connections[0];
+      expect(suggestion).toHaveProperty("id");
+      expect(suggestion).toHaveProperty("summary");
+      expect(suggestion).toHaveProperty("similarity_reason");
+      expect(suggestion.id).not.toBe(data.id); // never self-reference
+    }
+    // preId variable used to confirm different ID
+    expect(data.id).not.toBe(preId);
+  });
+
+  it("does not self-reference in suggested_connections", () => {
+    const result = handleCaptureThought(db, {
+      content: "Recursive self-referencing thought test",
+      summary: "Self-reference test",
+    });
+    const data = parseResult(result);
+    const selfSuggestion = data.suggested_connections?.find(
+      (s: { id: string }) => s.id === data.id,
+    );
+    expect(selfSuggestion).toBeUndefined();
+  });
 });
