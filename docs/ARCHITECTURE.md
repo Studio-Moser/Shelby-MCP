@@ -573,10 +573,67 @@ The database schema defined in this document (thoughts, edges, thoughts_fts tabl
 
 ---
 
+## Retrieval Architecture
+
+ShelbyMCP implements a three-mode retrieval system that maps to the GraphRAG pattern used by LightRAG, Microsoft GraphRAG, and similar systems — but with a key philosophical difference.
+
+### Three Retrieval Modes
+
+| Mode | Implementation | When to use |
+|---|---|---|
+| **Full-text search (FTS5)** | `searchThoughts()` in `fts.ts`. BM25 ranking over content. Porter tokenizer handles stemming + Unicode. | Default. Fast, zero-cost, works without embeddings. |
+| **Vector search** | `searchByEmbedding()` in `vectors.ts`. Cosine similarity over 1536-dim float32 vectors. Linear scan. | When semantic similarity matters more than keyword matching. Requires embeddings to be populated. |
+| **Hybrid** | FTS first (3x pool), reranked by embedding cosine similarity. Implemented in `search.ts`. | Best quality when embeddings are available. Falls back gracefully to FTS-only. |
+
+All three modes are exposed through a single `search_thoughts` tool. The mode is auto-detected: text query → FTS, embedding param → vector, both → hybrid.
+
+### Graph Traversal (Separate)
+
+`explore_graph` in `graph.ts` does breadth-first traversal from a starting thought, up to depth 5, with optional edge type filtering. This is currently a **separate tool call** from search.
+
+**Known gap**: In GraphRAG systems (LightRAG, Microsoft GraphRAG), a single query combines vector/FTS retrieval with graph traversal. Shelby requires two tool calls to get relationship-aware results. A future `graph_depth` parameter on `search_thoughts` could close this gap.
+
+### How This Differs from GraphRAG
+
+GraphRAG systems (LightRAG, Microsoft GraphRAG, Cognee) are "smart server" architectures — the server runs LLM inference to extract entities and relationships from raw documents at ingest time. This is expensive but automatic.
+
+ShelbyMCP is "smart agent, dumb server" — the server runs zero inference. Agents provide structured metadata, summaries, and explicit edge relationships at capture time. The Forage skill backfills embeddings using the user's existing AI subscription.
+
+| | GraphRAG Systems | ShelbyMCP |
+|---|---|---|
+| Entity extraction | Server-side LLM inference at ingest | Agent provides at capture time |
+| Relationship discovery | Automatic (LLM-inferred) | Manual (agent calls `manage_edges`) |
+| Embedding generation | Always, at ingest | Optional, Forage backfills |
+| Infrastructure | Docker + API keys | Single SQLite file |
+| Ongoing cost | Per-document embedding + inference | Zero |
+
+This is a deliberate tradeoff: ShelbyMCP sacrifices automatic relationship discovery for zero infrastructure, zero cost, and higher-quality metadata. The agent doing the capturing is already an LLM — it classifies, summarizes, and identifies relationships as part of its normal reasoning.
+
+### Embedding Strategy
+
+Embeddings are **optional by design**. The system works without them (FTS-only). When present, they enable vector and hybrid search modes.
+
+**Current embedding sources:**
+- **Forage skill**: Scheduled enrichment that lists thoughts without embeddings, generates them, and backfills via `update_thought`. Uses the user's AI subscription.
+- **Shelby for Mac**: `EmbeddingService.swift` generates embeddings at capture time via API or on-device models.
+- **Direct API**: Any MCP client can pass an `embedding` param to `search_thoughts` for vector search, or provide embeddings via `capture_thought` metadata.
+
+**Future consideration**: On-device embedding generation via Apple Foundation Models or ONNX in-process (see the [knowledge-rag](https://github.com/lyonzin/knowledge-rag) MCP server for a reference implementation of the ONNX approach). This would eliminate API dependency entirely.
+
+### Future Retrieval Improvements
+
+1. **Graph-aware search**: Add optional `graph_depth` param to `search_thoughts`. After FTS/vector retrieval, traverse N hops of graph edges from each result and include related thoughts. Reduces agent tool calls and surfaces relationship-aware results in one step.
+2. **Auto-edge suggestions**: Return suggested relationships in `capture_thought` responses based on content similarity to existing thoughts. Agent confirms or dismisses via `manage_edges`.
+3. **Temporal edges**: Add `valid_from`/`valid_until` to the edge schema for temporal fact resolution (Zep Graphiti pattern). Enables reasoning about knowledge evolution.
+4. **sqlite-vec**: When the npm package matures, replace custom cosine similarity with sqlite-vec's optimized implementation for faster vector search at scale.
+
+For the full ecosystem analysis, see [RAG Ecosystem & Graph Retrieval](../../Shelby-Strategy/Research/RAG%20Ecosystem%20%26%20Graph%20Retrieval.md) in Shelby-Strategy.
+
+---
+
 ## Future Considerations
 
 - **Streamable HTTP transport**: The MCP spec (2025-11-25) introduced Streamable HTTP transport replacing the older SSE transport. This is the standard path for remote MCP access — use `NodeStreamableHTTPServerTransport` from the SDK (with `createMcpExpressApp()` or `createMcpHonoApp()` for DNS rebinding protection) rather than building a custom REST API. Enables remote clients, web UIs, and multi-machine setups.
-- **sqlite-vec integration**: When the npm package matures, replace custom cosine similarity with sqlite-vec's optimized implementation
 - **Plugin system**: Allow community-built Forage tasks
 - **Multi-user**: Scoped memory access for team scenarios
 - **Dynamic tool loading**: For users who find 9 tools too many, support a `--tools` CLI flag to load only specified tools. Speakeasy demonstrated 96%+ input token reduction with dynamic tool loading. Low priority — 9 tools is within the recommended range.
