@@ -88,7 +88,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "capture_thought",
     {
       title: "Capture Thought",
-      description: "Save a note, decision, insight, task, question, or reference to persistent memory. Supports rich metadata (topics, people, project, source) and bulk capture. Use this whenever you learn something worth remembering across sessions — decisions made, user preferences, architecture choices, or project context.",
+      description: "Persist a thought, decision, insight, task, question, or reference to long-term memory. Use whenever something is worth remembering across sessions: architecture choices, user preferences, project goals, bug root causes, or key facts. Supports optional metadata (topics, people, project, source) and bulk capture via the thoughts[] array. Always include a one-line summary so the thought is findable via search_thoughts.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -135,7 +135,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "search_thoughts",
     {
       title: "Search Thoughts",
-      description: "Search persistent memory by keyword or semantic similarity. Use before starting work on any topic to recall prior decisions, context, and preferences. Returns summaries — call get_thought for full content. Supports filtering by type and project.",
+      description: "Search long-term memory by keyword (FTS) or vector similarity, or both (hybrid). Call this before starting any task, making any decision, or when the user asks what you remember about a topic. Returns matching thought summaries with IDs — call get_thought to read full content. Supports graph_depth for GraphRAG-style retrieval: after FTS/vector results are found, traverse N hops of graph edges and include related thoughts in the response.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -152,6 +152,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         offset: z.number().describe("Pagination offset").optional(),
         type: z.string().describe("Filter by thought type").optional(),
         project: z.string().describe("Filter by project").optional(),
+        graph_depth: z.number().describe("Graph traversal depth after retrieval (0 = none, max 5). When >= 1, related thoughts reachable via graph edges are included in graph_related.").optional(),
       },
     },
     withLogging("search_thoughts", (args) => handleSearchThoughts(db, args as Record<string, unknown>)),
@@ -163,7 +164,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "list_thoughts",
     {
       title: "List Thoughts",
-      description: "Browse and filter memories by type, topic, person, project, source, or date range. Use to see what's been captured recently, find all decisions for a project, or list thoughts mentioning a specific person. Complementary to search_thoughts — this filters by structured fields rather than free-text.",
+      description: "Browse and filter memories using structured fields: type, topic, person, project, source, or date range. Use when you want to enumerate all thoughts of a category (e.g., all decisions for a project, all thoughts mentioning a person, thoughts captured this week) rather than searching by keyword. Complementary to search_thoughts — use list_thoughts to browse by metadata, search_thoughts to find by content.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -192,7 +193,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "get_thought",
     {
       title: "Get Thought",
-      description: "Retrieve the full content of a specific memory by its UUID. Use after search_thoughts or list_thoughts return a summary you need to read in full. Returns all fields including content, metadata, topics, people, and timestamps.",
+      description: "Fetch the complete content of a single memory by UUID. Use after search_thoughts or list_thoughts returns a summary that you need to read in full — those tools only return summaries and IDs. Returns all fields: content, summary, type, topics, people, project, source, metadata, and timestamps.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -212,7 +213,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "update_thought",
     {
       title: "Update Thought",
-      description: "Update an existing memory's content, summary, type, topics, people, project, or metadata. Use to correct outdated information instead of creating duplicates. Supports bulk updates by passing multiple IDs.",
+      description: "Modify an existing memory — correct outdated content, add a missing summary, reclassify the type, or update topics and people. Always prefer update_thought over deleting and re-creating. Supports bulk updates by passing multiple IDs in the ids[] array. Use this when the user says something has changed or was saved incorrectly.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -242,7 +243,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "delete_thought",
     {
       title: "Delete Thought",
-      description: "Permanently delete a memory and all its relationship edges. Use to remove outdated, incorrect, or duplicate entries. This is destructive and cannot be undone.",
+      description: "Permanently remove a memory and all its relationship edges from the database. Use only for truly obsolete or duplicate entries — prefer update_thought for corrections. Destructive and cannot be undone. Requires the thought's UUID.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -262,7 +263,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "manage_edges",
     {
       title: "Manage Edges",
-      description: "Link or unlink two memories with a typed relationship (refines, cites, refuted_by, tags, related, follows). Use to build a knowledge graph — connect decisions to the tasks they affect, references to the insights they support, or chain a sequence of related thoughts.",
+      description: "Create or remove a typed relationship edge between two memories. Use to build a knowledge graph: connect a decision to the tasks it affects, a reference to the insight it supports, or chain a sequence of thoughts with follows. Also use to confirm suggested_connections returned by capture_thought. Edge types: refines, cites, refuted_by, tags, related, follows.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -288,7 +289,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "explore_graph",
     {
       title: "Explore Graph",
-      description: "Walk the knowledge graph outward from a starting memory. Returns connected thoughts up to a configurable depth (max 5). Use to discover related context — e.g., find all decisions linked to a task, or trace how an insight connects to references and other notes.",
+      description: "Traverse the knowledge graph outward from a starting memory, returning all connected thoughts up to a configurable depth (max 5). Use to discover related context for a specific thought — e.g., find all decisions and references linked to a task, trace how an insight connects to supporting references, or understand the full neighborhood around a memory. For combined retrieval + traversal in one call, use search_thoughts with graph_depth instead.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -316,7 +317,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "thought_stats",
     {
       title: "Thought Stats",
-      description: "Get a summary of the memory database — total thoughts, breakdowns by type/project/topic, edge counts, and recent activity. Use to understand the current state of memory or verify captures are working.",
+      description: "Get aggregate statistics about the memory database: total thought count, breakdown by type, top topics and projects, edge count, and recent activity. Use to audit the state of memory, verify that capture_thought calls are persisting, or understand what categories of knowledge have been accumulated.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,

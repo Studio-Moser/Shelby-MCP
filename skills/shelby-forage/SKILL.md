@@ -12,7 +12,7 @@ You have access to the ShelbyMCP memory tools. Run the tasks below in order, ski
 
 ## Before You Start
 
-1. Determine today's date and day of the week. Tasks 6 and 7 only run on Mondays.
+1. Determine today's date and day of the week. Tasks 7 and 8 only run on Mondays.
 2. Check the last forage log: use `search_thoughts` with query `"Forage run"` and `limit: 1` to find the most recent run. Read it with `get_thought` to see what was done last time — how many summaries were backfilled, what was consolidated, any notes about remaining work. Use this to pick up where the last run left off (e.g., if the log says "42 thoughts still missing summaries", prioritize the summary backfill).
 
 ## Task 1: Summary Backfill
@@ -25,7 +25,17 @@ Summaries are critical — search results only show summaries, not full content.
 4. Use `update_thought` to set the `summary` field. Set `source: "forage"` if you're also correcting other fields
 5. If `has_more` is true, note the remaining count — you'll catch them on the next run
 
-## Task 2: Auto-Classify
+## Task 2: Embedding Backfill
+
+Embeddings power vector and hybrid search. Thoughts captured without an embedding are invisible to vector-based retrieval. This task ensures the vector infrastructure is actively utilized.
+
+1. Use `list_thoughts` with `limit: 50` to get recent thoughts
+2. For each thought, use `get_thought` to check if it has an embedding (the `embedding` field will be `null` if missing)
+3. For thoughts missing embeddings, call `update_thought` with a `source: "forage"` note in metadata — the ShelbyMCP server will re-index on next load. **Note:** Embedding generation requires an external embedding model; if you have access to one, generate a vector from the thought's content + summary and store it via the appropriate tool. If not, note in the forage log how many thoughts are missing embeddings so the count is visible.
+4. Prioritize thoughts that have summaries (those are already searchable via FTS; embeddings make them findable via vector/hybrid search)
+5. If `has_more` is true, note the remaining count — catch them on the next run
+
+## Task 3: Auto-Classify
 
 Find thoughts with missing or sparse metadata and improve their classification.
 
@@ -36,7 +46,7 @@ Find thoughts with missing or sparse metadata and improve their classification.
    - People mentioned (if the `people` array is empty)
 3. Use `update_thought` to apply the corrections — only update fields that actually need changing
 
-## Task 3: Consolidation
+## Task 4: Consolidation
 
 Find duplicate or very similar thoughts and merge them. Be conservative — only merge when thoughts are genuinely saying the same thing, not just related.
 
@@ -46,7 +56,7 @@ Find duplicate or very similar thoughts and merge them. Be conservative — only
    - Use `update_thought` on each original to set `consolidated_into` to the new thought's ID
    - Carry over any edges from the originals to the new thought using `manage_edges` with `action: "link"`
 
-## Task 4: Contradiction Detection
+## Task 5: Contradiction Detection
 
 Look for thoughts that disagree with each other — these are high-value signals that something has changed and the user should be aware.
 
@@ -61,7 +71,7 @@ Look for thoughts that disagree with each other — these are high-value signals
 
 Minor wording differences or natural evolution of thinking don't count as contradictions. Focus on factual disagreements.
 
-## Task 5: Connection Discovery
+## Task 6: Connection Discovery
 
 Find thoughts that should be related but aren't linked yet.
 
@@ -74,7 +84,7 @@ Find thoughts that should be related but aren't linked yet.
    - `follows` — thought B is a consequence or next step of thought A
 4. Check existing edges first via `explore_graph` to avoid duplicating relationships
 
-## Task 6: Stale Sweep (Mondays only)
+## Task 7: Stale Sweep (Mondays only)
 
 Skip this task unless today is Monday.
 
@@ -94,7 +104,7 @@ Find *actionable* tasks that may have been forgotten. The goal is to surface thi
    - Content: the original task content, when it was created, and why it looks forgotten
    - Link it to the original task using `manage_edges` with `action: "link"` and `edge_type: "related"`
 
-## Task 7: Digest (Mondays only)
+## Task 8: Digest (Mondays only)
 
 Skip this task unless today is Monday.
 
@@ -108,7 +118,7 @@ Generate a summary of the week's thinking.
    - Summary: "Weekly digest — [date range]"
    - Content: structured digest covering key decisions, open questions, active tasks, and emerging themes
 
-## Task 8: Forage Log
+## Task 9: Forage Log
 
 At the end of every run, capture a brief log of what you did. This serves as an audit trail and helps future runs avoid re-processing.
 

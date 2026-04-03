@@ -94,8 +94,8 @@ export async function startHttpTransport(
         }
       } finally {
         res.on("close", () => {
-          transport.close();
-          server.close();
+          void transport.close();
+          void server.close();
         });
       }
       return;
