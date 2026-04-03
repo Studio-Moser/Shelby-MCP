@@ -32,7 +32,7 @@ function findSuggestedConnections(
   if (!sanitized) return [];
 
   const ftsResult = searchThoughts(db.db, {
-    query: searchText,
+    query: sanitized,
     limit: SUGGESTION_LIMIT + 1, // +1 to account for possible self-match
     offset: 0,
   });

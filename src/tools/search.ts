@@ -1,4 +1,5 @@
 import type { ThoughtDatabase } from "../db/database.js";
+import { fetchGraphRelated } from "../db/edges.js";
 import { searchThoughts } from "../db/fts.js";
 import { searchByEmbedding, bufferToEmbedding, cosineSimilarity } from "../db/vectors.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
@@ -11,102 +12,6 @@ interface SearchArgs {
   type?: string;
   project?: string;
   graph_depth?: number;
-}
-
-interface GraphRelatedThought {
-  id: string;
-  summary: string | null;
-  type: string;
-  depth: number;
-  via_edge_type: string;
-  direction: "outgoing" | "incoming";
-}
-
-/**
- * After retrieving a set of result IDs, traverse their graph edges up to
- * graph_depth hops and return related thoughts not already in the result set.
- */
-function fetchGraphRelated(
-  db: ThoughtDatabase,
-  resultIds: string[],
-  graphDepth: number,
-): GraphRelatedThought[] {
-  if (graphDepth <= 0 || resultIds.length === 0) return [];
-
-  const effectiveDepth = Math.min(Math.max(graphDepth, 1), 5);
-  const seen = new Set<string>(resultIds);
-  const related: GraphRelatedThought[] = [];
-
-  // BFS from all result nodes simultaneously
-  type QueueItem = { id: string; depth: number };
-  const queue: QueueItem[] = resultIds.map((id) => ({ id, depth: 0 }));
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (current.depth >= effectiveDepth) continue;
-
-    // Outgoing edges
-    const outgoing = db.db
-      .prepare(
-        `SELECT e.edge_type, e.target_id, t.summary, t.type
-         FROM edges e
-         JOIN thoughts t ON t.id = e.target_id
-         WHERE e.source_id = ?`,
-      )
-      .all(current.id) as Array<{
-      edge_type: string;
-      target_id: string;
-      summary: string | null;
-      type: string;
-    }>;
-
-    for (const row of outgoing) {
-      if (!seen.has(row.target_id)) {
-        seen.add(row.target_id);
-        related.push({
-          id: row.target_id,
-          summary: row.summary,
-          type: row.type,
-          depth: current.depth + 1,
-          via_edge_type: row.edge_type,
-          direction: "outgoing",
-        });
-        queue.push({ id: row.target_id, depth: current.depth + 1 });
-      }
-    }
-
-    // Incoming edges
-    const incoming = db.db
-      .prepare(
-        `SELECT e.edge_type, e.source_id, t.summary, t.type
-         FROM edges e
-         JOIN thoughts t ON t.id = e.source_id
-         WHERE e.target_id = ?`,
-      )
-      .all(current.id) as Array<{
-      edge_type: string;
-      source_id: string;
-      summary: string | null;
-      type: string;
-    }>;
-
-    for (const row of incoming) {
-      if (!seen.has(row.source_id)) {
-        seen.add(row.source_id);
-        related.push({
-          id: row.source_id,
-          summary: row.summary,
-          type: row.type,
-          depth: current.depth + 1,
-          via_edge_type: row.edge_type,
-          direction: "incoming",
-        });
-        queue.push({ id: row.source_id, depth: current.depth + 1 });
-      }
-    }
-  }
-
-  return related;
 }
 
 export function handleSearchThoughts(
