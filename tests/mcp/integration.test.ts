@@ -256,4 +256,43 @@ describe("MCP Integration", () => {
     // Search results should NOT include full content
     expect(hit.content).toBeUndefined();
   });
+
+  // ---- 11. Expire edge and verify traversal ----
+  it("expire hides edge from explore_graph", async () => {
+    const r1 = await client.callTool({
+      name: "capture_thought",
+      arguments: { content: "Temporal root", summary: "Root" },
+    });
+    const r2 = await client.callTool({
+      name: "capture_thought",
+      arguments: { content: "Temporal child", summary: "Child" },
+    });
+    const idA = (parseResult(r1) as { id: string }).id;
+    const idB = (parseResult(r2) as { id: string }).id;
+
+    const linkResult = await client.callTool({
+      name: "manage_edges",
+      arguments: { action: "link", source_id: idA, target_id: idB, edge_type: "related" },
+    });
+    const edgeId = (parseResult(linkResult) as { edge_id: string }).edge_id;
+
+    await client.callTool({
+      name: "manage_edges",
+      arguments: { action: "expire", edge_id: edgeId, valid_until: "2020-01-01T00:00:00.000Z" },
+    });
+
+    const exploreResult = await client.callTool({
+      name: "explore_graph",
+      arguments: { thought_id: idA, max_depth: 1 },
+    });
+    const graph = parseResult(exploreResult) as { node_count: number };
+    expect(graph.node_count).toBe(1);
+
+    const fullResult = await client.callTool({
+      name: "explore_graph",
+      arguments: { thought_id: idA, max_depth: 1, include_expired: true },
+    });
+    const fullGraph = parseResult(fullResult) as { node_count: number };
+    expect(fullGraph.node_count).toBe(2);
+  });
 });

@@ -347,7 +347,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
   }, async () => ({
     contents: [{
       uri: "shelbymcp://status",
-      text: JSON.stringify({ status: "ok", tools: 8, prompts: 3 }),
+      text: JSON.stringify({ status: "ok", tools: 9, prompts: 3 }),
       mimeType: "application/json",
     }],
   }));
