@@ -7,6 +7,7 @@ import {
   getEdgesBetween,
   getConnections,
   traverseGraph,
+  expireEdge,
 } from "../../src/db/edges.js";
 
 // Helper to insert a test thought directly
@@ -415,6 +416,118 @@ describe("Edge operations", () => {
       expect(root.edges[0].edge_type).toBe("refines");
       expect(root.edges[0].connected_to).toBe("t2");
       expect(root.edges[0].direction).toBe("outgoing");
+    });
+  });
+
+  describe("temporal edges", () => {
+    it("linkThoughts stores valid_from and valid_until", () => {
+      insertThought(db, "t1", "Thought 1");
+      insertThought(db, "t2", "Thought 2");
+      const edgeId = linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t2",
+        edge_type: "related",
+        valid_from: "2026-01-01T00:00:00.000Z",
+        valid_until: "2026-12-31T23:59:59.000Z",
+      });
+      const edge = getEdge(db, edgeId);
+      expect(edge!.valid_from).toBe("2026-01-01T00:00:00.000Z");
+      expect(edge!.valid_until).toBe("2026-12-31T23:59:59.000Z");
+    });
+
+    it("linkThoughts defaults valid_from and valid_until to null", () => {
+      insertThought(db, "t1", "Thought 1");
+      insertThought(db, "t2", "Thought 2");
+      const edgeId = linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t2",
+        edge_type: "related",
+      });
+      const edge = getEdge(db, edgeId);
+      expect(edge!.valid_from).toBeNull();
+      expect(edge!.valid_until).toBeNull();
+    });
+
+    it("expireEdge sets valid_until", () => {
+      insertThought(db, "t1", "Thought 1");
+      insertThought(db, "t2", "Thought 2");
+      const edgeId = linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t2",
+        edge_type: "related",
+      });
+      expireEdge(db, edgeId, "2026-06-01T00:00:00.000Z");
+      const edge = getEdge(db, edgeId);
+      expect(edge!.valid_until).toBe("2026-06-01T00:00:00.000Z");
+    });
+
+    it("expireEdge defaults to now when no timestamp given", () => {
+      insertThought(db, "t1", "Thought 1");
+      insertThought(db, "t2", "Thought 2");
+      const edgeId = linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t2",
+        edge_type: "related",
+      });
+      const before = new Date().toISOString();
+      expireEdge(db, edgeId);
+      const after = new Date().toISOString();
+      const edge = getEdge(db, edgeId);
+      expect(edge!.valid_until).not.toBeNull();
+      expect(edge!.valid_until! >= before).toBe(true);
+      expect(edge!.valid_until! <= after).toBe(true);
+    });
+
+    it("expireEdge throws for non-existent edge", () => {
+      expect(() => expireEdge(db, "nonexistent")).toThrow(/does not exist/);
+    });
+
+    it("getConnections excludes expired edges by default", () => {
+      insertThought(db, "t1", "Thought 1", "S1");
+      insertThought(db, "t2", "Thought 2", "S2");
+      insertThought(db, "t3", "Thought 3", "S3");
+      linkThoughts(db, { source_id: "t1", target_id: "t2", edge_type: "related" });
+      linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t3",
+        edge_type: "cites",
+        valid_until: "2020-01-01T00:00:00.000Z",
+      });
+      const connections = getConnections(db, "t1");
+      expect(connections).toHaveLength(1);
+      expect(connections[0].thought_id).toBe("t2");
+    });
+
+    it("traverseGraph excludes expired edges by default", () => {
+      insertThought(db, "t1", "Thought 1", "S1");
+      insertThought(db, "t2", "Thought 2", "S2");
+      insertThought(db, "t3", "Thought 3", "S3");
+      linkThoughts(db, { source_id: "t1", target_id: "t2", edge_type: "related" });
+      linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t3",
+        edge_type: "follows",
+        valid_until: "2020-01-01T00:00:00.000Z",
+      });
+      const nodes = traverseGraph(db, "t1", 1);
+      expect(nodes).toHaveLength(2);
+      expect(nodes.map((n) => n.id).sort()).toEqual(["t1", "t2"]);
+    });
+
+    it("traverseGraph with include_expired=true returns all edges", () => {
+      insertThought(db, "t1", "Thought 1", "S1");
+      insertThought(db, "t2", "Thought 2", "S2");
+      insertThought(db, "t3", "Thought 3", "S3");
+      linkThoughts(db, { source_id: "t1", target_id: "t2", edge_type: "related" });
+      linkThoughts(db, {
+        source_id: "t1",
+        target_id: "t3",
+        edge_type: "follows",
+        valid_until: "2020-01-01T00:00:00.000Z",
+      });
+      const nodes = traverseGraph(db, "t1", 1, undefined, true);
+      expect(nodes).toHaveLength(3);
+      expect(nodes.map((n) => n.id).sort()).toEqual(["t1", "t2", "t3"]);
     });
   });
 });

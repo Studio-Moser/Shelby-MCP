@@ -19,6 +19,8 @@ export interface EdgeInput {
   target_id: string;
   edge_type: string; // refines | cites | refuted_by | tags | related | follows
   metadata?: Record<string, unknown>;
+  valid_from?: string;
+  valid_until?: string;
 }
 
 export interface EdgeRecord {
@@ -28,6 +30,8 @@ export interface EdgeRecord {
   edge_type: string;
   metadata: Record<string, unknown> | null;
   created_at: string;
+  valid_from: string | null;
+  valid_until: string | null;
 }
 
 export interface ConnectedThought {
@@ -71,6 +75,8 @@ function toEdgeRecord(row: Record<string, unknown>): EdgeRecord {
     edge_type: row.edge_type as string,
     metadata: parseMetadata(row.metadata as string | null),
     created_at: row.created_at as string,
+    valid_from: (row.valid_from as string) ?? null,
+    valid_until: (row.valid_until as string) ?? null,
   };
 }
 
@@ -107,14 +113,16 @@ export function linkThoughts(db: ThoughtDatabase, input: EdgeInput): string {
   const id = uuidv4();
   const now = new Date().toISOString();
   const metadataJson = metadata ? JSON.stringify(metadata) : null;
+  const validFrom = input.valid_from ?? null;
+  const validUntil = input.valid_until ?? null;
 
   try {
     db.db
       .prepare(
-        `INSERT INTO edges (id, source_id, target_id, edge_type, metadata, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO edges (id, source_id, target_id, edge_type, metadata, created_at, valid_from, valid_until)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, source_id, target_id, edge_type, metadataJson, now);
+      .run(id, source_id, target_id, edge_type, metadataJson, now, validFrom, validUntil);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("UNIQUE constraint failed")) {
@@ -145,6 +153,25 @@ export function unlinkThoughts(
     .run(source_id, target_id, edge_type);
 
   return result.changes > 0;
+}
+
+/**
+ * Expire an edge by setting its valid_until timestamp.
+ * Defaults to now if no timestamp is provided.
+ */
+export function expireEdge(
+  db: ThoughtDatabase,
+  edgeId: string,
+  validUntil?: string,
+): void {
+  const timestamp = validUntil ?? new Date().toISOString();
+  const result = db.db
+    .prepare("UPDATE edges SET valid_until = ? WHERE id = ?")
+    .run(timestamp, edgeId);
+
+  if (result.changes === 0) {
+    throw new Error(`Edge "${edgeId}" does not exist`);
+  }
 }
 
 /**
@@ -204,7 +231,7 @@ export function getConnections(
       `SELECT t.id AS thought_id, t.summary, t.type, e.id AS edge_id, e.edge_type
        FROM edges e
        JOIN thoughts t ON t.id = e.target_id
-       WHERE e.source_id = ? ${typeFilter}`
+       WHERE e.source_id = ? AND (e.valid_until IS NULL OR e.valid_until > datetime('now')) ${typeFilter}`
     )
     .all(thought_id, ...typeParams) as Record<string, unknown>[];
 
@@ -225,7 +252,7 @@ export function getConnections(
       `SELECT t.id AS thought_id, t.summary, t.type, e.id AS edge_id, e.edge_type
        FROM edges e
        JOIN thoughts t ON t.id = e.source_id
-       WHERE e.target_id = ? ${typeFilter}`
+       WHERE e.target_id = ? AND (e.valid_until IS NULL OR e.valid_until > datetime('now')) ${typeFilter}`
     )
     .all(thought_id, ...typeParams) as Record<string, unknown>[];
 
@@ -285,7 +312,7 @@ export function fetchGraphRelated(
         `SELECT e.edge_type, e.target_id, t.summary, t.type
          FROM edges e
          JOIN thoughts t ON t.id = e.target_id
-         WHERE e.source_id = ?`,
+         WHERE e.source_id = ? AND (e.valid_until IS NULL OR e.valid_until > datetime('now'))`,
       )
       .all(current.id) as Array<{
       edge_type: string;
@@ -315,7 +342,7 @@ export function fetchGraphRelated(
         `SELECT e.edge_type, e.source_id, t.summary, t.type
          FROM edges e
          JOIN thoughts t ON t.id = e.source_id
-         WHERE e.target_id = ?`,
+         WHERE e.target_id = ? AND (e.valid_until IS NULL OR e.valid_until > datetime('now'))`,
       )
       .all(current.id) as Array<{
       edge_type: string;
@@ -347,7 +374,8 @@ export function traverseGraph(
   db: ThoughtDatabase,
   thought_id: string,
   max_depth: number,
-  edge_types?: string[]
+  edge_types?: string[],
+  include_expired?: boolean,
 ): GraphNode[] {
   const effectiveDepth = Math.min(Math.max(max_depth, 0), 5);
 
@@ -383,6 +411,8 @@ export function traverseGraph(
     typeParams.push(...edge_types);
   }
 
+  const temporalFilter = include_expired ? "" : "AND (e.valid_until IS NULL OR e.valid_until > datetime('now'))";
+
   while (queue.length > 0) {
     const current = queue.shift()!;
 
@@ -395,7 +425,7 @@ export function traverseGraph(
                 t.id AS thought_id, t.summary, t.type
          FROM edges e
          JOIN thoughts t ON t.id = e.target_id
-         WHERE e.source_id = ? ${typeFilter}`
+         WHERE e.source_id = ? ${temporalFilter} ${typeFilter}`
       )
       .all(current.id, ...typeParams) as Record<string, unknown>[];
 
@@ -434,7 +464,7 @@ export function traverseGraph(
                 t.id AS thought_id, t.summary, t.type
          FROM edges e
          JOIN thoughts t ON t.id = e.source_id
-         WHERE e.target_id = ? ${typeFilter}`
+         WHERE e.target_id = ? ${temporalFilter} ${typeFilter}`
       )
       .all(current.id, ...typeParams) as Record<string, unknown>[];
 
