@@ -6,6 +6,7 @@ import { createOAuthHandlers, verifyBearerToken } from "./oauth.js";
 
 const MCP_PATH = "/mcp";
 const HEALTH_PATH = "/health";
+const MCP_METADATA_PATH = "/.well-known/mcp.json";
 const OAUTH_METADATA_PATH = "/.well-known/oauth-authorization-server";
 const REGISTER_PATH = "/register";
 const AUTHORIZE_PATH = "/authorize";
@@ -27,6 +28,26 @@ export async function startHttpTransport(
     if (path === HEALTH_PATH && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    // --- MCP metadata for registry/crawler discovery ---
+    if (path === MCP_METADATA_PATH && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        name: "shelbymcp",
+        version: "0.2.6",
+        description: "Knowledge-graph memory server for AI tools",
+        transport: "streamable-http",
+        endpoint: "/mcp",
+        capabilities: {
+          tools: 9,
+          prompts: 3,
+          resources: 1,
+          logging: true,
+          completions: true,
+        },
+      }));
       return;
     }
 
