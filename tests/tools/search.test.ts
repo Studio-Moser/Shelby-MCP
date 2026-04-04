@@ -136,6 +136,74 @@ describe("handleSearchThoughts", () => {
     expect(neighbor.direction).toBeDefined();
   });
 
+  it("hybrid RRF surfaces results found only by vector search", () => {
+    const id1 = captureId("Alpha bravo charlie unique content");
+    const id2 = captureId("Completely different words no overlap");
+
+    storeEmbedding(db.db, id1, [0.5, 0.5, 0.0]);
+    storeEmbedding(db.db, id2, [1.0, 0.0, 0.0]);
+
+    const result = handleSearchThoughts(db, {
+      query: "alpha bravo",
+      embedding: [1.0, 0.0, 0.0],
+    });
+    const data = parseResult(result);
+    expect(data.mode).toBe("hybrid");
+    const ids = data.results.map((r: { id: string }) => r.id);
+    expect(ids).toContain(id2);
+  });
+
+  it("hybrid RRF respects offset and limit on fused results", () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const id = captureId(`Pagination test thought number ${i}`);
+      storeEmbedding(db.db, id, [Math.random(), Math.random(), 0]);
+      ids.push(id);
+    }
+
+    const page1 = handleSearchThoughts(db, {
+      query: "pagination test thought",
+      embedding: [0.5, 0.5, 0.0],
+      limit: 2,
+      offset: 0,
+    });
+    const data1 = parseResult(page1);
+    expect(data1.results).toHaveLength(2);
+    expect(data1.offset).toBe(0);
+
+    const page2 = handleSearchThoughts(db, {
+      query: "pagination test thought",
+      embedding: [0.5, 0.5, 0.0],
+      limit: 2,
+      offset: 2,
+    });
+    const data2 = parseResult(page2);
+    expect(data2.results).toHaveLength(2);
+    expect(data2.offset).toBe(2);
+
+    const page1Ids = data1.results.map((r: { id: string }) => r.id);
+    const page2Ids = data2.results.map((r: { id: string }) => r.id);
+    for (const id of page2Ids) {
+      expect(page1Ids).not.toContain(id);
+    }
+  });
+
+  it("hybrid RRF includes FTS-only results (no embedding) with lower rank", () => {
+    const withEmb = captureId("Delta echo foxtrot embedded thought");
+    const noEmb = captureId("Delta echo foxtrot no embedding thought");
+
+    storeEmbedding(db.db, withEmb, [1.0, 0.0, 0.0]);
+
+    const result = handleSearchThoughts(db, {
+      query: "delta echo foxtrot",
+      embedding: [1.0, 0.0, 0.0],
+    });
+    const data = parseResult(result);
+    const ids = data.results.map((r: { id: string }) => r.id);
+    expect(ids).toContain(withEmb);
+    expect(ids).toContain(noEmb);
+  });
+
   it("graph_related does not duplicate results already in the main result set", () => {
     const idA = captureId("Unique node for dedup check");
     const idB = captureId("Unique node secondary dedup check");
