@@ -1,7 +1,7 @@
 import type { ThoughtDatabase } from "../db/database.js";
 import { fetchGraphRelated } from "../db/edges.js";
 import { searchThoughts } from "../db/fts.js";
-import { searchByEmbedding, bufferToEmbedding, cosineSimilarity } from "../db/vectors.js";
+import { searchByEmbedding } from "../db/vectors.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
 
 interface SearchArgs {
@@ -65,41 +65,63 @@ export function handleSearchThoughts(
     });
   }
 
-  // Hybrid: FTS first, then rerank by embedding similarity
+  // Hybrid: RRF (Reciprocal Rank Fusion) — run FTS and vector independently, fuse by rank
   if (a.query && a.embedding) {
-    // Get a larger FTS pool to rerank from
-    const ftsPool = searchThoughts(db.db, {
+    if (!Array.isArray(a.embedding) || a.embedding.length === 0) {
+      return toolError("invalid_input", "embedding must be a non-empty number array");
+    }
+
+    const poolSize = Math.min(limit * 3, 100);
+
+    const ftsResult = searchThoughts(db.db, {
       query: a.query,
-      limit: Math.min(limit * 3, 100),
+      limit: poolSize,
       offset: 0,
       type: a.type,
       project: a.project,
     });
 
-    // Rerank by embedding similarity
-    const reranked = ftsPool.results.map((r) => {
-      const row = db.db
-        .prepare("SELECT embedding FROM thoughts WHERE id = ?")
-        .get(r.id) as { embedding: Buffer | null } | undefined;
+    const vectorResult = searchByEmbedding(db.db, a.embedding, poolSize);
 
-      let similarity = 0;
-      if (row?.embedding) {
-        const emb = bufferToEmbedding(row.embedding);
-        similarity = cosineSimilarity(a.embedding!, emb);
+    const ftsRanks = new Map<string, number>();
+    ftsResult.results.forEach((r, i) => ftsRanks.set(r.id, i + 1));
+
+    const vectorRanks = new Map<string, number>();
+    vectorResult.forEach((r, i) => vectorRanks.set(r.id, i + 1));
+
+    const metadataMap = new Map<string, { summary: string | null; type: string; topics: string[]; created_at: string }>();
+    for (const r of ftsResult.results) {
+      metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at });
+    }
+    for (const r of vectorResult) {
+      if (!metadataMap.has(r.id)) {
+        metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at });
       }
+    }
 
-      return { ...r, similarity };
-    });
+    const K = 60;
+    const scored: Array<{ id: string; summary: string | null; type: string; topics: string[]; created_at: string; rrf_score: number }> = [];
 
-    reranked.sort((x, y) => y.similarity - x.similarity);
-    const sliced = reranked.slice(offset, offset + limit);
+    for (const [id, meta] of metadataMap) {
+      const ftsRank = ftsRanks.get(id);
+      const vecRank = vectorRanks.get(id);
+      const rrf_score =
+        (ftsRank ? 1 / (K + ftsRank) : 0) +
+        (vecRank ? 1 / (K + vecRank) : 0);
+      scored.push({ id, ...meta, rrf_score });
+    }
+
+    scored.sort((a, b) => b.rrf_score - a.rrf_score);
+
+    const total_count = scored.length;
+    const sliced = scored.slice(offset, offset + limit);
     const graph_related = fetchGraphRelated(db, sliced.map((r) => r.id), graphDepth);
 
     return toolSuccess({
       mode: "hybrid",
       results: sliced,
-      total_count: ftsPool.total_count,
-      has_more: offset + sliced.length < ftsPool.total_count,
+      total_count,
+      has_more: offset + sliced.length < total_count,
       offset,
       ...(graphDepth > 0 ? { graph_related } : {}),
     });
