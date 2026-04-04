@@ -117,3 +117,96 @@ describe("handleExploreGraph", () => {
     expect(data.node_count).toBe(2);
   });
 });
+
+describe("handleManageEdges — expire", () => {
+  it("expires an edge", () => {
+    const a = captureId("Thought A");
+    const b = captureId("Thought B");
+    const linkResult = handleManageEdges(db, {
+      action: "link",
+      source_id: a,
+      target_id: b,
+      edge_type: "related",
+    });
+    const edgeId = parseResult(linkResult).edge_id;
+    const result = handleManageEdges(db, {
+      action: "expire",
+      edge_id: edgeId,
+    });
+    const data = parseResult(result);
+    expect(data.action).toBe("expired");
+    expect(data.edge_id).toBe(edgeId);
+  });
+
+  it("returns error for non-existent edge_id", () => {
+    const result = handleManageEdges(db, {
+      action: "expire",
+      edge_id: "nonexistent",
+    });
+    const r = result as any;
+    expect(r.isError).toBe(true);
+    const data = JSON.parse(r.content[0].text);
+    expect(data.error).toBe("not_found");
+  });
+
+  it("returns error when edge_id is missing", () => {
+    const result = handleManageEdges(db, {
+      action: "expire",
+    });
+    const r = result as any;
+    expect(r.isError).toBe(true);
+    const data = JSON.parse(r.content[0].text);
+    expect(data.error).toBe("invalid_input");
+  });
+
+  it("links with valid_from and valid_until", () => {
+    const a = captureId("A");
+    const b = captureId("B");
+    const result = handleManageEdges(db, {
+      action: "link",
+      source_id: a,
+      target_id: b,
+      edge_type: "related",
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: "2026-12-31T23:59:59.000Z",
+    });
+    const data = parseResult(result);
+    expect(data.action).toBe("linked");
+  });
+});
+
+describe("handleExploreGraph — include_expired", () => {
+  it("excludes expired edges by default", () => {
+    const a = captureId("Root");
+    const b = captureId("Active child");
+    const c = captureId("Expired child");
+    handleManageEdges(db, { action: "link", source_id: a, target_id: b, edge_type: "related" });
+    handleManageEdges(db, {
+      action: "link",
+      source_id: a,
+      target_id: c,
+      edge_type: "follows",
+      valid_until: "2020-01-01T00:00:00.000Z",
+    });
+    const result = handleExploreGraph(db, { thought_id: a, max_depth: 1 });
+    const data = parseResult(result);
+    expect(data.node_count).toBe(2);
+  });
+
+  it("includes expired edges when include_expired is true", () => {
+    const a = captureId("Root");
+    const b = captureId("Active child");
+    const c = captureId("Expired child");
+    handleManageEdges(db, { action: "link", source_id: a, target_id: b, edge_type: "related" });
+    handleManageEdges(db, {
+      action: "link",
+      source_id: a,
+      target_id: c,
+      edge_type: "follows",
+      valid_until: "2020-01-01T00:00:00.000Z",
+    });
+    const result = handleExploreGraph(db, { thought_id: a, max_depth: 1, include_expired: true });
+    const data = parseResult(result);
+    expect(data.node_count).toBe(3);
+  });
+});

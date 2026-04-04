@@ -263,7 +263,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "manage_edges",
     {
       title: "Manage Edges",
-      description: "Create or remove a typed relationship edge between two memories. Use to build a knowledge graph: connect a decision to the tasks it affects, a reference to the insight it supports, or chain a sequence of thoughts with follows. Also use to confirm suggested_connections returned by capture_thought. Edge types: refines, cites, refuted_by, tags, related, follows.",
+      description: "Create, remove, or expire a typed relationship edge between two memories. Use to build a knowledge graph: connect a decision to the tasks it affects, a reference to the insight it supports, or chain a sequence of thoughts with follows. Use 'expire' to mark an edge as no longer current without deleting it (non-destructive fact resolution). Edge types: refines, cites, refuted_by, tags, related, follows.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -271,13 +271,17 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         openWorldHint: false,
       },
       inputSchema: {
-        action: z.enum(["link", "unlink"]).describe("Action to perform"),
-        source_id: z.string().describe("Source thought ID"),
-        target_id: z.string().describe("Target thought ID"),
+        action: z.enum(["link", "unlink", "expire"]).describe("Action to perform"),
+        source_id: z.string().describe("Source thought ID (required for link/unlink)").optional(),
+        target_id: z.string().describe("Target thought ID (required for link/unlink)").optional(),
         edge_type: z
           .enum(VALID_EDGE_TYPES)
-          .describe("Relationship type"),
+          .describe("Relationship type (required for link/unlink)")
+          .optional(),
         metadata: z.record(z.unknown()).describe("Edge metadata").optional(),
+        valid_from: z.string().describe("ISO 8601 start of validity period (optional, for link)").optional(),
+        valid_until: z.string().describe("ISO 8601 end of validity period (optional, for link/expire)").optional(),
+        edge_id: z.string().describe("Edge ID (required for expire action)").optional(),
       },
     },
     withLogging("manage_edges", (args) => handleManageEdges(db, args as Record<string, unknown>)),
@@ -305,6 +309,10 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         edge_types: z
           .array(z.string())
           .describe("Filter by edge types")
+          .optional(),
+        include_expired: z
+          .boolean()
+          .describe("Include expired edges in traversal (default false)")
           .optional(),
       },
     },

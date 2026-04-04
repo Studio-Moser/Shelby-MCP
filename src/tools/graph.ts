@@ -1,5 +1,5 @@
 import type { ThoughtDatabase } from "../db/database.js";
-import { linkThoughts, unlinkThoughts, VALID_EDGE_TYPES, traverseGraph } from "../db/edges.js";
+import { linkThoughts, unlinkThoughts, expireEdge, VALID_EDGE_TYPES, traverseGraph } from "../db/edges.js";
 import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
 
 // --- manage_edges ---
@@ -10,6 +10,9 @@ interface ManageEdgesArgs {
   target_id: string;
   edge_type: string;
   metadata?: Record<string, unknown>;
+  valid_from?: string;
+  valid_until?: string;
+  edge_id?: string;
 }
 
 export function handleManageEdges(
@@ -25,6 +28,8 @@ export function handleManageEdges(
         target_id: a.target_id,
         edge_type: a.edge_type,
         metadata: a.metadata,
+        valid_from: a.valid_from,
+        valid_until: a.valid_until,
       });
       return toolSuccess({ edge_id: edgeId, action: "linked" });
     } catch (err: unknown) {
@@ -56,9 +61,25 @@ export function handleManageEdges(
     return toolSuccess({ action: "unlinked" });
   }
 
+  if (a.action === "expire") {
+    if (!a.edge_id) {
+      return toolError("invalid_input", "edge_id is required for expire action");
+    }
+    try {
+      expireEdge(db, a.edge_id, a.valid_until);
+      return toolSuccess({ action: "expired", edge_id: a.edge_id });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("does not exist")) {
+        return toolError("not_found", msg);
+      }
+      return toolError("temporary_failure", msg);
+    }
+  }
+
   return toolError(
     "invalid_input",
-    'action must be "link" or "unlink"',
+    'action must be "link", "unlink", or "expire"',
   );
 }
 
@@ -68,6 +89,7 @@ interface ExploreGraphArgs {
   thought_id: string;
   max_depth?: number;
   edge_types?: string[];
+  include_expired?: boolean;
 }
 
 export function handleExploreGraph(
@@ -81,7 +103,7 @@ export function handleExploreGraph(
   }
 
   const depth = a.max_depth ?? 1;
-  const nodes = traverseGraph(db, a.thought_id, depth, a.edge_types);
+  const nodes = traverseGraph(db, a.thought_id, depth, a.edge_types, a.include_expired);
 
   if (nodes.length === 0) {
     return toolError(
