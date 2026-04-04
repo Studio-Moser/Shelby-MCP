@@ -28,7 +28,7 @@ describe("ThoughtDatabase", () => {
 
   it("runs migrations to latest version", () => {
     db = new ThoughtDatabase(":memory:");
-    expect(db.getSchemaVersion()).toBe(2);
+    expect(db.getSchemaVersion()).toBe(3);
   });
 
   it("creates thoughts table", () => {
@@ -59,7 +59,7 @@ describe("ThoughtDatabase", () => {
     db = new ThoughtDatabase(":memory:");
     // Simulate re-running migrations on same version
     const version = db.getSchemaVersion();
-    expect(version).toBe(2);
+    expect(version).toBe(3);
   });
 
   it("creates oauth_clients table after migration", () => {

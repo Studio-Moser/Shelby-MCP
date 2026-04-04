@@ -88,6 +88,17 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    description: "Temporal edges — valid_from, valid_until",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE edges ADD COLUMN valid_from TEXT;
+        ALTER TABLE edges ADD COLUMN valid_until TEXT;
+        CREATE INDEX IF NOT EXISTS idx_edges_valid_until ON edges(valid_until);
+      `);
+    },
+  },
 ];
 
 export function getSchemaVersion(db: Database.Database): number {
