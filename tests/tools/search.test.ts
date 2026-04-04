@@ -204,6 +204,68 @@ describe("handleSearchThoughts", () => {
     expect(ids).toContain(noEmb);
   });
 
+  it("hybrid RRF type filter excludes vector-only results with wrong type", () => {
+    // thought A: type=decision, will match FTS and vector
+    const idA = captureId("Architecture decision record for auth", { type: "decision" });
+    // thought B: type=note, vector-only (FTS excluded by type filter), should be filtered out
+    const idB = captureId("Architecture decision record related note", { type: "note" });
+
+    storeEmbedding(db.db, idA, [1.0, 0.0, 0.0]);
+    storeEmbedding(db.db, idB, [1.0, 0.0, 0.0]); // high similarity but wrong type
+
+    const result = handleSearchThoughts(db, {
+      query: "architecture decision",
+      embedding: [1.0, 0.0, 0.0],
+      type: "decision",
+    });
+    const data = parseResult(result);
+    expect(data.mode).toBe("hybrid");
+    const ids = data.results.map((r: { id: string }) => r.id);
+    expect(ids).toContain(idA);
+    expect(ids).not.toContain(idB);
+  });
+
+  it("hybrid RRF project filter excludes vector-only results from other projects", () => {
+    const idA = captureId("Search performance optimization", { project: "proj-alpha" });
+    const idB = captureId("Search performance optimization", { project: "proj-beta" });
+
+    storeEmbedding(db.db, idA, [1.0, 0.0, 0.0]);
+    storeEmbedding(db.db, idB, [1.0, 0.0, 0.0]); // same vector, different project
+
+    const result = handleSearchThoughts(db, {
+      query: "search performance",
+      embedding: [1.0, 0.0, 0.0],
+      project: "proj-alpha",
+    });
+    const data = parseResult(result);
+    expect(data.mode).toBe("hybrid");
+    const ids = data.results.map((r: { id: string }) => r.id);
+    expect(ids).toContain(idA);
+    expect(ids).not.toContain(idB);
+  });
+
+  it("hybrid RRF type+project filter applies both constraints simultaneously", () => {
+    const idMatch = captureId("Database schema migration plan", { type: "decision", project: "proj-x" });
+    const idWrongType = captureId("Database schema migration plan", { type: "note", project: "proj-x" });
+    const idWrongProject = captureId("Database schema migration plan", { type: "decision", project: "proj-y" });
+
+    storeEmbedding(db.db, idMatch, [1.0, 0.0, 0.0]);
+    storeEmbedding(db.db, idWrongType, [1.0, 0.0, 0.0]);
+    storeEmbedding(db.db, idWrongProject, [1.0, 0.0, 0.0]);
+
+    const result = handleSearchThoughts(db, {
+      query: "database schema migration",
+      embedding: [1.0, 0.0, 0.0],
+      type: "decision",
+      project: "proj-x",
+    });
+    const data = parseResult(result);
+    const ids = data.results.map((r: { id: string }) => r.id);
+    expect(ids).toContain(idMatch);
+    expect(ids).not.toContain(idWrongType);
+    expect(ids).not.toContain(idWrongProject);
+  });
+
   it("graph_related does not duplicate results already in the main result set", () => {
     const idA = captureId("Unique node for dedup check");
     const idB = captureId("Unique node secondary dedup check");

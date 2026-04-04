@@ -89,13 +89,32 @@ export function handleSearchThoughts(
     const vectorRanks = new Map<string, number>();
     vectorResult.forEach((r, i) => vectorRanks.set(r.id, i + 1));
 
-    const metadataMap = new Map<string, { summary: string | null; type: string; topics: string[]; created_at: string }>();
+    const metadataMap = new Map<string, { summary: string | null; type: string; topics: string[]; created_at: string; project: string | null }>();
     for (const r of ftsResult.results) {
-      metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at });
+      // FTS results are already filtered by project (if specified), so project
+      // is not returned in SearchResult — mark as null; it will be overwritten
+      // by the DB lookup below if needed.
+      metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null });
     }
     for (const r of vectorResult) {
       if (!metadataMap.has(r.id)) {
-        metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at });
+        metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null });
+      }
+    }
+
+    // If project filter is in play, fetch project for all candidates from the DB.
+    // This is required because vector results are not pre-filtered by project.
+    if (a.project) {
+      const allIds = Array.from(metadataMap.keys());
+      const placeholders = allIds.map(() => "?").join(", ");
+      const rows = db.db
+        .prepare(`SELECT id, project FROM thoughts WHERE id IN (${placeholders})`)
+        .all(...allIds) as Array<{ id: string; project: string | null }>;
+      for (const row of rows) {
+        const existing = metadataMap.get(row.id);
+        if (existing) {
+          existing.project = row.project;
+        }
       }
     }
 
@@ -108,13 +127,29 @@ export function handleSearchThoughts(
       const rrf_score =
         (ftsRank ? 1 / (K + ftsRank) : 0) +
         (vecRank ? 1 / (K + vecRank) : 0);
-      scored.push({ id, ...meta, rrf_score });
+      const { project: _project, ...rest } = meta;
+      scored.push({ id, ...rest, rrf_score });
     }
 
     scored.sort((a, b) => b.rrf_score - a.rrf_score);
 
-    const total_count = scored.length;
-    const sliced = scored.slice(offset, offset + limit);
+    // Post-fusion filter: enforce type and project constraints that were applied
+    // to the FTS pool but bypassed by the vector pool.
+    let filtered = scored as Array<{ id: string; summary: string | null; type: string; topics: string[]; created_at: string; rrf_score: number }>;
+    if (a.type || a.project) {
+      // Rebuild a project lookup from the metadata map for filtering.
+      filtered = scored.filter((item) => {
+        if (a.type && item.type !== a.type) return false;
+        if (a.project) {
+          const meta = metadataMap.get(item.id);
+          if (!meta || meta.project !== a.project) return false;
+        }
+        return true;
+      });
+    }
+
+    const total_count = filtered.length;
+    const sliced = filtered.slice(offset, offset + limit);
     const graph_related = fetchGraphRelated(db, sliced.map((r) => r.id), graphDepth);
 
     return toolSuccess({
