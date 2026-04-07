@@ -63,11 +63,15 @@ function findSuggestedConnections(
   return suggestions;
 }
 
+type TrustLevel = "trusted" | "unverified" | "external";
+
 interface CaptureArgs {
   content?: string;
   summary?: string;
   type?: string;
   source?: string;
+  source_agent?: string;
+  trust_level?: TrustLevel;
   project?: string;
   topics?: string[];
   people?: string[];
@@ -78,6 +82,8 @@ interface CaptureArgs {
     summary?: string;
     type?: string;
     source?: string;
+    source_agent?: string;
+    trust_level?: TrustLevel;
     project?: string;
     topics?: string[];
     people?: string[];
@@ -132,6 +138,8 @@ function captureSingle(
     summary?: string;
     type?: string;
     source?: string;
+    source_agent?: string;
+    trust_level?: TrustLevel;
     project?: string;
     topics?: string[];
     people?: string[];
@@ -144,6 +152,8 @@ function captureSingle(
     summary: args.summary,
     type: args.type,
     source: args.source,
+    source_agent: args.source_agent,
+    trust_level: args.trust_level,
     project: args.project,
     topics: args.topics,
     people: args.people,
@@ -239,6 +249,8 @@ export function handleCaptureThought(
     summary: a.summary,
     type: a.type,
     source: a.source,
+    source_agent: a.source_agent,
+    trust_level: a.trust_level,
     project: a.project,
     topics: a.topics,
     people: a.people,

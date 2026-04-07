@@ -1,5 +1,5 @@
 import type { ThoughtDatabase } from "../db/database.js";
-import { listThoughts } from "../db/thoughts.js";
+import { listThoughts, type TrustLevel } from "../db/thoughts.js";
 import { toolSuccess, clampLimit, type ToolResult } from "./helpers.js";
 
 interface ListArgs {
@@ -8,6 +8,8 @@ interface ListArgs {
   topic?: string;
   person?: string;
   source?: string;
+  source_agent?: string;
+  trust_level?: TrustLevel;
   since?: string;
   until?: string;
   has_summary?: boolean;
@@ -27,6 +29,8 @@ export function handleListThoughts(
     topic: a.topic,
     person: a.person,
     source: a.source,
+    source_agent: a.source_agent,
+    trust_level: a.trust_level,
     since: a.since,
     until: a.until,
     has_summary: a.has_summary,

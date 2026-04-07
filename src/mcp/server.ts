@@ -23,6 +23,8 @@ import {
   MAX_PERSON_LENGTH,
   MAX_BULK_THOUGHTS,
 } from "../tools/helpers.js";
+import { getEmbeddingConfig, generateEmbedding } from "../db/embedding.js";
+import { storeEmbedding } from "../db/vectors.js";
 
 const VERSION = "0.1.0";
 
@@ -41,6 +43,12 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     name: "shelbymcp",
     version: VERSION,
   });
+
+  // Initialize embedding config from environment
+  const embeddingConfig = getEmbeddingConfig();
+  if (embeddingConfig.provider !== "none") {
+    console.error(`[INFO] Embedding provider: ${embeddingConfig.provider} (${embeddingConfig.dimensions}d)`);
+  }
 
   // ---------------------------------------------------------------------------
   // Logging
@@ -112,6 +120,8 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .describe("Thought type")
           .optional(),
         source: z.string().describe("Source tool or context").optional(),
+        source_agent: z.string().describe("Originating AI agent identifier (e.g. claude-code, cursor, windsurf)").optional(),
+        trust_level: z.enum(["trusted", "unverified", "external"]).describe("Trust level for memory poisoning defense: trusted (default), unverified, or external").optional(),
         project: z.string().describe("Project association").optional(),
         topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("Topic tags").optional(),
         people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("People mentioned").optional(),
@@ -124,6 +134,8 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
               summary: z.string().max(MAX_SUMMARY_LENGTH).optional(),
               type: z.string().optional(),
               source: z.string().optional(),
+              source_agent: z.string().optional(),
+              trust_level: z.enum(["trusted", "unverified", "external"]).optional(),
               project: z.string().optional(),
               topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).optional(),
               people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).optional(),
@@ -136,7 +148,41 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .optional(),
       },
     },
-    withLogging("capture_thought", (args) => handleCaptureThought(db, args as Record<string, unknown>)),
+    withLogging("capture_thought", async (args) => {
+      const result = handleCaptureThought(db, args as Record<string, unknown>);
+      // Auto-embed after capture when a server-side embedding provider is configured
+      if (!result.isError && embeddingConfig.provider !== "none") {
+        try {
+          const parsed = JSON.parse(result.content[0]?.text ?? "{}") as Record<string, unknown>;
+          // Single capture: parsed.id is a string
+          // Bulk capture: parsed.thoughts is an array of {id}
+          const idsToEmbed: string[] = [];
+          if (typeof parsed.id === "string") {
+            idsToEmbed.push(parsed.id);
+          } else if (Array.isArray(parsed.thoughts)) {
+            for (const t of parsed.thoughts as Array<{ id: string }>) {
+              if (t.id) idsToEmbed.push(t.id);
+            }
+          }
+          // Embed each thought using its content
+          for (const thoughtId of idsToEmbed) {
+            // Fetch the thought content from the DB for embedding input
+            const thought = db.db.prepare("SELECT content, summary FROM thoughts WHERE id = ?").get(thoughtId) as { content: string; summary: string | null } | undefined;
+            if (!thought) continue;
+            const textToEmbed = thought.summary ? `${thought.summary}\n\n${thought.content}` : thought.content;
+            const vector = await generateEmbedding(textToEmbed, embeddingConfig);
+            if (vector) {
+              storeEmbedding(db.db, thoughtId, vector);
+              log("debug", "capture_thought", { event: "embedding_stored", thoughtId, provider: embeddingConfig.provider });
+            }
+          }
+        } catch (err) {
+          // Non-fatal: embedding failure should not block capture
+          console.error(`[WARN] Auto-embedding failed after capture: ${String(err)}`);
+        }
+      }
+      return result;
+    }),
   );
 
   // --- search_thoughts ---
@@ -187,6 +233,8 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         topic: z.string().describe("Filter by topic").optional(),
         person: z.string().describe("Filter by person mentioned").optional(),
         source: z.string().describe("Filter by source").optional(),
+        source_agent: z.string().describe("Filter by originating AI agent").optional(),
+        trust_level: z.enum(["trusted", "unverified", "external"]).describe("Filter by trust level").optional(),
         since: z.string().describe("ISO 8601 start date").optional(),
         until: z.string().describe("ISO 8601 end date").optional(),
         has_summary: z.boolean().describe("Filter by summary presence: true = has summary, false = missing summary").optional(),
