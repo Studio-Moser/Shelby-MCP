@@ -1,4 +1,9 @@
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+// NOTE: @modelcontextprotocol/sdk ^1.26.0 is affected by CVE-2026-0621 (ReDoS in UriTemplate regex).
+// Fixed in v2.0.0-alpha.2. Upgrade to SDK v2 stable once released. See SECURITY.md for details.
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ThoughtDatabase } from "../db/database.js";
 import { createServerWithDb } from "./server.js";
@@ -7,7 +12,23 @@ import { createOAuthHandlers, verifyBearerToken } from "./oauth.js";
 const MCP_PATH = "/mcp";
 const HEALTH_PATH = "/health";
 const MCP_METADATA_PATH = "/.well-known/mcp.json";
+// MCP Registry v0.1 canonical auto-discovery path (SEP-1649 / SEP-1960)
+// Consumed by VS Code, Copilot, Cursor for server auto-discovery
+const MCP_SERVER_JSON_PATH = "/.well-known/mcp/server.json";
 const OAUTH_METADATA_PATH = "/.well-known/oauth-authorization-server";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function getPackageVersion(): string {
+  try {
+    const pkgPath = resolve(__dirname, "../../package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string };
+    return pkg.version;
+  } catch {
+    return "0.0.0";
+  }
+}
+
 const REGISTER_PATH = "/register";
 const AUTHORIZE_PATH = "/authorize";
 const TOKEN_PATH = "/token";
@@ -33,11 +54,33 @@ export async function startHttpTransport(
 
     // --- MCP metadata for registry/crawler discovery ---
     if (path === MCP_METADATA_PATH && req.method === "GET") {
+      const version = getPackageVersion();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         name: "shelbymcp",
-        version: "0.2.6",
+        version,
         description: "Knowledge-graph memory server for AI tools",
+        transport: "streamable-http",
+        endpoint: "/mcp",
+        capabilities: {
+          tools: 9,
+          prompts: 3,
+          resources: 1,
+          logging: true,
+          completions: true,
+        },
+      }));
+      return;
+    }
+
+    // --- MCP Registry v0.1 canonical auto-discovery (SEP-1649 / SEP-1960) ---
+    if (path === MCP_SERVER_JSON_PATH && req.method === "GET") {
+      const version = getPackageVersion();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        name: "shelbymcp",
+        version,
+        description: "Knowledge-graph memory server for AI tools via MCP",
         transport: "streamable-http",
         endpoint: "/mcp",
         capabilities: {
