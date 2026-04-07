@@ -1,6 +1,16 @@
 import type { ThoughtDatabase } from "../db/database.js";
 import { updateThought, getThought } from "../db/thoughts.js";
-import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
+import {
+  toolSuccess,
+  toolError,
+  type ToolResult,
+  MAX_CONTENT_LENGTH,
+  MAX_SUMMARY_LENGTH,
+  MAX_TOPIC_LENGTH,
+  MAX_TOPICS_COUNT,
+  MAX_PEOPLE_COUNT,
+  MAX_PERSON_LENGTH,
+} from "./helpers.js";
 
 interface UpdateArgs {
   id?: string;
@@ -37,6 +47,62 @@ export function handleUpdateThought(
 
   if (targetIds.length === 0) {
     return toolError("invalid_input", "No target IDs provided");
+  }
+
+  // Validate input lengths (OWASP ASI06 — memory poisoning mitigation)
+  if (a.content !== undefined) {
+    if (typeof a.content !== "string") {
+      return toolError("invalid_input", "content must be a string");
+    }
+    if (a.content.length > MAX_CONTENT_LENGTH) {
+      return toolError(
+        "invalid_input",
+        `content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters (got ${a.content.length})`,
+      );
+    }
+  }
+  if (a.summary !== undefined) {
+    if (typeof a.summary !== "string") {
+      return toolError("invalid_input", "summary must be a string");
+    }
+    if (a.summary.length > MAX_SUMMARY_LENGTH) {
+      return toolError(
+        "invalid_input",
+        `summary exceeds maximum length of ${MAX_SUMMARY_LENGTH} characters (got ${a.summary.length})`,
+      );
+    }
+  }
+  if (a.topics !== undefined && Array.isArray(a.topics)) {
+    if (a.topics.length > MAX_TOPICS_COUNT) {
+      return toolError(
+        "invalid_input",
+        `topics array exceeds maximum of ${MAX_TOPICS_COUNT} entries`,
+      );
+    }
+    for (const topic of a.topics) {
+      if (typeof topic === "string" && topic.length > MAX_TOPIC_LENGTH) {
+        return toolError(
+          "invalid_input",
+          `topic "${topic.slice(0, 30)}..." exceeds maximum length of ${MAX_TOPIC_LENGTH} characters`,
+        );
+      }
+    }
+  }
+  if (a.people !== undefined && Array.isArray(a.people)) {
+    if (a.people.length > MAX_PEOPLE_COUNT) {
+      return toolError(
+        "invalid_input",
+        `people array exceeds maximum of ${MAX_PEOPLE_COUNT} entries`,
+      );
+    }
+    for (const person of a.people) {
+      if (typeof person === "string" && person.length > MAX_PERSON_LENGTH) {
+        return toolError(
+          "invalid_input",
+          `person "${person.slice(0, 30)}..." exceeds maximum length of ${MAX_PERSON_LENGTH} characters`,
+        );
+      }
+    }
   }
 
   // Build updates object (exclude id/ids)

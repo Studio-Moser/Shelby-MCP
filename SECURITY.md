@@ -47,3 +47,39 @@ ShelbyMCP stores user thoughts and memories in a local SQLite database. Security
 - **MCP protocol**: ShelbyMCP communicates via stdio, not network sockets. No network attack surface by default.
 - **Forage skill**: Runs on the user's AI subscription. The skill has access to the same tools as any MCP client.
 - **No secrets in memory**: ShelbyMCP does not store API keys, tokens, or credentials. If an AI tool captures a thought containing secrets, that's the tool's responsibility to filter.
+
+## Agentic AI Memory Poisoning (OWASP ASI06)
+
+### Threat Model
+
+ShelbyMCP is a shared memory store accessed by multiple AI tools (Claude Code, Codex, etc.). A compromised or malicious AI tool — or a prompt injection attack delivered through external content — could attempt to:
+
+1. **Inject crafted content** via `capture_thought` containing prompt injection strings designed to manipulate other AI tools when they retrieve the memory.
+2. **Overwrite legitimate memories** via `update_thought` with adversarial content.
+3. **Sabotage memory** via `delete_thought` to remove correct context and force agents into a degraded state.
+
+This is a local, single-user server (not multi-tenant), so per-caller authorization is not applicable. The primary concern is a tool calling the MCP server with maliciously large or crafted inputs.
+
+### Mitigations in Place
+
+**Input length caps** (enforced at both the Zod schema layer and the handler layer):
+
+| Field      | Maximum          |
+|------------|-----------------|
+| `content`  | 50,000 characters (~50 KB) |
+| `summary`  | 200 characters  |
+| `topics`   | 20 entries, each ≤ 100 characters |
+| `people`   | 20 entries, each ≤ 100 characters |
+| Bulk `thoughts` array | 50 thoughts per call |
+
+These limits prevent a single tool invocation from flooding the database with arbitrarily large content that could be used for large-scale prompt injection at retrieval time.
+
+**What is NOT mitigated (out of scope for this release):**
+
+- **Semantic content filtering**: No attempt is made to detect or strip prompt injection strings from content. This would require inference (which violates the "smart agent, dumb server" architecture principle) and would produce false positives on legitimate content.
+- **Rate limiting**: Not implemented because this is a local stdio server; OS-level process isolation provides the primary rate limit.
+- **Caller authentication/authorization**: Not applicable — all callers on the local machine are trusted equally. If multi-agent trust boundaries become relevant in a future version, per-caller signing should be considered.
+
+### Microsoft Agent Governance Toolkit Alignment
+
+This audit was conducted with reference to the Microsoft Agent Governance Toolkit and OWASP Agentic AI Top 10 (ASI06 — Memory Poisoning). The mitigations above address the data-layer amplification vector. The semantic injection vector remains a design-level risk acknowledged and accepted for the current single-user, local deployment model.

@@ -2,7 +2,18 @@ import type { ThoughtDatabase } from "../db/database.js";
 import { insertThought, getThought } from "../db/thoughts.js";
 import { linkThoughts } from "../db/edges.js";
 import { searchThoughts, sanitizeFTSQuery } from "../db/fts.js";
-import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
+import {
+  toolSuccess,
+  toolError,
+  type ToolResult,
+  MAX_CONTENT_LENGTH,
+  MAX_SUMMARY_LENGTH,
+  MAX_TOPIC_LENGTH,
+  MAX_TOPICS_COUNT,
+  MAX_PEOPLE_COUNT,
+  MAX_PERSON_LENGTH,
+  MAX_BULK_THOUGHTS,
+} from "./helpers.js";
 
 const SUGGESTION_LIMIT = 5;
 const SUGGESTION_MIN_RANK = 0.5; // BM25 rank threshold (higher = more relevant)
@@ -52,11 +63,15 @@ function findSuggestedConnections(
   return suggestions;
 }
 
+type TrustLevel = "trusted" | "unverified" | "external";
+
 interface CaptureArgs {
   content?: string;
   summary?: string;
   type?: string;
   source?: string;
+  source_agent?: string;
+  trust_level?: TrustLevel;
   project?: string;
   topics?: string[];
   people?: string[];
@@ -67,12 +82,53 @@ interface CaptureArgs {
     summary?: string;
     type?: string;
     source?: string;
+    source_agent?: string;
+    trust_level?: TrustLevel;
     project?: string;
     topics?: string[];
     people?: string[];
     metadata?: Record<string, unknown>;
     related_to?: string[];
   }>;
+}
+
+/**
+ * Validate input fields for a single thought against OWASP ASI06 memory poisoning limits.
+ * Returns an error string if any limit is exceeded, or null if valid.
+ */
+function validateThoughtInput(t: {
+  content: string;
+  summary?: string;
+  topics?: string[];
+  people?: string[];
+}): string | null {
+  if (t.content.length > MAX_CONTENT_LENGTH) {
+    return `content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters (got ${t.content.length})`;
+  }
+  if (t.summary !== undefined && t.summary.length > MAX_SUMMARY_LENGTH) {
+    return `summary exceeds maximum length of ${MAX_SUMMARY_LENGTH} characters (got ${t.summary.length})`;
+  }
+  if (t.topics !== undefined) {
+    if (t.topics.length > MAX_TOPICS_COUNT) {
+      return `topics array exceeds maximum of ${MAX_TOPICS_COUNT} entries`;
+    }
+    for (const topic of t.topics) {
+      if (topic.length > MAX_TOPIC_LENGTH) {
+        return `topic "${topic.slice(0, 30)}..." exceeds maximum length of ${MAX_TOPIC_LENGTH} characters`;
+      }
+    }
+  }
+  if (t.people !== undefined) {
+    if (t.people.length > MAX_PEOPLE_COUNT) {
+      return `people array exceeds maximum of ${MAX_PEOPLE_COUNT} entries`;
+    }
+    for (const person of t.people) {
+      if (person.length > MAX_PERSON_LENGTH) {
+        return `person "${person.slice(0, 30)}..." exceeds maximum length of ${MAX_PERSON_LENGTH} characters`;
+      }
+    }
+  }
+  return null;
 }
 
 function captureSingle(
@@ -82,6 +138,8 @@ function captureSingle(
     summary?: string;
     type?: string;
     source?: string;
+    source_agent?: string;
+    trust_level?: TrustLevel;
     project?: string;
     topics?: string[];
     people?: string[];
@@ -94,6 +152,8 @@ function captureSingle(
     summary: args.summary,
     type: args.type,
     source: args.source,
+    source_agent: args.source_agent,
+    trust_level: args.trust_level,
     project: args.project,
     topics: args.topics,
     people: args.people,
@@ -138,6 +198,13 @@ export function handleCaptureThought(
       return toolError("invalid_input", "thoughts array is empty");
     }
 
+    if (a.thoughts.length > MAX_BULK_THOUGHTS) {
+      return toolError(
+        "invalid_input",
+        `bulk capture exceeds maximum of ${MAX_BULK_THOUGHTS} thoughts per call (got ${a.thoughts.length})`,
+      );
+    }
+
     const results: Array<{ id: string; linked: string[]; skipped: string[] }> = [];
     for (const thought of a.thoughts) {
       if (!thought.content || typeof thought.content !== "string") {
@@ -145,6 +212,10 @@ export function handleCaptureThought(
           "invalid_input",
           "Each thought in bulk capture must have a content string",
         );
+      }
+      const err = validateThoughtInput(thought);
+      if (err) {
+        return toolError("invalid_input", err);
       }
       results.push(captureSingle(db, thought));
     }
@@ -163,11 +234,23 @@ export function handleCaptureThought(
     );
   }
 
+  const singleErr = validateThoughtInput({
+    content: a.content,
+    summary: a.summary,
+    topics: a.topics,
+    people: a.people,
+  });
+  if (singleErr) {
+    return toolError("invalid_input", singleErr);
+  }
+
   const result = captureSingle(db, {
     content: a.content,
     summary: a.summary,
     type: a.type,
     source: a.source,
+    source_agent: a.source_agent,
+    trust_level: a.trust_level,
     project: a.project,
     topics: a.topics,
     people: a.people,
