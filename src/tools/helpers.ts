@@ -1,3 +1,17 @@
+// ---------------------------------------------------------------------------
+// Input length limits (OWASP ASI06 — memory poisoning mitigation)
+// ---------------------------------------------------------------------------
+// These caps prevent a malicious or compromised AI tool from flooding the
+// memory store with arbitrarily large content that could be used for prompt
+// injection at retrieval time or to exhaust storage.
+export const MAX_CONTENT_LENGTH = 50_000; // ~50 KB
+export const MAX_SUMMARY_LENGTH = 200;
+export const MAX_TOPIC_LENGTH = 100;
+export const MAX_TOPICS_COUNT = 20;
+export const MAX_PEOPLE_COUNT = 20;
+export const MAX_PERSON_LENGTH = 100;
+export const MAX_BULK_THOUGHTS = 50;
+
 export interface ToolResult {
   [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;

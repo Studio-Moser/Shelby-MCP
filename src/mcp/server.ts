@@ -14,6 +14,15 @@ import { handleDeleteThought } from "../tools/delete.js";
 import { handleManageEdges, handleExploreGraph } from "../tools/graph.js";
 import { handleThoughtStats } from "../tools/stats.js";
 import type { ToolResult } from "../tools/helpers.js";
+import {
+  MAX_CONTENT_LENGTH,
+  MAX_SUMMARY_LENGTH,
+  MAX_TOPIC_LENGTH,
+  MAX_TOPICS_COUNT,
+  MAX_PEOPLE_COUNT,
+  MAX_PERSON_LENGTH,
+  MAX_BULK_THOUGHTS,
+} from "../tools/helpers.js";
 
 const VERSION = "0.1.0";
 
@@ -96,32 +105,33 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         openWorldHint: false,
       },
       inputSchema: {
-        content: z.string().describe("The thought content").optional(),
-        summary: z.string().describe("One-line summary for search results").optional(),
+        content: z.string().max(MAX_CONTENT_LENGTH).describe("The thought content").optional(),
+        summary: z.string().max(MAX_SUMMARY_LENGTH).describe("One-line summary for search results").optional(),
         type: z
           .enum(["note", "decision", "task", "question", "reference", "insight"])
           .describe("Thought type")
           .optional(),
         source: z.string().describe("Source tool or context").optional(),
         project: z.string().describe("Project association").optional(),
-        topics: z.array(z.string()).describe("Topic tags").optional(),
-        people: z.array(z.string()).describe("People mentioned").optional(),
+        topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("Topic tags").optional(),
+        people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("People mentioned").optional(),
         metadata: z.record(z.unknown()).describe("Arbitrary metadata").optional(),
         related_to: z.array(z.string()).describe("IDs of related thoughts to link").optional(),
         thoughts: z
           .array(
             z.object({
-              content: z.string(),
-              summary: z.string().optional(),
+              content: z.string().max(MAX_CONTENT_LENGTH),
+              summary: z.string().max(MAX_SUMMARY_LENGTH).optional(),
               type: z.string().optional(),
               source: z.string().optional(),
               project: z.string().optional(),
-              topics: z.array(z.string()).optional(),
-              people: z.array(z.string()).optional(),
+              topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).optional(),
+              people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).optional(),
               metadata: z.record(z.unknown()).optional(),
               related_to: z.array(z.string()).optional(),
             }),
           )
+          .max(MAX_BULK_THOUGHTS)
           .describe("Bulk capture: array of thoughts")
           .optional(),
       },
@@ -223,13 +233,13 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       inputSchema: {
         id: z.string().describe("Single thought ID to update").optional(),
         ids: z.array(z.string()).describe("Multiple thought IDs for bulk update").optional(),
-        content: z.string().describe("New content").optional(),
-        summary: z.string().describe("New summary").optional(),
+        content: z.string().max(MAX_CONTENT_LENGTH).describe("New content").optional(),
+        summary: z.string().max(MAX_SUMMARY_LENGTH).describe("New summary").optional(),
         type: z.string().describe("New type").optional(),
         source: z.string().describe("New source").optional(),
         project: z.string().describe("New project").optional(),
-        topics: z.array(z.string()).describe("New topics").optional(),
-        people: z.array(z.string()).describe("New people").optional(),
+        topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("New topics").optional(),
+        people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("New people").optional(),
         metadata: z.record(z.unknown()).describe("New metadata").optional(),
         visibility: z.string().describe("New visibility").optional(),
       },
