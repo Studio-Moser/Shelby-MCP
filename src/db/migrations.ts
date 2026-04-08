@@ -99,6 +99,18 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    description: "source_agent and trust_level columns on thoughts",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE thoughts ADD COLUMN source_agent TEXT;
+        ALTER TABLE thoughts ADD COLUMN trust_level TEXT CHECK(trust_level IN ('trusted', 'unverified', 'external')) NOT NULL DEFAULT 'trusted';
+        CREATE INDEX IF NOT EXISTS idx_thoughts_trust_level ON thoughts(trust_level);
+        CREATE INDEX IF NOT EXISTS idx_thoughts_source_agent ON thoughts(source_agent);
+      `);
+    },
+  },
 ];
 
 export function getSchemaVersion(db: Database.Database): number {

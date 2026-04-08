@@ -1,11 +1,15 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 
+export type TrustLevel = "trusted" | "unverified" | "external";
+
 export interface ThoughtInput {
   content: string;
   summary?: string;
   type?: string;
   source?: string;
+  source_agent?: string;
+  trust_level?: TrustLevel;
   project?: string;
   topics?: string[];
   people?: string[];
@@ -19,6 +23,8 @@ export interface ThoughtRecord {
   summary: string | null;
   type: string;
   source: string;
+  source_agent: string | null;
+  trust_level: TrustLevel;
   project: string | null;
   topics: string[];
   people: string[];
@@ -45,6 +51,8 @@ export interface ListOptions {
   topic?: string;
   person?: string;
   source?: string;
+  source_agent?: string;
+  trust_level?: TrustLevel;
   since?: string;
   until?: string;
   has_summary?: boolean;
@@ -65,6 +73,8 @@ interface RawThoughtRow {
   summary: string | null;
   type: string;
   source: string;
+  source_agent: string | null;
+  trust_level: TrustLevel;
   project: string | null;
   topics: string | null;
   people: string | null;
@@ -114,6 +124,8 @@ function rowToRecord(row: RawThoughtRow): ThoughtRecord {
     summary: row.summary,
     type: row.type,
     source: row.source,
+    source_agent: row.source_agent,
+    trust_level: row.trust_level ?? "trusted",
     project: row.project,
     topics: parseJsonArray(row.topics),
     people: parseJsonArray(row.people),
@@ -142,8 +154,8 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO thoughts (id, content, summary, type, source, project, topics, people, visibility, metadata, created_at, updated_at)
-    VALUES (@id, @content, @summary, @type, @source, @project, @topics, @people, @visibility, @metadata, @created_at, @updated_at)
+    INSERT INTO thoughts (id, content, summary, type, source, source_agent, trust_level, project, topics, people, visibility, metadata, created_at, updated_at)
+    VALUES (@id, @content, @summary, @type, @source, @source_agent, @trust_level, @project, @topics, @people, @visibility, @metadata, @created_at, @updated_at)
   `);
 
   stmt.run({
@@ -152,6 +164,8 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
     summary: input.summary ?? null,
     type: input.type ?? "note",
     source: input.source ?? "unknown",
+    source_agent: input.source_agent ?? null,
+    trust_level: input.trust_level ?? "trusted",
     project: input.project ?? null,
     topics: input.topics ? JSON.stringify(input.topics) : null,
     people: input.people ? JSON.stringify(input.people) : null,
@@ -214,6 +228,14 @@ export function updateThought(
     setClauses.push("metadata = @metadata");
     params.metadata = JSON.stringify(updates.metadata);
   }
+  if (updates.source_agent !== undefined) {
+    setClauses.push("source_agent = @source_agent");
+    params.source_agent = updates.source_agent;
+  }
+  if (updates.trust_level !== undefined) {
+    setClauses.push("trust_level = @trust_level");
+    params.trust_level = updates.trust_level;
+  }
 
   if (setClauses.length === 0) return false;
 
@@ -253,6 +275,14 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   if (options.source) {
     whereClauses.push("source = @source");
     params.source = options.source;
+  }
+  if (options.source_agent) {
+    whereClauses.push("source_agent = @source_agent");
+    params.source_agent = options.source_agent;
+  }
+  if (options.trust_level) {
+    whereClauses.push("trust_level = @trust_level");
+    params.trust_level = options.trust_level;
   }
   if (options.since) {
     whereClauses.push("created_at >= @since");
