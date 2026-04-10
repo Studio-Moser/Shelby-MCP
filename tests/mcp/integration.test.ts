@@ -30,22 +30,25 @@ describe("MCP Integration", () => {
     db?.close();
   });
 
-  // ---- 1. Lists all 9 tools ----
-  it("lists all 9 tools", async () => {
+  // ---- 1. Lists all 11 tools ----
+  // (9 original memory tools + get_brief + select_context ported from the Mac app)
+  it("lists all 11 tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "capture_thought",
       "delete_thought",
       "explore_graph",
+      "get_brief",
       "get_thought",
       "list_thoughts",
       "manage_edges",
       "search_thoughts",
+      "select_context",
       "thought_stats",
       "update_thought",
     ]);
-    expect(tools).toHaveLength(9);
+    expect(tools).toHaveLength(11);
   });
 
   // ---- 2. Capture and retrieve ----

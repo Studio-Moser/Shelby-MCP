@@ -13,6 +13,8 @@ import { handleUpdateThought } from "../tools/update.js";
 import { handleDeleteThought } from "../tools/delete.js";
 import { handleManageEdges, handleExploreGraph } from "../tools/graph.js";
 import { handleThoughtStats } from "../tools/stats.js";
+import { handleGetBrief } from "../tools/brief.js";
+import { handleSelectContext } from "../tools/context.js";
 import type { ToolResult } from "../tools/helpers.js";
 import {
   MAX_CONTENT_LENGTH,
@@ -395,6 +397,60 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     withLogging("thought_stats", () => handleThoughtStats(db)),
   );
 
+  // --- get_brief ---
+
+  server.registerTool(
+    "get_brief",
+    {
+      title: "Get Brief",
+      description: "Generate a high-level project context brief for session orientation. Call this at the start of every new session before doing work — it loads key decisions, references, insights, and recent activity so you have full context without issuing multiple search_thoughts / list_thoughts calls. Scope 'essentials' returns just the durable context; 'recent' returns everything from the last 7 days; 'full' (default) returns both.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        scope: z
+          .enum(["essentials", "recent", "full"])
+          .describe("What to include. Default: full")
+          .optional(),
+        project: z
+          .string()
+          .describe("Project path to scope the brief to")
+          .optional(),
+      },
+    },
+    withLogging("get_brief", (args) => handleGetBrief(db, args as Record<string, unknown>)),
+  );
+
+  // --- select_context ---
+
+  server.registerTool(
+    "select_context",
+    {
+      title: "Select Context",
+      description: "Compose a targeted context payload by filtering thoughts by type, topic, person, and date. Returns a formatted markdown document ready for agent consumption. Use this instead of get_brief when you need specific context rather than a full overview — for example, 'all decisions about auth from the last 30 days' or 'everything mentioning Sarah'. Can optionally prepend an essentials brief header and/or append memory stats.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        types: z.array(z.string()).describe("Thought types to include").optional(),
+        topics: z.array(z.string()).describe("Topic filters (first topic is applied to the list query)").optional(),
+        people: z.array(z.string()).describe("People filters (first person is applied to the list query)").optional(),
+        since: z.string().describe("ISO 8601 date — only include thoughts created after this date").optional(),
+        project: z.string().describe("Project path to scope the selection").optional(),
+        include_brief: z.boolean().describe("Prepend an essentials brief header (default: false)").optional(),
+        include_stats: z.boolean().describe("Append a memory stats summary (default: false)").optional(),
+        limit: z.number().describe("Max thoughts to return (default: 20, max: 100)").optional(),
+      },
+    },
+    withLogging("select_context", (args) => handleSelectContext(db, args as Record<string, unknown>)),
+  );
+
   // --- Resources ---
   // Stub so that clients calling resources/list (e.g. Codex) get an empty
   // list instead of "Method not found", which prevents them from registering
@@ -405,7 +461,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
   }, async () => ({
     contents: [{
       uri: "shelbymcp://status",
-      text: JSON.stringify({ status: "ok", tools: 9, prompts: 3 }),
+      text: JSON.stringify({ status: "ok", tools: 11, prompts: 3 }),
       mimeType: "application/json",
     }],
   }));
@@ -512,8 +568,12 @@ Call \`search_thoughts\` or \`list_thoughts\` before:
 - \`get_thought\` — Fetch a single thought by ID with full content. Use after search/list to drill into details.
 
 ## Graph
-- \`manage_edges\` — Create or remove typed relationships between thoughts. Actions: \`link\`, \`unlink\`. Types: \`refines\`, \`cites\`, \`refuted_by\`, \`tags\`, \`related\`, \`follows\`.
+- \`manage_edges\` — Create or remove typed relationships between thoughts. Actions: \`link\`, \`unlink\`, \`expire\`. Types: \`refines\`, \`cites\`, \`refuted_by\`, \`tags\`, \`related\`, \`follows\`.
 - \`explore_graph\` — Traverse relationships from a starting thought. Set \`max_depth\` (1-5) and optionally filter by \`edge_types\`.
+
+## Orientation & Context
+- \`get_brief\` — Generate a high-level project brief (key decisions + recent activity). Call at the start of every session before doing work.
+- \`select_context\` — Compose a targeted context payload by filtering thoughts by type, topic, person, or date. Use when you need a narrow slice rather than a full overview.
 
 ## Stats
 - \`thought_stats\` — Aggregate counts by type, top topics, recent activity. Good for understanding what's in memory.`,
