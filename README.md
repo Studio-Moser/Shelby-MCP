@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>The knowledge-graph memory server for AI tools.</strong><br/>
+  <strong>The memory backbone for Shelby — and a standalone knowledge-graph memory server for any MCP-compatible AI tool.</strong><br/>
   Mem0-grade intelligence. Engram-grade simplicity.
 </p>
 
@@ -25,9 +25,11 @@
 
 Every AI memory server is a bag of embeddings. **ShelbyMCP connects your thoughts.**
 
-ShelbyMCP is a zero-dependency MCP memory server with a built-in knowledge graph. It gives Claude Code, Cursor, Codex, Windsurf, Gemini, Antigravity, and any MCP-compatible AI tool persistent memory that understands how your thoughts are related — not just what they contain.
+ShelbyMCP is the open-source memory backbone of [Shelby](https://shelbybot.com) — your AI coworker on Mac — and a zero-dependency MCP memory server you can run standalone with any MCP-compatible AI tool. It gives Claude Code, Cursor, Codex, Windsurf, Gemini, Antigravity, and others persistent memory that understands how your thoughts are related — not just what they contain.
 
 Ship it with the **Forage skill**, a scheduled task that runs on your existing AI subscription to continuously enrich, consolidate, and connect your memories. No Docker. No Python. No cloud accounts. Just a binary and a database file.
+
+> **Where this fits in Shelby**: Shelby is an AI coworker built on three layers — companion (the experience), harness (the runtime that carries context, enforces governance, holds history), and memory (this server). If you want the full coworker experience, install Shelby for Mac. If you only want the memory backbone for your existing AI tools, ShelbyMCP standalone is what you want.
 
 ### Why ShelbyMCP?
 
