@@ -320,7 +320,7 @@ You MUST call `search_thoughts` or `list_thoughts` before:
 
 ## 3. Forage Skill (Optional)
 
-The Forage skill is a scheduled task that runs on your AI subscription to continuously improve your memories. It backfills summaries, generates embeddings, merges duplicates, detects contradictions, discovers connections, and produces weekly digests.
+The Forage skill is a scheduled task you trigger from your own Claude Code (or Codex / Gemini CLI) session — it runs against your AI subscription, never ShelbyMCP's, so the server stays zero-cost and zero-cloud while your normal subscription terms apply. It backfills summaries, generates embeddings, merges duplicates, detects contradictions, discovers connections, and produces weekly digests.
 
 > **Quick setup:** Run `shelbymcp forage` to print the Forage prompt to your terminal.
 
