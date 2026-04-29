@@ -10,7 +10,7 @@
 ## Design Principles
 
 1. **Minimal dependencies.** `npx shelbymcp` and you're running. Single SQLite file. No Docker, no Python, no cloud accounts.
-2. **Smart agent, dumb server.** The MCP server runs zero inference. The AI tools calling the tools are already LLMs — they provide structured metadata at capture time. The Forage skill uses the user's existing AI subscription for enrichment.
+2. **Smart agent, dumb server.** The MCP server runs zero inference. The AI tools calling the tools are already LLMs — they provide structured metadata at capture time. The Forage skill is run by the user in their own Claude Code (or Codex / Gemini CLI) session — it executes on the user's subscription, not via ShelbyMCP authenticating on their behalf — so the server stays zero-cost and zero-cloud.
 3. **Knowledge graph as a first-class citizen.** Thoughts aren't isolated. Typed edges (refines, cites, refuted_by, tags, related, follows) connect memories into a navigable graph.
 4. **Single file for portability.** The entire database is one SQLite file. Easy to back up, sync (CloudKit, Dropbox, git), or move between machines.
 5. **Native to the MCP ecosystem.** Built with the official MCP TypeScript SDK and better-sqlite3 — the same tools the MCP community already uses.

@@ -27,7 +27,7 @@ Every AI memory server is a bag of embeddings. **ShelbyMCP connects your thought
 
 ShelbyMCP is the open-source memory backbone of [Shelby](https://shelbybot.com) — your AI coworker on Mac — and a zero-dependency MCP memory server you can run standalone with any MCP-compatible AI tool. It gives Claude Code, Cursor, Codex, Windsurf, Gemini, Antigravity, and others persistent memory that understands how your thoughts are related — not just what they contain.
 
-Ship it with the **Forage skill**, a scheduled task that runs on your existing AI subscription to continuously enrich, consolidate, and connect your memories. No Docker. No Python. No cloud accounts. Just a binary and a database file.
+Ship it with the **Forage skill**, a scheduled task you run in your own Claude Code (or Codex / Gemini CLI) session to continuously enrich, consolidate, and connect your memories. Forage uses *your* subscription — the same way you'd use Claude Code yourself — so ShelbyMCP itself stays zero-cost and zero-cloud. No Docker. No Python. No cloud accounts. Just a binary and a database file.
 
 > **Where this fits in Shelby**: Shelby is an AI coworker built on three layers — companion (the experience), harness (the runtime that carries context, enforces governance, holds history), and memory (this server). If you want the full coworker experience, install Shelby for Mac. If you only want the memory backbone for your existing AI tools, ShelbyMCP standalone is what you want.
 
@@ -39,7 +39,7 @@ Ship it with the **Forage skill**, a scheduled task that runs on your existing A
 | Memories are a flat pile of text | Knowledge graph with typed relationships (refines, cites, refuted_by, tags) |
 | Search results blow up your context window | Pre-computed summaries — search returns one-liners, fetch full content on demand |
 | No memory maintenance | Forage skill auto-consolidates, deduplicates, and connects |
-| Vector search requires heavy infra | Forage skill backfills embeddings using your existing AI subscription |
+| Vector search requires heavy infra | Forage skill backfills embeddings via the AI tool you already run yourself (Claude Code, Codex, Gemini CLI) — Shelby never touches your subscription auth |
 | Requires Docker/Python/Cloud | `npx shelbymcp`, single SQLite file |
 
 ---
@@ -191,7 +191,7 @@ Agents create edges at capture time ("this decision relates to thought X") and t
 
 ## The Forage Skill
 
-ShelbyMCP ships with `shelby-forage`, a scheduled skill that runs on your existing AI subscription (Claude Code, Codex, etc.) to continuously improve your memory. The server stays zero-dependency — the intelligence comes from tools you're already paying for.
+ShelbyMCP ships with `shelby-forage`, a scheduled skill *you* run in your own AI tool of choice (Claude Code, Codex, Gemini CLI) to continuously improve your memory. The skill executes inside your session, on your subscription — ShelbyMCP itself never authenticates the call. The server stays zero-dependency, your subscription terms apply normally, and the intelligence comes from tools you're already paying for.
 
 | Task | Frequency | What it does |
 |---|---|---|

@@ -39,7 +39,7 @@ npm publish
 
 ## Key Design Decisions
 
-1. **Smart agent, dumb server.** The server runs zero inference. Agents provide structured metadata AND summaries at capture time. The Forage skill uses the user's AI subscription for enrichment.
+1. **Smart agent, dumb server.** The server runs zero inference. Agents provide structured metadata AND summaries at capture time. The Forage skill is run by the user in their own Claude Code (or Codex / Gemini CLI) session — ShelbyMCP itself never authenticates the user's AI subscription, so the server stays zero-cost and zero-cloud and the user's subscription terms apply normally.
 2. **Knowledge graph is the differentiator.** Typed edges (refines, cites, refuted_by, tags, related, follows) between thoughts.
 3. **Search returns summaries, not content.** The `summary` column stores agent-provided one-liners. Search/list tools return summaries + IDs. The agent calls `get_thought` for full content. This prevents 40K+ token blowups on search results.
 4. **Static tool descriptions.** Tool definitions are in the system prompt on every message. Dynamic data in descriptions breaks prompt caching (10x cost). Put dynamic info in tool responses, never descriptions.
