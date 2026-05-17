@@ -28,7 +28,8 @@ import {
 import { getEmbeddingConfig, generateEmbedding } from "../db/embedding.js";
 import { storeEmbedding } from "../db/vectors.js";
 
-const VERSION = "0.1.0";
+// Keep in sync with package.json version.
+const VERSION = "0.3.0";
 
 // Logging levels in order of severity (syslog-style)
 const LOG_LEVELS: LoggingLevel[] = [
