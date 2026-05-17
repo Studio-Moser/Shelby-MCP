@@ -36,6 +36,18 @@ export function getEmbeddingConfig(): EmbeddingConfig {
 }
 
 /**
+ * Return a stable, specific identifier for the embedding provider in use.
+ * Used as `metadata.embedding_provider` on captured thoughts so cross-provider
+ * vector comparisons can be skipped per ADR 0001 §3. Returns null when no
+ * server-side provider is configured (embeddings, if present, came from the
+ * calling agent — provenance unknown).
+ */
+export function getEmbeddingProviderId(config: EmbeddingConfig): string | null {
+  if (config.provider === "gemini") return `gemini-${GEMINI_EMBEDDING_MODEL}`;
+  return null;
+}
+
+/**
  * Generate an embedding vector for the given text using the configured provider.
  * Returns null if the provider is "none" or if generation fails.
  */

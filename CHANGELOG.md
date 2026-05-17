@@ -5,6 +5,12 @@ All notable changes to ShelbyMCP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Schema version stamp bumped from 4 → 5 to align with Shelby-MacOS's Swift memory implementation, per [ADR 0001 §8](https://github.com/Studio-Moser/Shelby-Strategy/blob/main/docs/adr/0001-memory-server-architecture-contract.md). No actual schema change — the v5 migration is a no-op version stamp. Both codebases now advance through the same migration sequence so cross-codebase tooling and conformance tests can rely on a single number.
+- Logged server version constant updated from `0.1.0` → `0.3.0` to match `package.json`. Comment added to keep them in sync.
+
 ## [0.1.0] - 2026-03-28
 
 ### Added

@@ -111,6 +111,21 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    description: "version-stamp alignment with Shelby-MacOS (no schema change)",
+    up: (_db) => {
+      // No-op migration. This exists to keep the schema version sequence
+      // aligned with the Shelby-MacOS Swift memory implementation, which
+      // independently advanced to v5 (covering the same source_agent +
+      // trust_level + temporal-edge work that npm bundled into v3+v4).
+      // Per ADR 0001 §8 (Shelby-Strategy/docs/adr/0001-memory-server-architecture-contract.md):
+      // "Adding a column = +1. ... Both implementations advance through the
+      // same sequence." Bumping the version stamp here keeps `getSchemaVersion`
+      // results consistent across the two implementations so cross-codebase
+      // tooling and conformance tests can rely on a single number.
+    },
+  },
 ];
 
 export function getSchemaVersion(db: Database.Database): number {

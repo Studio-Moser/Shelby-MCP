@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { getSchemaVersion } from "../../src/db/migrations.js";
 
-describe("Migration v4 — source_agent and trust_level", () => {
+describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
   let db: ThoughtDatabase;
 
   beforeEach(() => {
@@ -13,8 +13,8 @@ describe("Migration v4 — source_agent and trust_level", () => {
     db?.close();
   });
 
-  it("schema version is 4 after all migrations", () => {
-    expect(getSchemaVersion(db.db)).toBe(4);
+  it("schema version is 5 after all migrations", () => {
+    expect(getSchemaVersion(db.db)).toBe(5);
   });
 
   it("thoughts table has source_agent column", () => {

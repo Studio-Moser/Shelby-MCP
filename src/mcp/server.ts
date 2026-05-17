@@ -25,7 +25,7 @@ import {
   MAX_PERSON_LENGTH,
   MAX_BULK_THOUGHTS,
 } from "../tools/helpers.js";
-import { getEmbeddingConfig, generateEmbedding } from "../db/embedding.js";
+import { getEmbeddingConfig, generateEmbedding, getEmbeddingProviderId } from "../db/embedding.js";
 import { storeEmbedding } from "../db/vectors.js";
 
 // Keep in sync with package.json version.
@@ -168,6 +168,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
             }
           }
           // Embed each thought using its content
+          const providerId = getEmbeddingProviderId(embeddingConfig);
           for (const thoughtId of idsToEmbed) {
             // Fetch the thought content from the DB for embedding input
             const thought = db.db.prepare("SELECT content, summary FROM thoughts WHERE id = ?").get(thoughtId) as { content: string; summary: string | null } | undefined;
@@ -176,7 +177,14 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
             const vector = await generateEmbedding(textToEmbed, embeddingConfig);
             if (vector) {
               storeEmbedding(db.db, thoughtId, vector);
-              log("debug", "capture_thought", { event: "embedding_stored", thoughtId, provider: embeddingConfig.provider });
+              // Tag the thought with the embedding provider so cross-provider
+              // vector comparisons can be skipped per ADR 0001 §3.
+              if (providerId) {
+                db.db.prepare(
+                  "UPDATE thoughts SET metadata = json_set(COALESCE(metadata, '{}'), '$.embedding_provider', ?) WHERE id = ?",
+                ).run(providerId, thoughtId);
+              }
+              log("debug", "capture_thought", { event: "embedding_stored", thoughtId, provider: embeddingConfig.provider, providerId });
             }
           }
         } catch (err) {
