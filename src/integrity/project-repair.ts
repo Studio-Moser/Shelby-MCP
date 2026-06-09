@@ -1,80 +1,9 @@
 import type Database from "better-sqlite3";
 import { getThought, updateThought, type ThoughtRecord } from "../db/thoughts.js";
 import { upsertProject, getProjectBySlug, listProjects, type Project } from "../db/projects.js";
+import { DEFAULT_KNOWN_PROJECTS, DEFAULT_TOPIC_CLUSTERS } from "./seed-data.js";
 
 const REPAIRED_BY = "integrity-project-v1";
-
-// Known projects seed. member_repos are normalized git remotes; member_paths are
-// machine-local hints (used to map legacy absolute-path `project` values to slugs).
-const KNOWN_PROJECTS: Project[] = [
-  {
-    slug: "shelby",
-    displayName: "Shelby",
-    provisional: false,
-    memberRepos: [
-      "github.com/Studio-Moser/Shelby-MCP",
-      "github.com/Studio-Moser/Shelby-MacOS",
-      "github.com/Studio-Moser/Shelby-Strategy",
-      "github.com/Studio-Moser/Shelby-Website",
-    ],
-    memberPaths: ["/Users/timmoser/Projects/Shelby"],
-  },
-  {
-    slug: "kuow-games",
-    displayName: "KUOW Games",
-    provisional: false,
-    memberRepos: [],
-    memberPaths: [
-      "/Users/timmoser/Projects/KUOW-Games",
-      "/Users/timmoser/Projects/KUOW-Core",
-      "/Users/timmoser/Projects/KUOW-Connect",
-      "/Users/timmoser/Projects/KUOW-Website",
-    ],
-  },
-  {
-    slug: "the-crooked-line",
-    displayName: "The Crooked Line",
-    provisional: false,
-    memberRepos: ["github.com/The-Crooked-Line/website"],
-    memberPaths: ["/Users/timmoser/Projects/The Crooked Line"],
-  },
-  {
-    slug: "ausra-photos",
-    displayName: "Ausra Photos",
-    provisional: false,
-    memberRepos: [],
-    memberPaths: ["/Users/timmoser/Projects/Ausra Photos"],
-  },
-];
-
-// Distinctive topic → slug. Only topics that unambiguously identify a project.
-const TOPIC_CLUSTERS: Record<string, string> = {
-  "kuow-games": "kuow-games",
-  "foggy-find": "kuow-games",
-  "game-shell": "kuow-games",
-  "game-takeover": "kuow-games",
-  "player-progress": "kuow-games",
-  "daily-puzzle-pipeline": "kuow-games",
-  "overnight-worker": "the-crooked-line",
-  "polymarket": "the-crooked-line",
-  "prediction-market": "the-crooked-line",
-  "prediction-markets": "the-crooked-line",
-  "cftc": "the-crooked-line",
-  "sec-edgar": "the-crooked-line",
-  "market-manipulation": "the-crooked-line",
-  "government-contracts": "the-crooked-line",
-  "congressional-trading": "the-crooked-line",
-  "unusual-whales": "the-crooked-line",
-  "the-crooked-line": "the-crooked-line",
-  "ausra-photos": "ausra-photos",
-  "ausra-research": "ausra-photos",
-  "shelby-daily-research": "shelby",
-  "shelby-macos": "shelby",
-  "shelby-mcp": "shelby",
-  "shelby-strategy": "shelby",
-  "shelby-research": "shelby",
-  "shelby-mac-ui": "shelby",
-};
 
 export interface RepairItem {
   id: string;
@@ -90,8 +19,8 @@ export interface RepairReport {
   applied: number;
 }
 
-export function seedKnownProjects(db: Database.Database): void {
-  for (const p of KNOWN_PROJECTS) {
+export function seedKnownProjects(db: Database.Database, projects: Project[] = DEFAULT_KNOWN_PROJECTS): void {
+  for (const p of projects) {
     const existing = getProjectBySlug(db, p.slug);
     // Don't clobber a human-confirmed project that's been edited; only seed if
     // missing or still provisional.
@@ -117,10 +46,10 @@ function inferByPath(project: string | null, projects: Project[]): string | null
   return null;
 }
 
-function inferByTopics(topics: string[]): { slug: string | null; ambiguous: boolean } {
+function inferByTopics(topics: string[], topicClusters: Record<string, string>): { slug: string | null; ambiguous: boolean } {
   const hits = new Set<string>();
   for (const t of topics) {
-    const slug = TOPIC_CLUSTERS[t.toLowerCase()];
+    const slug = topicClusters[t.toLowerCase()];
     if (slug) hits.add(slug);
   }
   if (hits.size === 1) {
@@ -132,7 +61,7 @@ function inferByTopics(topics: string[]): { slug: string | null; ambiguous: bool
   return { slug: null, ambiguous: false };
 }
 
-function classify(t: ThoughtRecord, projects: Project[]): RepairItem {
+function classify(t: ThoughtRecord, projects: Project[], topicClusters: Record<string, string>): RepairItem {
   const byPath = inferByPath(t.project, projects);
   if (byPath) {
     return {
@@ -142,7 +71,7 @@ function classify(t: ThoughtRecord, projects: Project[]): RepairItem {
       reason: `legacy project path matches ${byPath} member_path`,
     };
   }
-  const byTopic = inferByTopics(t.topics);
+  const byTopic = inferByTopics(t.topics, topicClusters);
   if (byTopic.slug) {
     return {
       id: t.id,
@@ -195,23 +124,28 @@ function parseJsonArrayRaw(raw: string | null): string[] {
   }
 }
 
-export function planProjectRepairs(db: Database.Database): RepairReport {
+export function planProjectRepairs(db: Database.Database, topicClusters: Record<string, string> = DEFAULT_TOPIC_CLUSTERS): RepairReport {
   const projects = listProjects(db);
   const highConfidence: RepairItem[] = [];
   const flagged: RepairItem[] = [];
   let scanned = 0;
   for (const t of repairCandidates(db)) {
     scanned++;
-    const item = classify(t as ThoughtRecord, projects);
+    const item = classify(t as ThoughtRecord, projects, topicClusters);
     if (item.confidence === "high") highConfidence.push(item);
     else flagged.push(item);
   }
   return { scanned, highConfidence, flagged, applied: 0 };
 }
 
-export function repairProjects(db: Database.Database, opts: { apply: boolean }): RepairReport {
-  seedKnownProjects(db);
-  const report = planProjectRepairs(db);
+export function repairProjects(
+  db: Database.Database,
+  opts: { apply: boolean; projects?: Project[]; topicClusters?: Record<string, string> },
+): RepairReport {
+  const projects = opts.projects ?? DEFAULT_KNOWN_PROJECTS;
+  const topicClusters = opts.topicClusters ?? DEFAULT_TOPIC_CLUSTERS;
+  seedKnownProjects(db, projects);
+  const report = planProjectRepairs(db, topicClusters);
   if (!opts.apply) return report;
 
   let applied = 0;

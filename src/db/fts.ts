@@ -65,6 +65,7 @@ export function searchThoughts(
   if (options.shared_only) {
     whereClauses.push("t.visibility = 'shared'");
   }
+  // Mirrors the canonical project-scope semantics in src/db/thoughts.ts listThoughts — keep in sync.
   if (options.project_identifier !== undefined) {
     if (options.include_shared) {
       whereClauses.push("(t.project_identifier = ? OR t.visibility = 'shared')");

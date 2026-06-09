@@ -149,6 +149,7 @@ export function handleSearchThoughts(
 
     // Post-fusion filter: enforce type and project constraints that were applied
     // to the FTS pool but bypassed by the vector pool.
+    // Mirrors the canonical project-scope semantics in src/db/thoughts.ts listThoughts — keep in sync.
     let filtered = scored as Array<{ id: string; summary: string | null; type: string; topics: string[]; created_at: string; rrf_score: number }>;
     if (a.type || a.project || a.project_identifier !== undefined || a.shared_only) {
       // Rebuild a project lookup from the metadata map for filtering.

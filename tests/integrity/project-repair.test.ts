@@ -85,6 +85,38 @@ describe("apply", () => {
   });
 });
 
+describe("data injection", () => {
+  it("honors injected projects and topicClusters (not the hardcoded defaults)", () => {
+    const customDb = new Database(":memory:");
+    runMigrations(customDb);
+
+    const customProject = {
+      slug: "custom",
+      displayName: "Custom",
+      memberRepos: [] as string[],
+      memberPaths: ["/tmp/x"],
+      provisional: false,
+    };
+    const customTopicClusters = { "widgets": "custom" };
+
+    repairProjects(customDb, {
+      apply: true,
+      projects: [customProject],
+      topicClusters: customTopicClusters,
+    });
+
+    const id = insertThought(customDb, { content: "injection test", topics: ["widgets"] });
+    // The thought was inserted AFTER the initial repair pass, so run repair again
+    repairProjects(customDb, {
+      apply: true,
+      projects: [customProject],
+      topicClusters: customTopicClusters,
+    });
+
+    expect(getThought(customDb, id)?.project_identifier).toBe("custom");
+  });
+});
+
 // helper
 import { getProjectBySlug } from "../../src/db/projects.js";
 function getProjectBySlugSafe(db: Database.Database, slug: string): boolean {

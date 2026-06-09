@@ -279,6 +279,9 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   if (options.shared_only) {
     whereClauses.push("visibility = 'shared'");
   }
+  // CANONICAL project-scope semantics: rows whose project_identifier matches the caller's slug,
+  // plus visibility='shared' when include_shared. Mirrored in src/db/fts.ts (searchThoughts)
+  // and the hybrid post-fusion filter in src/tools/search.ts — keep all three in sync.
   if (options.project_identifier !== undefined) {
     if (options.include_shared) {
       whereClauses.push("(project_identifier = @project_identifier OR visibility = 'shared')");
