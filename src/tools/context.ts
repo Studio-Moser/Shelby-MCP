@@ -27,6 +27,8 @@ export interface SelectContextArgs {
   people?: string[];
   since?: string;
   project?: string;
+  project_identifier?: string;
+  include_shared?: boolean;
   include_brief?: boolean;
   include_stats?: boolean;
   limit?: number;
@@ -59,11 +61,9 @@ export function handleSelectContext(
   // formatting logic; extract just the rendered markdown so we can splice it
   // into the combined output.
   if (a.include_brief === true) {
-    // TODO(#9): slug-scope select_context (brief header + thought filter) on
-    // project_identifier. The old `project` (path) key is a no-op after the
-    // get_brief rename, so omit it rather than silently swallow it.
     const briefResult = handleGetBrief(db, {
       scope: "essentials",
+      project_identifier: a.project_identifier,
     });
     if (!briefResult.isError) {
       try {
@@ -88,6 +88,8 @@ export function handleSelectContext(
     personFilter: a.people?.[0],
     since: a.since,
     project: a.project,
+    project_identifier: a.project_identifier,
+    include_shared: a.include_shared,
     limit,
   });
 
@@ -112,6 +114,7 @@ export function handleSelectContext(
   return toolSuccess({
     matched_count: thoughts.length,
     project: a.project ?? null,
+    project_identifier: a.project_identifier ?? null,
     document,
   });
 }
@@ -130,6 +133,8 @@ interface CollectArgs {
   personFilter: string | undefined;
   since: string | undefined;
   project: string | undefined;
+  project_identifier: string | undefined;
+  include_shared: boolean | undefined;
   limit: number;
 }
 
@@ -148,6 +153,8 @@ function collectThoughts(
         person: args.personFilter,
         since: args.since,
         project: args.project,
+        project_identifier: args.project_identifier,
+        include_shared: args.include_shared ?? true,
         limit: args.limit,
       });
       pool.push(...result.results);
@@ -158,6 +165,8 @@ function collectThoughts(
       person: args.personFilter,
       since: args.since,
       project: args.project,
+      project_identifier: args.project_identifier,
+      include_shared: args.include_shared ?? true,
       limit: args.limit,
     });
     pool.push(...result.results);

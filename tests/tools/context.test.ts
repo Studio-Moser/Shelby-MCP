@@ -141,6 +141,23 @@ describe("handleSelectContext", () => {
     expect(data.document).not.toContain("Other thing");
   });
 
+  it("scopes by project_identifier slug", () => {
+    capture("Shelby slug thought", {
+      project_identifier: "shelby",
+      summary: "Shelby slug thought",
+    });
+    capture("Kuow slug thought", {
+      project_identifier: "kuow-games",
+      summary: "Kuow slug thought",
+    });
+
+    const result = handleSelectContext(db, { project_identifier: "shelby" });
+    const data = parseResult(result);
+    expect(data.matched_count).toBe(1);
+    expect(data.document).toContain("Shelby slug thought");
+    expect(data.document).not.toContain("Kuow slug thought");
+  });
+
   it("rejects non-string-array types", () => {
     const result = handleSelectContext(db, { types: [1, 2, 3] as unknown as string[] });
     expect(result.isError).toBe(true);
