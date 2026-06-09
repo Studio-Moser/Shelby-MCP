@@ -10,6 +10,7 @@ Usage:
   shelbymcp forage             Print the Forage skill prompt
   shelbymcp onboard            Print the onboarding interview prompt
   shelbymcp migrate            Print the migration prompt for other AI tools
+  shelbymcp repair-projects [--apply]  Back-fill project_identifier on existing memories; dry-run unless --apply
   shelbymcp help               Show this help
 
 Setup agents:

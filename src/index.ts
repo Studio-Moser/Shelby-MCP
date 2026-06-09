@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { parseArgs } from "./config.js";
+import { parseArgs, getDefaultDbPath } from "./config.js";
 import { createServer } from "./mcp/server.js";
 import { startHttpTransport } from "./mcp/http-transport.js";
 import { printHelp } from "./cli/help.js";
@@ -11,6 +11,7 @@ import { printOnboard } from "./cli/onboard.js";
 import { printMigrate } from "./cli/migrate.js";
 import { runSetup } from "./cli/setup.js";
 import { runUninstall } from "./cli/uninstall.js";
+import { runRepairProjects } from "./cli/repair-projects.js";
 
 async function main() {
   const config = parseArgs(process.argv.slice(2));
@@ -43,6 +44,14 @@ async function main() {
       case "migrate":
         printMigrate();
         break;
+      case "repair-projects": {
+        // Resolve dbPath the same way the server does: env var → default.
+        // getDefaultDbPath() returns ~/.shelbymcp/memory.db; SHELBY_DB_PATH
+        // is the override env var (config.ts uses the same logic for the server).
+        const dbPath = process.env.SHELBY_DB_PATH ?? getDefaultDbPath();
+        runRepairProjects(dbPath, config.apply ?? false);
+        break;
+      }
     }
     process.exit(0);
   }

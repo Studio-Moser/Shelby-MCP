@@ -15,6 +15,16 @@ You have access to the ShelbyMCP memory tools. Run the tasks below in order, ski
 1. Determine today's date and day of the week. Tasks 7 and 8 only run on Mondays.
 2. Check the last forage log: use `search_thoughts` with query `"Forage run"` and `limit: 1` to find the most recent run. Read it with `get_thought` to see what was done last time — how many summaries were backfilled, what was consolidated, any notes about remaining work. Use this to pick up where the last run left off (e.g., if the log says "42 thoughts still missing summaries", prioritize the summary backfill).
 
+## Before Task 1: Project-Identity Hygiene
+
+Run the project-identity repair tool to back-fill missing `project_identifier` fields before enriching memories — this ensures classification and graph-traversal work on the correct project slice.
+
+```
+npx shelbymcp repair-projects --apply
+```
+
+This auto-assigns high-confidence project slugs and flags ambiguous memories with `needs_project_review` in metadata. Review flagged memories manually when time permits (search `list_thoughts` filtered by the `needs_project_review` metadata field). Skip this step if you have no database access from the shell.
+
 ## Task 1: Summary Backfill
 
 Summaries are critical — search results only show summaries, not full content. Find thoughts that are missing them and fill them in.
