@@ -126,6 +126,27 @@ const migrations: Migration[] = [
       // tooling and conformance tests can rely on a single number.
     },
   },
+  {
+    version: 6,
+    description: "Project identity — project_identifier column + projects registry",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE thoughts ADD COLUMN project_identifier TEXT;
+        CREATE INDEX IF NOT EXISTS idx_thoughts_project_identifier ON thoughts(project_identifier);
+
+        CREATE TABLE IF NOT EXISTS projects (
+          slug          TEXT PRIMARY KEY,
+          display_name  TEXT NOT NULL,
+          member_repos  TEXT NOT NULL DEFAULT '[]',
+          member_paths  TEXT NOT NULL DEFAULT '[]',
+          provisional   INTEGER NOT NULL DEFAULT 0,
+          created_at    TEXT NOT NULL,
+          updated_at    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_projects_provisional ON projects(provisional);
+      `);
+    },
+  },
 ];
 
 export function getSchemaVersion(db: Database.Database): number {
