@@ -52,6 +52,7 @@ export interface ListOptions {
   project?: string;
   project_identifier?: string;
   include_shared?: boolean;
+  shared_only?: boolean;
   topic?: string;
   person?: string;
   source?: string;
@@ -274,6 +275,9 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   if (options.project) {
     whereClauses.push("project = @project");
     params.project = options.project;
+  }
+  if (options.shared_only) {
+    whereClauses.push("visibility = 'shared'");
   }
   if (options.project_identifier !== undefined) {
     if (options.include_shared) {

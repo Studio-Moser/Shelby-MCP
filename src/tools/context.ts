@@ -59,9 +59,11 @@ export function handleSelectContext(
   // formatting logic; extract just the rendered markdown so we can splice it
   // into the combined output.
   if (a.include_brief === true) {
+    // TODO(#9): slug-scope select_context (brief header + thought filter) on
+    // project_identifier. The old `project` (path) key is a no-op after the
+    // get_brief rename, so omit it rather than silently swallow it.
     const briefResult = handleGetBrief(db, {
       scope: "essentials",
-      project: a.project,
     });
     if (!briefResult.isError) {
       try {

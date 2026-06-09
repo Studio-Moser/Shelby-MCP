@@ -60,16 +60,27 @@ export function handleGetBrief(
   const recent: ThoughtSummary[] =
     scope === "recent" || scope === "full" ? fetchRecent(db, slug) : [];
 
-  // Deduplicate across the two sections for the total count so thoughts that
-  // appear in both (e.g. a recent decision) are only counted once.
+  // Shared section: visibility='shared' thoughts across all projects.
+  // Fetch before deduplication so we can filter shared ids out of the other sections.
+  const shared: ThoughtSummary[] =
+    scope === "essentials" || scope === "full" ? fetchShared(db) : [];
+
+  // Remove any thought that appears in the Shared section from Essentials and
+  // Recent so each thought renders exactly once.
+  const sharedIds = new Set(shared.map((t) => t.id));
+  const essentialsShown = essentials.filter((t) => !sharedIds.has(t.id));
+  const recentShown = recent.filter((t) => !sharedIds.has(t.id));
+
+  // Deduplicate across all three sections for the total count.
   const uniqueIds = new Set<string>();
-  for (const t of essentials) uniqueIds.add(t.id);
-  for (const t of recent) uniqueIds.add(t.id);
+  for (const t of essentialsShown) uniqueIds.add(t.id);
+  for (const t of recentShown) uniqueIds.add(t.id);
+  for (const t of shared) uniqueIds.add(t.id);
 
-  const lastActivity = newestCreatedAt([...essentials, ...recent]);
+  const lastActivity = newestCreatedAt([...essentialsShown, ...recentShown, ...shared]);
 
-  const essentialsSection = formatEssentials(essentials);
-  const recentSection = formatRecent(recent);
+  const essentialsSection = formatEssentials(essentialsShown);
+  const recentSection = formatRecent(recentShown);
 
   // Build the human-readable brief document. Markdown matches the Mac app's
   // output so the format is identical across transports.
@@ -83,9 +94,9 @@ export function handleGetBrief(
 
   if (essentialsSection) lines.push(essentialsSection, "");
 
-  // Shared section: visibility='shared' thoughts across all projects.
+  // Shared section: visibility='shared' thoughts (already fetched and deduped above).
   if (scope === "essentials" || scope === "full") {
-    const sharedSection = formatShared(fetchShared(db));
+    const sharedSection = formatShared(shared);
     if (sharedSection) lines.push(sharedSection, "");
   }
 
@@ -113,12 +124,14 @@ function fetchEssentials(
 ): ThoughtSummary[] {
   // Fetch each essential type in a separate list call so we can guarantee
   // per-type coverage even when one type would otherwise dominate the limit.
+  // include_shared is false here — the Shared section owns shared rows so they
+  // don't appear in both sections.
   const collected: ThoughtSummary[] = [];
   for (const type of ESSENTIAL_TYPES) {
     const result = listThoughts(db.db, {
       type,
       project_identifier: slug,
-      include_shared: slug !== undefined,
+      include_shared: false,
       limit: ESSENTIALS_LIMIT,
     });
     collected.push(...result.results);
@@ -143,25 +156,24 @@ function fetchRecent(
   slug: string | undefined,
 ): ThoughtSummary[] {
   const since = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
+  // include_shared is false here — the Shared section owns shared rows so they
+  // don't appear in both sections.
   const result = listThoughts(db.db, {
     since,
     project_identifier: slug,
-    include_shared: slug !== undefined,
+    include_shared: false,
     limit: RECENT_LIMIT,
   });
   return result.results;
 }
 
 // Returns visibility='shared' durable-context thoughts regardless of project.
-// Uses a sentinel slug that matches no real project so only the OR-shared arm
-// of the listThoughts WHERE clause returns rows.
 function fetchShared(db: ThoughtDatabase): ThoughtSummary[] {
   const collected: ThoughtSummary[] = [];
   for (const type of ESSENTIAL_TYPES) {
     const result = listThoughts(db.db, {
       type,
-      project_identifier: " __none__",
-      include_shared: true,
+      shared_only: true,
       limit: ESSENTIALS_LIMIT,
     });
     for (const t of result.results) {

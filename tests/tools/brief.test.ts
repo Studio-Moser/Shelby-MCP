@@ -154,4 +154,39 @@ describe("get_brief slug scoping", () => {
     expect(data.brief).toContain("global pref");
     expect(data.project_identifier).toBe("shelby");
   });
+
+  it("shared thought appears exactly once (under Shared) and is not double-listed in Essentials", () => {
+    insertThought(db.db, {
+      content: "cross-project insight",
+      type: "insight",
+      summary: "cross-project insight",
+      project_identifier: "shelby",
+      visibility: "shared",
+    });
+    insertThought(db.db, {
+      content: "private shelby insight",
+      type: "insight",
+      summary: "private shelby insight",
+      project_identifier: "shelby",
+    });
+
+    const result = handleGetBrief(db, { scope: "essentials", project_identifier: "shelby" });
+    const data = parseResult(result);
+    const brief: string = data.brief;
+
+    // The shared thought summary should appear exactly once in the brief string.
+    const occurrences = (brief.match(/cross-project insight/g) ?? []).length;
+    expect(occurrences).toBe(1);
+
+    // It must appear under the Shared section (after the ## Shared heading), not Essentials.
+    const sharedIdx = brief.indexOf("## Shared");
+    const sharedThoughtIdx = brief.indexOf("cross-project insight");
+    expect(sharedIdx).toBeGreaterThan(-1);
+    expect(sharedThoughtIdx).toBeGreaterThan(sharedIdx);
+    // Private thought is still in Essentials.
+    expect(brief).toContain("private shelby insight");
+
+    // Total count must equal the number of unique rendered thoughts (2 here).
+    expect(data.thought_count).toBe(2);
+  });
 });

@@ -372,6 +372,19 @@ describe("listThoughts slug scoping", () => {
   });
 });
 
+describe("listThoughts shared_only flag", () => {
+  it("returns only visibility='shared' thoughts when shared_only is true", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    insertThought(db, { content: "shared one", type: "insight", summary: "shared one", visibility: "shared", project_identifier: "shelby" });
+    insertThought(db, { content: "personal one", type: "decision", summary: "personal one", project_identifier: "shelby" });
+    insertThought(db, { content: "shared two", type: "reference", summary: "shared two", visibility: "shared" });
+    const r = listThoughts(db, { shared_only: true });
+    expect(r.total_count).toBe(2);
+    db.close();
+  });
+});
+
 describe("project_identifier on thoughts", () => {
   it("persists and reads back project_identifier", () => {
     const db = new BetterSqlite3(":memory:");
