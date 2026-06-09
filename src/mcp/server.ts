@@ -424,9 +424,9 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .enum(["essentials", "recent", "full"])
           .describe("What to include. Default: full")
           .optional(),
-        project: z
+        project_identifier: z
           .string()
-          .describe("Project path to scope the brief to")
+          .describe("Project slug to scope the brief to")
           .optional(),
       },
     },

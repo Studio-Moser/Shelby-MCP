@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleGetBrief } from "../../src/tools/brief.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
+import { insertThought } from "../../src/db/thoughts.js";
 
 let db: ThoughtDatabase;
 
@@ -101,26 +102,29 @@ describe("handleGetBrief", () => {
     expect(data.error).toBe("invalid_input");
   });
 
-  it("scopes by project path when provided", () => {
-    capture("Shelby decision", {
+  it("scopes by project_identifier when provided", () => {
+    insertThought(db.db, {
+      content: "Shelby decision",
       type: "decision",
-      project: "/Users/me/Projects/Shelby",
       summary: "Shelby decision",
+      project_identifier: "shelby",
     });
-    capture("Other project decision", {
+    insertThought(db.db, {
+      content: "Other project decision",
       type: "decision",
-      project: "/Users/me/Projects/Other",
       summary: "Other decision",
+      project_identifier: "other-project",
     });
 
     const result = handleGetBrief(db, {
       scope: "essentials",
-      project: "/Users/me/Projects/Shelby",
+      project_identifier: "shelby",
     });
     const data = parseResult(result);
     expect(data.brief).toContain("Shelby decision");
     expect(data.brief).not.toContain("Other decision");
-    expect(data.brief).toContain("# Project Brief — Shelby");
+    expect(data.brief).toContain("# Project Brief — shelby");
+    expect(data.project_identifier).toBe("shelby");
   });
 
   it("last_activity reflects the newest included thought", () => {
@@ -133,5 +137,21 @@ describe("handleGetBrief", () => {
     expect(data.last_activity).toBeTruthy();
     // Should be an ISO 8601 string
     expect(new Date(data.last_activity).toString()).not.toBe("Invalid Date");
+  });
+});
+
+describe("get_brief slug scoping", () => {
+  it("includes current slug + shared, excludes other projects, labels Shared", () => {
+    insertThought(db.db, { content: "shelby decision", type: "decision", summary: "shelby decision", project_identifier: "shelby" });
+    insertThought(db.db, { content: "kuow decision", type: "decision", summary: "kuow decision", project_identifier: "kuow-games" });
+    insertThought(db.db, { content: "global pref", type: "insight", summary: "global pref", project_identifier: "shelby", visibility: "shared" });
+
+    const result = handleGetBrief(db, { scope: "essentials", project_identifier: "shelby" });
+    const data = parseResult(result);
+    expect(data.brief).toContain("shelby decision");
+    expect(data.brief).not.toContain("kuow decision");
+    expect(data.brief).toContain("## Shared");
+    expect(data.brief).toContain("global pref");
+    expect(data.project_identifier).toBe("shelby");
   });
 });
