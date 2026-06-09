@@ -15,6 +15,9 @@ export interface SearchOptions {
   offset?: number;
   type?: string;
   project?: string;
+  project_identifier?: string;
+  include_shared?: boolean;
+  shared_only?: boolean;
 }
 
 export interface SearchListResult {
@@ -58,6 +61,17 @@ export function searchThoughts(
   if (options.project) {
     whereClauses.push("t.project = ?");
     params.push(options.project);
+  }
+  if (options.shared_only) {
+    whereClauses.push("t.visibility = 'shared'");
+  }
+  if (options.project_identifier !== undefined) {
+    if (options.include_shared) {
+      whereClauses.push("(t.project_identifier = ? OR t.visibility = 'shared')");
+    } else {
+      whereClauses.push("t.project_identifier = ?");
+    }
+    params.push(options.project_identifier);
   }
 
   const whereSQL = whereClauses.join(" AND ");
