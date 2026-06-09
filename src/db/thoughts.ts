@@ -11,6 +11,7 @@ export interface ThoughtInput {
   source_agent?: string;
   trust_level?: TrustLevel;
   project?: string;
+  project_identifier?: string;
   topics?: string[];
   people?: string[];
   visibility?: string;
@@ -26,6 +27,7 @@ export interface ThoughtRecord {
   source_agent: string | null;
   trust_level: TrustLevel;
   project: string | null;
+  project_identifier: string | null;
   topics: string[];
   people: string[];
   visibility: string;
@@ -76,6 +78,7 @@ interface RawThoughtRow {
   source_agent: string | null;
   trust_level: TrustLevel;
   project: string | null;
+  project_identifier: string | null;
   topics: string | null;
   people: string | null;
   visibility: string;
@@ -127,6 +130,7 @@ function rowToRecord(row: RawThoughtRow): ThoughtRecord {
     source_agent: row.source_agent,
     trust_level: row.trust_level ?? "trusted",
     project: row.project,
+    project_identifier: row.project_identifier,
     topics: parseJsonArray(row.topics),
     people: parseJsonArray(row.people),
     visibility: row.visibility,
@@ -154,8 +158,8 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO thoughts (id, content, summary, type, source, source_agent, trust_level, project, topics, people, visibility, metadata, created_at, updated_at)
-    VALUES (@id, @content, @summary, @type, @source, @source_agent, @trust_level, @project, @topics, @people, @visibility, @metadata, @created_at, @updated_at)
+    INSERT INTO thoughts (id, content, summary, type, source, source_agent, trust_level, project, project_identifier, topics, people, visibility, metadata, created_at, updated_at)
+    VALUES (@id, @content, @summary, @type, @source, @source_agent, @trust_level, @project, @project_identifier, @topics, @people, @visibility, @metadata, @created_at, @updated_at)
   `);
 
   stmt.run({
@@ -167,6 +171,7 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
     source_agent: input.source_agent ?? null,
     trust_level: input.trust_level ?? "trusted",
     project: input.project ?? null,
+    project_identifier: input.project_identifier ?? null,
     topics: input.topics ? JSON.stringify(input.topics) : null,
     people: input.people ? JSON.stringify(input.people) : null,
     visibility: input.visibility ?? "personal",
@@ -211,6 +216,10 @@ export function updateThought(
   if (updates.project !== undefined) {
     setClauses.push("project = @project");
     params.project = updates.project;
+  }
+  if (updates.project_identifier !== undefined) {
+    setClauses.push("project_identifier = @project_identifier");
+    params.project_identifier = updates.project_identifier;
   }
   if (updates.topics !== undefined) {
     setClauses.push("topics = @topics");

@@ -8,6 +8,8 @@ import {
   listThoughts,
   countThoughts,
 } from "../../src/db/thoughts.js";
+import { runMigrations } from "../../src/db/migrations.js";
+import BetterSqlite3 from "better-sqlite3";
 import type Database from "better-sqlite3";
 
 describe("thoughts CRUD", () => {
@@ -339,5 +341,25 @@ describe("thoughts CRUD", () => {
       insertThought(db, { content: "Three" });
       expect(countThoughts(db)).toBe(3);
     });
+  });
+});
+
+describe("project_identifier on thoughts", () => {
+  it("persists and reads back project_identifier", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    const id = insertThought(db, { content: "x", project_identifier: "shelby" });
+    expect(getThought(db, id)?.project_identifier).toBe("shelby");
+    db.close();
+  });
+
+  it("defaults project_identifier to null and updates it", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    const id = insertThought(db, { content: "y" });
+    expect(getThought(db, id)?.project_identifier).toBeNull();
+    updateThought(db, id, { project_identifier: "kuow-games" });
+    expect(getThought(db, id)?.project_identifier).toBe("kuow-games");
+    db.close();
   });
 });
