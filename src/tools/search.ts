@@ -116,16 +116,18 @@ export function handleSearchThoughts(
     // are not pre-filtered by project scope.
     if (a.project || a.project_identifier !== undefined || a.shared_only) {
       const allIds = Array.from(metadataMap.keys());
-      const placeholders = allIds.map(() => "?").join(", ");
-      const rows = db.db
-        .prepare(`SELECT id, project, project_identifier, visibility FROM thoughts WHERE id IN (${placeholders})`)
-        .all(...allIds) as Array<{ id: string; project: string | null; project_identifier: string | null; visibility: string }>;
-      for (const row of rows) {
-        const existing = metadataMap.get(row.id);
-        if (existing) {
-          existing.project = row.project;
-          existing.project_identifier = row.project_identifier;
-          existing.visibility = row.visibility;
+      if (allIds.length > 0) {
+        const placeholders = allIds.map(() => "?").join(", ");
+        const rows = db.db
+          .prepare(`SELECT id, project, project_identifier, visibility FROM thoughts WHERE id IN (${placeholders})`)
+          .all(...allIds) as Array<{ id: string; project: string | null; project_identifier: string | null; visibility: string }>;
+        for (const row of rows) {
+          const existing = metadataMap.get(row.id);
+          if (existing) {
+            existing.project = row.project;
+            existing.project_identifier = row.project_identifier;
+            existing.visibility = row.visibility;
+          }
         }
       }
     }

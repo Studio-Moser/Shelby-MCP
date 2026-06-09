@@ -6,6 +6,7 @@ import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
 import { getEdgesBetween } from "../../src/db/edges.js";
+import { listProjects } from "../../src/db/projects.js";
 
 function makeGitRepo(remote: string): string {
   const root = mkdtempSync(join(tmpdir(), "cap-"));
@@ -207,5 +208,27 @@ describe("handleCaptureThought", () => {
     const data = parseResult(result);
     const thought = getThought(db.db, data.id);
     expect(thought!.visibility).toBe("personal");
+  });
+
+  it("does NOT create a new projects row when explicit project_identifier is provided", () => {
+    // Even when cwd is a temp git repo with an unknown remote, capturing with
+    // an explicit project_identifier must skip the filesystem walk + registry write.
+    const root = makeGitRepo("git@github.com:acme/UnknownProject.git");
+    const beforeCount = listProjects(db.db).length;
+    try {
+      const result = handleCaptureThought(
+        db,
+        { content: "Explicit slug thought", project_identifier: "shelby" },
+        root,
+      );
+      expect(result.isError).toBeFalsy();
+      const afterCount = listProjects(db.db).length;
+      expect(afterCount).toBe(beforeCount); // no new project row provisioned
+      const data = parseResult(result);
+      const thought = getThought(db.db, data.id);
+      expect(thought!.project_identifier).toBe("shelby");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

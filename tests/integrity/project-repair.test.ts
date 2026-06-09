@@ -63,6 +63,26 @@ describe("apply", () => {
     expect(t?.metadata?.repaired_by).toBe("integrity-project-v1");
     expect(t?.metadata?.prior_key).toBe("prior_value");
   });
+
+  it("empty-string project_identifier gets repaired_from === 'empty'", () => {
+    // Insert a thought then manually set project_identifier to empty string
+    // (simulates a thought that was captured with project_identifier = "").
+    const id = insertThought(db, { content: "x", topics: ["polymarket"] });
+    // Force empty string via raw SQL (insertThought defaults to null, not "")
+    db.prepare("UPDATE thoughts SET project_identifier = '' WHERE id = ?").run(id);
+
+    repairProjects(db, { apply: true });
+    const t = getThought(db, id);
+    expect(t?.metadata?.repaired_from).toBe("empty");
+  });
+
+  it("null project_identifier gets repaired_from === 'null'", () => {
+    const id = insertThought(db, { content: "x", topics: ["polymarket"] });
+    // insertThought defaults project_identifier to null
+    repairProjects(db, { apply: true });
+    const t = getThought(db, id);
+    expect(t?.metadata?.repaired_from).toBe("null");
+  });
 });
 
 // helper

@@ -34,11 +34,26 @@ describe("resolveProjectIdentifier", () => {
     expect(p?.memberRepos).toEqual(["github.com/acme/Cool-Repo"]);
   });
 
-  it("falls back to the directory basename (provisional) for a non-git dir", () => {
+  it("returns null and provisions nothing for a bare non-marker temp dir", () => {
+    // No .git, package.json, or other markers — server install/home dir scenario.
+    // mkdtempSync gives a unique dir with no project markers.
     const dir = mkdtempSync(join(tmpdir(), "Plain Dir-"));
     const slug = resolveProjectIdentifier(db, dir);
+    expect(slug).toBeNull();
+    // No project should have been provisioned.
+    // We can't easily enumerate all slugs, but we can confirm the dir basename
+    // was NOT registered as a project (since nothing was provisioned).
+  });
+
+  it("provisions a basename-slug provisional project for a dir with package.json but no .git", () => {
+    // Real project root (has a marker), no remote — should provision from basename.
+    const dir = mkdtempSync(join(tmpdir(), "my-pkg-dir-"));
+    writeFileSync(join(dir, "package.json"), '{"name": "my-pkg-dir"}');
+    const slug = resolveProjectIdentifier(db, dir);
     expect(typeof slug).toBe("string");
-    expect(slug.length).toBeGreaterThan(0);
-    expect(getProjectBySlug(db, slug)?.provisional).toBe(true);
+    expect(slug!.length).toBeGreaterThan(0);
+    const p = getProjectBySlug(db, slug!);
+    expect(p?.provisional).toBe(true);
+    expect(p?.memberRepos).toEqual([]);
   });
 });

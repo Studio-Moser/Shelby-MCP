@@ -106,9 +106,6 @@ export function seedKnownProjects(db: Database.Database): void {
   }
 }
 
-function needsRepair(t: ThoughtRecord): boolean {
-  return t.project_identifier === null || t.project_identifier === "";
-}
 
 function inferByPath(project: string | null, projects: Project[]): string | null {
   if (!project) return null;
@@ -162,9 +159,40 @@ function classify(t: ThoughtRecord, projects: Project[]): RepairItem {
   };
 }
 
-function allThoughts(db: Database.Database): ThoughtRecord[] {
-  const ids = db.prepare("SELECT id FROM thoughts").all() as Array<{ id: string }>;
-  return ids.map((r) => getThought(db, r.id)).filter((t): t is ThoughtRecord => t !== null);
+/** Minimal thought shape sufficient for classify() / inferByPath() / inferByTopics(). */
+interface RepairCandidate {
+  id: string;
+  project: string | null;
+  topics: string[];
+  project_identifier: string | null;
+}
+
+/**
+ * Fetch only the rows that need repair in a single query, avoiding the N+1
+ * SELECT id → getThought per row pattern of the old allThoughts() scan.
+ */
+function repairCandidates(db: Database.Database): RepairCandidate[] {
+  const rows = db
+    .prepare(
+      "SELECT id, project, project_identifier, topics FROM thoughts WHERE project_identifier IS NULL OR project_identifier = ''",
+    )
+    .all() as Array<{ id: string; project: string | null; project_identifier: string | null; topics: string | null }>;
+  return rows.map((r) => ({
+    id: r.id,
+    project: r.project,
+    project_identifier: r.project_identifier,
+    topics: parseJsonArrayRaw(r.topics),
+  }));
+}
+
+function parseJsonArrayRaw(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export function planProjectRepairs(db: Database.Database): RepairReport {
@@ -172,10 +200,9 @@ export function planProjectRepairs(db: Database.Database): RepairReport {
   const highConfidence: RepairItem[] = [];
   const flagged: RepairItem[] = [];
   let scanned = 0;
-  for (const t of allThoughts(db)) {
-    if (!needsRepair(t)) continue;
+  for (const t of repairCandidates(db)) {
     scanned++;
-    const item = classify(t, projects);
+    const item = classify(t as ThoughtRecord, projects);
     if (item.confidence === "high") highConfidence.push(item);
     else flagged.push(item);
   }
@@ -197,7 +224,7 @@ export function repairProjects(db: Database.Database, opts: { apply: boolean }):
       ...(t.metadata ?? {}),
       repaired_by: REPAIRED_BY,
       repaired_reason: item.reason,
-      repaired_from: t.project_identifier === null ? "null" : "",
+      repaired_from: t.project_identifier === null ? "null" : "empty",
     };
     updateThought(db, item.id, {
       project_identifier: item.suggestedSlug ?? undefined,

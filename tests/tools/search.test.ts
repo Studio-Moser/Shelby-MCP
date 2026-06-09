@@ -285,6 +285,21 @@ describe("handleSearchThoughts", () => {
     expect(ids).not.toContain(kuowId);
   });
 
+  it("hybrid search with project_identifier on empty DB returns empty result, not an error", () => {
+    // Guard: when FTS + vector both return nothing (empty DB), allIds is []
+    // and the former `WHERE id IN ()` would crash SQLite. Should return empty results.
+    const result = handleSearchThoughts(db, {
+      query: "anything",
+      embedding: [1.0, 0.0, 0.0],
+      project_identifier: "shelby",
+    });
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result);
+    expect(data.mode).toBe("hybrid");
+    expect(data.total_count).toBe(0);
+    expect(data.results).toEqual([]);
+  });
+
   it("graph_related does not duplicate results already in the main result set", () => {
     const idA = captureId("Unique node for dedup check");
     const idB = captureId("Unique node secondary dedup check");

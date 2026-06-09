@@ -26,7 +26,6 @@ export interface SelectContextArgs {
   topics?: string[];
   people?: string[];
   since?: string;
-  project?: string;
   project_identifier?: string;
   include_shared?: boolean;
   include_brief?: boolean;
@@ -87,7 +86,6 @@ export function handleSelectContext(
     topicFilter: a.topics?.[0],
     personFilter: a.people?.[0],
     since: a.since,
-    project: a.project,
     project_identifier: a.project_identifier,
     include_shared: a.include_shared,
     limit,
@@ -113,7 +111,6 @@ export function handleSelectContext(
   const document = sections.join("\n\n");
   return toolSuccess({
     matched_count: thoughts.length,
-    project: a.project ?? null,
     project_identifier: a.project_identifier ?? null,
     document,
   });
@@ -132,7 +129,6 @@ interface CollectArgs {
   topicFilter: string | undefined;
   personFilter: string | undefined;
   since: string | undefined;
-  project: string | undefined;
   project_identifier: string | undefined;
   include_shared: boolean | undefined;
   limit: number;
@@ -152,7 +148,6 @@ function collectThoughts(
         topic: args.topicFilter,
         person: args.personFilter,
         since: args.since,
-        project: args.project,
         project_identifier: args.project_identifier,
         include_shared: args.include_shared ?? true,
         limit: args.limit,
@@ -164,7 +159,6 @@ function collectThoughts(
       topic: args.topicFilter,
       person: args.personFilter,
       since: args.since,
-      project: args.project,
       project_identifier: args.project_identifier,
       include_shared: args.include_shared ?? true,
       limit: args.limit,

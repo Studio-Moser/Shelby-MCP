@@ -10,12 +10,25 @@ export function slugify(name: string): string {
 
 /**
  * Resolve the project slug for a working directory. Matches the registry by git
- * remote; if unmatched, auto-provisions a provisional Project (slug from the
- * repo/dir basename) so a capture is never left unresolved. Never returns null.
+ * remote; if a real project root is detected (detectProject non-null):
+ *   - has a remote  → registry match or provision from remote basename
+ *   - no remote     → provision from the project-root basename
+ *
+ * Returns null when detectProject finds no project marker (e.g. the server's
+ * home/install dir). Callers should treat null as "unresolved" and not stamp a
+ * provisional project.
+ *
+ * Note: for HTTP transport / clients that launch the server outside the project
+ * dir, cwd-resolution is best-effort; callers should pass an explicit
+ * project_identifier (the macOS app does this from its active-project context).
  */
-export function resolveProjectIdentifier(db: Database.Database, cwd: string): string {
+export function resolveProjectIdentifier(db: Database.Database, cwd: string): string | null {
   const detected = detectProject(cwd);
-  if (detected?.remote) {
+  if (!detected) {
+    // No project marker found — don't auto-provision anything.
+    return null;
+  }
+  if (detected.remote) {
     const existing = findProjectByRepo(db, detected.remote);
     if (existing) return existing.slug;
     const normalized = normalizeGitRemote(detected.remote);
@@ -23,9 +36,10 @@ export function resolveProjectIdentifier(db: Database.Database, cwd: string): st
     upsertProvisional(db, slug, [normalized], [detected.projectRoot]);
     return slug;
   }
-  const base = path.basename(detected?.projectRoot ?? cwd);
+  // Real project root with no remote — provision from dir basename.
+  const base = path.basename(detected.projectRoot);
   const slug = slugify(base);
-  upsertProvisional(db, slug, [], [detected?.projectRoot ?? cwd]);
+  upsertProvisional(db, slug, [], [detected.projectRoot]);
   return slug;
 }
 

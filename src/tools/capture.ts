@@ -153,7 +153,7 @@ function captureSingle(
     metadata?: Record<string, unknown>;
     related_to?: string[];
   },
-  resolvedSlug: string,
+  resolvedSlug: string | null,
 ): { id: string; linked: string[]; skipped: string[] } {
   // Default visibility: 'shared' for preference type, otherwise 'personal'
   const effectiveVisibility =
@@ -167,7 +167,7 @@ function captureSingle(
     source_agent: args.source_agent,
     trust_level: args.trust_level,
     project: args.project,
-    project_identifier: args.project_identifier ?? resolvedSlug,
+    project_identifier: args.project_identifier ?? resolvedSlug ?? undefined,
     visibility: effectiveVisibility,
     topics: args.topics,
     people: args.people,
@@ -207,9 +207,6 @@ export function handleCaptureThought(
 ): ToolResult {
   const a = args as unknown as CaptureArgs;
 
-  // Resolve project slug from cwd once for all thoughts in this call
-  const resolvedSlug = resolveProjectIdentifier(db.db, cwd);
-
   // Bulk capture mode
   if (a.thoughts && Array.isArray(a.thoughts)) {
     if (a.thoughts.length === 0) {
@@ -222,6 +219,13 @@ export function handleCaptureThought(
         `bulk capture exceeds maximum of ${MAX_BULK_THOUGHTS} thoughts per call (got ${a.thoughts.length})`,
       );
     }
+
+    // Only resolve from cwd when at least one thought lacks an explicit project_identifier.
+    // This avoids the filesystem walk + registry write when every thought already specifies it.
+    const needsResolution = a.thoughts.some((t) => !t.project_identifier);
+    const resolvedSlug: string | null = needsResolution
+      ? resolveProjectIdentifier(db.db, cwd)
+      : null;
 
     const results: Array<{ id: string; linked: string[]; skipped: string[] }> = [];
     for (const thought of a.thoughts) {
@@ -261,6 +265,12 @@ export function handleCaptureThought(
   if (singleErr) {
     return toolError("invalid_input", singleErr);
   }
+
+  // Only resolve from cwd when the explicit project_identifier is absent.
+  // This avoids the filesystem walk + registry write when the caller already specifies it.
+  const resolvedSlug: string | null = a.project_identifier
+    ? null
+    : resolveProjectIdentifier(db.db, cwd);
 
   const result = captureSingle(db, {
     content: a.content,

@@ -124,17 +124,17 @@ describe("handleSelectContext", () => {
     expect(data.matched_count).toBe(2);
   });
 
-  it("scopes by project path", () => {
+  it("scopes by project_identifier slug (formerly project path)", () => {
     capture("Shelby thing", {
-      project: "/projects/shelby",
+      project_identifier: "shelby",
       summary: "Shelby thing",
     });
     capture("Other thing", {
-      project: "/projects/other",
+      project_identifier: "other",
       summary: "Other thing",
     });
 
-    const result = handleSelectContext(db, { project: "/projects/shelby" });
+    const result = handleSelectContext(db, { project_identifier: "shelby" });
     const data = parseResult(result);
     expect(data.matched_count).toBe(1);
     expect(data.document).toContain("Shelby thing");

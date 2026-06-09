@@ -20,6 +20,7 @@ interface UpdateArgs {
   type?: string;
   source?: string;
   project?: string;
+  project_identifier?: string;
   topics?: string[];
   people?: string[];
   metadata?: Record<string, unknown>;
@@ -112,6 +113,7 @@ export function handleUpdateThought(
   if (a.type !== undefined) updates.type = a.type;
   if (a.source !== undefined) updates.source = a.source;
   if (a.project !== undefined) updates.project = a.project;
+  if (a.project_identifier !== undefined) updates.project_identifier = a.project_identifier;
   if (a.topics !== undefined) updates.topics = a.topics;
   if (a.people !== undefined) updates.people = a.people;
   if (a.metadata !== undefined) updates.metadata = a.metadata;
