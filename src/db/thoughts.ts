@@ -50,6 +50,8 @@ export interface ThoughtSummary {
 export interface ListOptions {
   type?: string;
   project?: string;
+  project_identifier?: string;
+  include_shared?: boolean;
   topic?: string;
   person?: string;
   source?: string;
@@ -272,6 +274,14 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   if (options.project) {
     whereClauses.push("project = @project");
     params.project = options.project;
+  }
+  if (options.project_identifier !== undefined) {
+    if (options.include_shared) {
+      whereClauses.push("(project_identifier = @project_identifier OR visibility = 'shared')");
+    } else {
+      whereClauses.push("project_identifier = @project_identifier");
+    }
+    params.project_identifier = options.project_identifier;
   }
   if (options.topic) {
     whereClauses.push("topics LIKE @topic");

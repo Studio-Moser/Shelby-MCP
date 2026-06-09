@@ -344,6 +344,34 @@ describe("thoughts CRUD", () => {
   });
 });
 
+describe("listThoughts slug scoping", () => {
+  function seed(db: Database.Database) {
+    insertThought(db, { content: "a", project_identifier: "shelby" });
+    insertThought(db, { content: "b", project_identifier: "kuow-games" });
+    insertThought(db, { content: "c", project_identifier: "shelby", visibility: "shared" });
+    insertThought(db, { content: "d", visibility: "shared" });
+    insertThought(db, { content: "e" });
+  }
+
+  it("returns current slug OR shared, and excludes other projects + null", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    seed(db);
+    const r = listThoughts(db, { project_identifier: "shelby", include_shared: true });
+    expect(r.total_count).toBe(3);
+    db.close();
+  });
+
+  it("include_shared:false returns only the exact slug", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    seed(db);
+    const r = listThoughts(db, { project_identifier: "shelby", include_shared: false });
+    expect(r.total_count).toBe(2);
+    db.close();
+  });
+});
+
 describe("project_identifier on thoughts", () => {
   it("persists and reads back project_identifier", () => {
     const db = new BetterSqlite3(":memory:");
