@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import Database from "better-sqlite3";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { getSchemaVersion } from "../../src/db/migrations.js";
+import { getSchemaVersion, runMigrations } from "../../src/db/migrations.js";
 
 describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
   let db: ThoughtDatabase;
@@ -13,8 +14,8 @@ describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
     db?.close();
   });
 
-  it("schema version is 5 after all migrations", () => {
-    expect(getSchemaVersion(db.db)).toBe(5);
+  it("schema version is 6 after all migrations", () => {
+    expect(getSchemaVersion(db.db)).toBe(6);
   });
 
   it("thoughts table has source_agent column", () => {
@@ -96,5 +97,23 @@ describe("Migration v3 — temporal edges", () => {
     const edge = db.db.prepare("SELECT valid_from, valid_until FROM edges WHERE id = 'e1'").get() as Record<string, unknown>;
     expect(edge.valid_from).toBeNull();
     expect(edge.valid_until).toBeNull();
+  });
+});
+
+describe("migration v6 — project identity", () => {
+  it("adds project_identifier column and projects table at version 6", () => {
+    const db = new Database(":memory:");
+    runMigrations(db);
+
+    expect(getSchemaVersion(db)).toBe(6);
+
+    const thoughtCols = db.prepare("PRAGMA table_info(thoughts)").all() as Array<{ name: string }>;
+    expect(thoughtCols.map((c) => c.name)).toContain("project_identifier");
+
+    const projectsCols = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+    expect(projectsCols.map((c) => c.name)).toEqual(
+      expect.arrayContaining(["slug","display_name","member_repos","member_paths","provisional","created_at","updated_at"]),
+    );
+    db.close();
   });
 });

@@ -1,8 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
 import { getEdgesBetween } from "../../src/db/edges.js";
+import { listProjects } from "../../src/db/projects.js";
+
+function makeGitRepo(remote: string): string {
+  const root = mkdtempSync(join(tmpdir(), "cap-"));
+  mkdirSync(join(root, ".git"));
+  writeFileSync(join(root, ".git", "config"), `[remote "origin"]\n\turl = ${remote}\n`);
+  return root;
+}
 
 let db: ThoughtDatabase;
 
@@ -165,5 +176,59 @@ describe("handleCaptureThought", () => {
       (s: { id: string }) => s.id === data.id,
     );
     expect(selfSuggestion).toBeUndefined();
+  });
+
+  it("stamps project_identifier from cwd when not provided explicitly", () => {
+    const root = makeGitRepo("git@github.com:acme/My-Project.git");
+    try {
+      const result = handleCaptureThought(db, { content: "Auto-resolved project" }, root);
+      const data = parseResult(result);
+      const thought = getThought(db.db, data.id);
+      expect(thought!.project_identifier).toBe("my-project");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("defaults visibility to 'shared' for preference type when not specified", () => {
+    const result = handleCaptureThought(db, {
+      content: "I prefer dark mode",
+      type: "preference",
+    });
+    const data = parseResult(result);
+    const thought = getThought(db.db, data.id);
+    expect(thought!.visibility).toBe("shared");
+  });
+
+  it("defaults visibility to 'personal' for note type when not specified", () => {
+    const result = handleCaptureThought(db, {
+      content: "A regular note",
+      type: "note",
+    });
+    const data = parseResult(result);
+    const thought = getThought(db.db, data.id);
+    expect(thought!.visibility).toBe("personal");
+  });
+
+  it("does NOT create a new projects row when explicit project_identifier is provided", () => {
+    // Even when cwd is a temp git repo with an unknown remote, capturing with
+    // an explicit project_identifier must skip the filesystem walk + registry write.
+    const root = makeGitRepo("git@github.com:acme/UnknownProject.git");
+    const beforeCount = listProjects(db.db).length;
+    try {
+      const result = handleCaptureThought(
+        db,
+        { content: "Explicit slug thought", project_identifier: "shelby" },
+        root,
+      );
+      expect(result.isError).toBeFalsy();
+      const afterCount = listProjects(db.db).length;
+      expect(afterCount).toBe(beforeCount); // no new project row provisioned
+      const data = parseResult(result);
+      const thought = getThought(db.db, data.id);
+      expect(thought!.project_identifier).toBe("shelby");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

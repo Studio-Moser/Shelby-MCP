@@ -16,6 +16,7 @@ import { handleThoughtStats } from "../tools/stats.js";
 import { handleGetBrief } from "../tools/brief.js";
 import { handleSelectContext } from "../tools/context.js";
 import type { ToolResult } from "../tools/helpers.js";
+import { applyDefaultScope } from "./scope-defaults.js";
 import {
   MAX_CONTENT_LENGTH,
   MAX_SUMMARY_LENGTH,
@@ -126,6 +127,8 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         source_agent: z.string().describe("Originating AI agent identifier (e.g. claude-code, cursor, windsurf)").optional(),
         trust_level: z.enum(["trusted", "unverified", "external"]).describe("Trust level for memory poisoning defense: trusted (default), unverified, or external").optional(),
         project: z.string().describe("Project association").optional(),
+        project_identifier: z.string().describe("Project registry slug (auto-resolved from cwd if omitted)").optional(),
+        visibility: z.enum(["personal", "shared"]).describe("Visibility: personal (default) or shared across projects").optional(),
         topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("Topic tags").optional(),
         people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("People mentioned").optional(),
         metadata: z.record(z.unknown()).describe("Arbitrary metadata").optional(),
@@ -140,6 +143,8 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
               source_agent: z.string().optional(),
               trust_level: z.enum(["trusted", "unverified", "external"]).optional(),
               project: z.string().optional(),
+              project_identifier: z.string().optional(),
+              visibility: z.enum(["personal", "shared"]).optional(),
               topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).optional(),
               people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).optional(),
               metadata: z.record(z.unknown()).optional(),
@@ -219,10 +224,17 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         offset: z.number().describe("Pagination offset").optional(),
         type: z.string().describe("Filter by thought type").optional(),
         project: z.string().describe("Filter by project").optional(),
+        project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
+        include_shared: z.boolean().describe("When project_identifier is set, also include shared thoughts (default true when auto-scoped from cwd)").optional(),
+        shared_only: z.boolean().describe("Return only thoughts with visibility=shared").optional(),
+        all_projects: z.boolean().describe("Set true to search across all projects regardless of cwd (disables auto-scoping)").optional(),
         graph_depth: z.number().describe("Graph traversal depth after retrieval (0 = none, max 5). When >= 1, related thoughts reachable via graph edges are included in graph_related.").optional(),
       },
     },
-    withLogging("search_thoughts", (args) => handleSearchThoughts(db, args as Record<string, unknown>)),
+    withLogging("search_thoughts", (args) => {
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      return handleSearchThoughts(db, scoped as Record<string, unknown>);
+    }),
   );
 
   // --- list_thoughts ---
@@ -241,6 +253,10 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       inputSchema: {
         type: z.string().describe("Filter by thought type").optional(),
         project: z.string().describe("Filter by project").optional(),
+        project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
+        include_shared: z.boolean().describe("When project_identifier is set, also include shared thoughts (default true when auto-scoped from cwd)").optional(),
+        shared_only: z.boolean().describe("Return only thoughts with visibility=shared").optional(),
+        all_projects: z.boolean().describe("Set true to list across all projects regardless of cwd (disables auto-scoping)").optional(),
         topic: z.string().describe("Filter by topic").optional(),
         person: z.string().describe("Filter by person mentioned").optional(),
         source: z.string().describe("Filter by source").optional(),
@@ -253,7 +269,10 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         offset: z.number().describe("Pagination offset").optional(),
       },
     },
-    withLogging("list_thoughts", (args) => handleListThoughts(db, args as Record<string, unknown>)),
+    withLogging("list_thoughts", (args) => {
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      return handleListThoughts(db, scoped as Record<string, unknown>);
+    }),
   );
 
   // --- get_thought ---
@@ -297,6 +316,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         type: z.string().describe("New type").optional(),
         source: z.string().describe("New source").optional(),
         project: z.string().describe("New project").optional(),
+        project_identifier: z.string().describe("New project registry slug").optional(),
         topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("New topics").optional(),
         people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("New people").optional(),
         metadata: z.record(z.unknown()).describe("New metadata").optional(),
@@ -424,13 +444,20 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .enum(["essentials", "recent", "full"])
           .describe("What to include. Default: full")
           .optional(),
-        project: z
+        project_identifier: z
           .string()
-          .describe("Project path to scope the brief to")
+          .describe("Project slug to scope the brief to (auto-defaulted from cwd when omitted)")
+          .optional(),
+        all_projects: z
+          .boolean()
+          .describe("Set true to generate a brief across all projects regardless of cwd (disables auto-scoping)")
           .optional(),
       },
     },
-    withLogging("get_brief", (args) => handleGetBrief(db, args as Record<string, unknown>)),
+    withLogging("get_brief", (args) => {
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      return handleGetBrief(db, scoped as Record<string, unknown>);
+    }),
   );
 
   // --- select_context ---
@@ -451,13 +478,18 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         topics: z.array(z.string()).describe("Topic filters (first topic is applied to the list query)").optional(),
         people: z.array(z.string()).describe("People filters (first person is applied to the list query)").optional(),
         since: z.string().describe("ISO 8601 date — only include thoughts created after this date").optional(),
-        project: z.string().describe("Project path to scope the selection").optional(),
+        project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
+        include_shared: z.boolean().describe("When project_identifier is set, also include shared thoughts (default true when auto-scoped from cwd)").optional(),
+        all_projects: z.boolean().describe("Set true to compose context across all projects regardless of cwd (disables auto-scoping)").optional(),
         include_brief: z.boolean().describe("Prepend an essentials brief header (default: false)").optional(),
         include_stats: z.boolean().describe("Append a memory stats summary (default: false)").optional(),
         limit: z.number().describe("Max thoughts to return (default: 20, max: 100)").optional(),
       },
     },
-    withLogging("select_context", (args) => handleSelectContext(db, args as Record<string, unknown>)),
+    withLogging("select_context", (args) => {
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      return handleSelectContext(db, scoped as Record<string, unknown>);
+    }),
   );
 
   // --- Resources ---

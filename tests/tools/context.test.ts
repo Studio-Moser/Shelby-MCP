@@ -124,21 +124,38 @@ describe("handleSelectContext", () => {
     expect(data.matched_count).toBe(2);
   });
 
-  it("scopes by project path", () => {
+  it("scopes by project_identifier slug (formerly project path)", () => {
     capture("Shelby thing", {
-      project: "/projects/shelby",
+      project_identifier: "shelby",
       summary: "Shelby thing",
     });
     capture("Other thing", {
-      project: "/projects/other",
+      project_identifier: "other",
       summary: "Other thing",
     });
 
-    const result = handleSelectContext(db, { project: "/projects/shelby" });
+    const result = handleSelectContext(db, { project_identifier: "shelby" });
     const data = parseResult(result);
     expect(data.matched_count).toBe(1);
     expect(data.document).toContain("Shelby thing");
     expect(data.document).not.toContain("Other thing");
+  });
+
+  it("scopes by project_identifier slug", () => {
+    capture("Shelby slug thought", {
+      project_identifier: "shelby",
+      summary: "Shelby slug thought",
+    });
+    capture("Kuow slug thought", {
+      project_identifier: "kuow-games",
+      summary: "Kuow slug thought",
+    });
+
+    const result = handleSelectContext(db, { project_identifier: "shelby" });
+    const data = parseResult(result);
+    expect(data.matched_count).toBe(1);
+    expect(data.document).toContain("Shelby slug thought");
+    expect(data.document).not.toContain("Kuow slug thought");
   });
 
   it("rejects non-string-array types", () => {

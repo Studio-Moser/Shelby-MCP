@@ -84,4 +84,27 @@ describe("handleUpdateThought", () => {
     const data = JSON.parse(r.content[0].text);
     expect(data.error).toBe("invalid_input");
   });
+
+  it("forwards project_identifier to updateThought", () => {
+    const id = captureId("No project yet");
+
+    const result = handleUpdateThought(db, {
+      id,
+      project_identifier: "shelby",
+    });
+    const data = parseResult(result);
+    expect(data.updated).toBe(1);
+
+    const thought = getThought(db.db, id);
+    expect(thought!.project_identifier).toBe("shelby");
+  });
+
+  it("forwards visibility to updateThought", () => {
+    const id = captureId("Personal note");
+    expect(getThought(db.db, id)!.visibility).toBe("personal");
+
+    handleUpdateThought(db, { id, visibility: "shared" });
+
+    expect(getThought(db.db, id)!.visibility).toBe("shared");
+  });
 });

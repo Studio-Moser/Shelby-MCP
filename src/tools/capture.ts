@@ -2,6 +2,7 @@ import type { ThoughtDatabase } from "../db/database.js";
 import { insertThought, getThought } from "../db/thoughts.js";
 import { linkThoughts } from "../db/edges.js";
 import { searchThoughts, sanitizeFTSQuery } from "../db/fts.js";
+import { resolveProjectIdentifier } from "../db/resolve-project.js";
 import {
   toolSuccess,
   toolError,
@@ -73,6 +74,8 @@ interface CaptureArgs {
   source_agent?: string;
   trust_level?: TrustLevel;
   project?: string;
+  project_identifier?: string;
+  visibility?: string;
   topics?: string[];
   people?: string[];
   metadata?: Record<string, unknown>;
@@ -85,6 +88,8 @@ interface CaptureArgs {
     source_agent?: string;
     trust_level?: TrustLevel;
     project?: string;
+    project_identifier?: string;
+    visibility?: string;
     topics?: string[];
     people?: string[];
     metadata?: Record<string, unknown>;
@@ -141,12 +146,19 @@ function captureSingle(
     source_agent?: string;
     trust_level?: TrustLevel;
     project?: string;
+    project_identifier?: string;
+    visibility?: string;
     topics?: string[];
     people?: string[];
     metadata?: Record<string, unknown>;
     related_to?: string[];
   },
+  resolvedSlug: string | null,
 ): { id: string; linked: string[]; skipped: string[] } {
+  // Default visibility: 'shared' for preference type, otherwise 'personal'
+  const effectiveVisibility =
+    args.visibility ?? (args.type === "preference" ? "shared" : undefined);
+
   const id = insertThought(db.db, {
     content: args.content,
     summary: args.summary,
@@ -155,6 +167,8 @@ function captureSingle(
     source_agent: args.source_agent,
     trust_level: args.trust_level,
     project: args.project,
+    project_identifier: args.project_identifier ?? resolvedSlug ?? undefined,
+    visibility: effectiveVisibility,
     topics: args.topics,
     people: args.people,
     metadata: args.metadata,
@@ -189,6 +203,7 @@ function captureSingle(
 export function handleCaptureThought(
   db: ThoughtDatabase,
   args: Record<string, unknown>,
+  cwd: string = process.cwd(),
 ): ToolResult {
   const a = args as unknown as CaptureArgs;
 
@@ -205,6 +220,13 @@ export function handleCaptureThought(
       );
     }
 
+    // Only resolve from cwd when at least one thought lacks an explicit project_identifier.
+    // This avoids the filesystem walk + registry write when every thought already specifies it.
+    const needsResolution = a.thoughts.some((t) => !t.project_identifier);
+    const resolvedSlug: string | null = needsResolution
+      ? resolveProjectIdentifier(db.db, cwd)
+      : null;
+
     const results: Array<{ id: string; linked: string[]; skipped: string[] }> = [];
     for (const thought of a.thoughts) {
       if (!thought.content || typeof thought.content !== "string") {
@@ -217,7 +239,7 @@ export function handleCaptureThought(
       if (err) {
         return toolError("invalid_input", err);
       }
-      results.push(captureSingle(db, thought));
+      results.push(captureSingle(db, thought, resolvedSlug));
     }
 
     return toolSuccess({
@@ -244,6 +266,12 @@ export function handleCaptureThought(
     return toolError("invalid_input", singleErr);
   }
 
+  // Only resolve from cwd when the explicit project_identifier is absent.
+  // This avoids the filesystem walk + registry write when the caller already specifies it.
+  const resolvedSlug: string | null = a.project_identifier
+    ? null
+    : resolveProjectIdentifier(db.db, cwd);
+
   const result = captureSingle(db, {
     content: a.content,
     summary: a.summary,
@@ -252,11 +280,13 @@ export function handleCaptureThought(
     source_agent: a.source_agent,
     trust_level: a.trust_level,
     project: a.project,
+    project_identifier: a.project_identifier,
+    visibility: a.visibility,
     topics: a.topics,
     people: a.people,
     metadata: a.metadata,
     related_to: a.related_to,
-  });
+  }, resolvedSlug);
 
   const suggested_connections = findSuggestedConnections(
     db,

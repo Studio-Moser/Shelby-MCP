@@ -8,6 +8,8 @@ import {
   listThoughts,
   countThoughts,
 } from "../../src/db/thoughts.js";
+import { runMigrations } from "../../src/db/migrations.js";
+import BetterSqlite3 from "better-sqlite3";
 import type Database from "better-sqlite3";
 
 describe("thoughts CRUD", () => {
@@ -339,5 +341,66 @@ describe("thoughts CRUD", () => {
       insertThought(db, { content: "Three" });
       expect(countThoughts(db)).toBe(3);
     });
+  });
+});
+
+describe("listThoughts slug scoping", () => {
+  function seed(db: Database.Database) {
+    insertThought(db, { content: "a", project_identifier: "shelby" });
+    insertThought(db, { content: "b", project_identifier: "kuow-games" });
+    insertThought(db, { content: "c", project_identifier: "shelby", visibility: "shared" });
+    insertThought(db, { content: "d", visibility: "shared" });
+    insertThought(db, { content: "e" });
+  }
+
+  it("returns current slug OR shared, and excludes other projects + null", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    seed(db);
+    const r = listThoughts(db, { project_identifier: "shelby", include_shared: true });
+    expect(r.total_count).toBe(3);
+    db.close();
+  });
+
+  it("include_shared:false returns only the exact slug", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    seed(db);
+    const r = listThoughts(db, { project_identifier: "shelby", include_shared: false });
+    expect(r.total_count).toBe(2);
+    db.close();
+  });
+});
+
+describe("listThoughts shared_only flag", () => {
+  it("returns only visibility='shared' thoughts when shared_only is true", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    insertThought(db, { content: "shared one", type: "insight", summary: "shared one", visibility: "shared", project_identifier: "shelby" });
+    insertThought(db, { content: "personal one", type: "decision", summary: "personal one", project_identifier: "shelby" });
+    insertThought(db, { content: "shared two", type: "reference", summary: "shared two", visibility: "shared" });
+    const r = listThoughts(db, { shared_only: true });
+    expect(r.total_count).toBe(2);
+    db.close();
+  });
+});
+
+describe("project_identifier on thoughts", () => {
+  it("persists and reads back project_identifier", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    const id = insertThought(db, { content: "x", project_identifier: "shelby" });
+    expect(getThought(db, id)?.project_identifier).toBe("shelby");
+    db.close();
+  });
+
+  it("defaults project_identifier to null and updates it", () => {
+    const db = new BetterSqlite3(":memory:");
+    runMigrations(db);
+    const id = insertThought(db, { content: "y" });
+    expect(getThought(db, id)?.project_identifier).toBeNull();
+    updateThought(db, id, { project_identifier: "kuow-games" });
+    expect(getThought(db, id)?.project_identifier).toBe("kuow-games");
+    db.close();
   });
 });

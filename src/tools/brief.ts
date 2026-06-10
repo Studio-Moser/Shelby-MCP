@@ -24,7 +24,7 @@ export type BriefScope = "essentials" | "recent" | "full";
 
 export interface BriefArgs {
   scope?: BriefScope;
-  project?: string;
+  project_identifier?: string;
 }
 
 // "Essentials" are the thought types that represent durable, reusable context.
@@ -51,30 +51,41 @@ export function handleGetBrief(
     );
   }
 
-  const project = a.project;
+  const slug = a.project_identifier;
 
   const essentials: ThoughtSummary[] =
     scope === "essentials" || scope === "full"
-      ? fetchEssentials(db, project)
+      ? fetchEssentials(db, slug)
       : [];
   const recent: ThoughtSummary[] =
-    scope === "recent" || scope === "full" ? fetchRecent(db, project) : [];
+    scope === "recent" || scope === "full" ? fetchRecent(db, slug) : [];
 
-  // Deduplicate across the two sections for the total count so thoughts that
-  // appear in both (e.g. a recent decision) are only counted once.
+  // Shared section: visibility='shared' thoughts across all projects.
+  // Fetch before deduplication so we can filter shared ids out of the other sections.
+  const shared: ThoughtSummary[] =
+    scope === "essentials" || scope === "full" ? fetchShared(db) : [];
+
+  // Remove any thought that appears in the Shared section from Essentials and
+  // Recent so each thought renders exactly once.
+  const sharedIds = new Set(shared.map((t) => t.id));
+  const essentialsShown = essentials.filter((t) => !sharedIds.has(t.id));
+  const recentShown = recent.filter((t) => !sharedIds.has(t.id));
+
+  // Deduplicate across all three sections for the total count.
   const uniqueIds = new Set<string>();
-  for (const t of essentials) uniqueIds.add(t.id);
-  for (const t of recent) uniqueIds.add(t.id);
+  for (const t of essentialsShown) uniqueIds.add(t.id);
+  for (const t of recentShown) uniqueIds.add(t.id);
+  for (const t of shared) uniqueIds.add(t.id);
 
-  const lastActivity = newestCreatedAt([...essentials, ...recent]);
+  const lastActivity = newestCreatedAt([...essentialsShown, ...recentShown, ...shared]);
 
-  const essentialsSection = formatEssentials(essentials);
-  const recentSection = formatRecent(recent);
+  const essentialsSection = formatEssentials(essentialsShown);
+  const recentSection = formatRecent(recentShown);
 
   // Build the human-readable brief document. Markdown matches the Mac app's
   // output so the format is identical across transports.
   const lines: string[] = [];
-  const title = project ? `# Project Brief — ${projectLabel(project)}` : "# Project Brief";
+  const title = slug ? `# Project Brief — ${slug}` : "# Project Brief";
   lines.push(title);
   lines.push(
     `Scope: ${scope} | Thoughts: ${uniqueIds.size}${lastActivity ? ` | Last activity: ${lastActivity}` : ""}`,
@@ -82,13 +93,20 @@ export function handleGetBrief(
   lines.push("");
 
   if (essentialsSection) lines.push(essentialsSection, "");
+
+  // Shared section: visibility='shared' thoughts (already fetched and deduped above).
+  if (scope === "essentials" || scope === "full") {
+    const sharedSection = formatShared(shared);
+    if (sharedSection) lines.push(sharedSection, "");
+  }
+
   if (recentSection) lines.push(recentSection, "");
   if (uniqueIds.size === 0) {
     lines.push("No memories found for this project yet.");
   }
 
   return toolSuccess({
-    project: project ?? null,
+    project_identifier: slug ?? null,
     scope,
     thought_count: uniqueIds.size,
     last_activity: lastActivity,
@@ -102,15 +120,18 @@ export function handleGetBrief(
 
 function fetchEssentials(
   db: ThoughtDatabase,
-  project: string | undefined,
+  slug: string | undefined,
 ): ThoughtSummary[] {
   // Fetch each essential type in a separate list call so we can guarantee
   // per-type coverage even when one type would otherwise dominate the limit.
+  // include_shared is false here — the Shared section owns shared rows so they
+  // don't appear in both sections.
   const collected: ThoughtSummary[] = [];
   for (const type of ESSENTIAL_TYPES) {
     const result = listThoughts(db.db, {
       type,
-      project,
+      project_identifier: slug,
+      include_shared: false,
       limit: ESSENTIALS_LIMIT,
     });
     collected.push(...result.results);
@@ -132,15 +153,34 @@ function fetchEssentials(
 
 function fetchRecent(
   db: ThoughtDatabase,
-  project: string | undefined,
+  slug: string | undefined,
 ): ThoughtSummary[] {
   const since = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
+  // include_shared is false here — the Shared section owns shared rows so they
+  // don't appear in both sections.
   const result = listThoughts(db.db, {
     since,
-    project,
+    project_identifier: slug,
+    include_shared: false,
     limit: RECENT_LIMIT,
   });
   return result.results;
+}
+
+// Returns visibility='shared' durable-context thoughts regardless of project.
+function fetchShared(db: ThoughtDatabase): ThoughtSummary[] {
+  const collected: ThoughtSummary[] = [];
+  for (const type of ESSENTIAL_TYPES) {
+    const result = listThoughts(db.db, {
+      type,
+      shared_only: true,
+      limit: ESSENTIALS_LIMIT,
+    });
+    for (const t of result.results) {
+      if (!collected.some((c) => c.id === t.id)) collected.push(t);
+    }
+  }
+  return collected.slice(0, ESSENTIALS_LIMIT);
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +190,15 @@ function fetchRecent(
 function formatEssentials(thoughts: ThoughtSummary[]): string {
   if (thoughts.length === 0) return "";
   const lines = ["## Essentials", ""];
+  for (const t of thoughts) {
+    lines.push(`- **[${dateOnly(t.created_at)}]** ${summaryOrType(t)}`);
+  }
+  return lines.join("\n");
+}
+
+function formatShared(thoughts: ThoughtSummary[]): string {
+  if (thoughts.length === 0) return "";
+  const lines = ["## Shared", ""];
   for (const t of thoughts) {
     lines.push(`- **[${dateOnly(t.created_at)}]** ${summaryOrType(t)}`);
   }
@@ -185,11 +234,4 @@ function newestCreatedAt(thoughts: ThoughtSummary[]): string | null {
     if (t.created_at > max) max = t.created_at;
   }
   return max;
-}
-
-function projectLabel(project: string): string {
-  // Mirror the Mac app's behavior: show the last path component instead of the
-  // full absolute path so the brief header isn't dominated by the prefix.
-  const parts = project.split("/").filter((p) => p.length > 0);
-  return parts[parts.length - 1] ?? project;
 }

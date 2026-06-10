@@ -12,10 +12,11 @@ export interface ShelbyConfig {
 }
 
 export interface CliCommand {
-  command: "help" | "setup" | "uninstall" | "protocol" | "forage" | "onboard" | "migrate";
+  command: "help" | "setup" | "uninstall" | "protocol" | "forage" | "onboard" | "migrate" | "repair-projects";
   agent?: string;
   forage?: boolean;
   onboard?: boolean;
+  apply?: boolean;
 }
 
 const DEFAULT_DB_DIR = resolve(homedir(), ".shelbymcp");
@@ -55,6 +56,11 @@ export function parseArgs(argv: string[]): ShelbyConfig | "version" | CliCommand
 
   if (first === "migrate") {
     return { command: "migrate" };
+  }
+
+  if (first === "repair-projects") {
+    const apply = argv.includes("--apply");
+    return { command: "repair-projects", apply };
   }
 
   // Parse flags for server mode — env vars provide defaults, CLI flags override

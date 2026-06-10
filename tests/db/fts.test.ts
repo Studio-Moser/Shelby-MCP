@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import Database from "better-sqlite3";
 import { ThoughtDatabase } from "../../src/db/database.js";
+import { runMigrations } from "../../src/db/migrations.js";
+import { insertThought as insertThoughtRecord } from "../../src/db/thoughts.js";
 import { searchThoughts, sanitizeFTSQuery } from "../../src/db/fts.js";
 
 function insertThought(
@@ -184,5 +187,32 @@ describe("searchThoughts", () => {
 
     const result = searchThoughts(tdb.db, { query: "CloudKit" });
     expect(result.results[0].topics).toEqual(["sync", "cloud"]);
+  });
+});
+
+describe("searchThoughts slug scoping", () => {
+  function seed(db: Database.Database) {
+    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "shelby" });
+    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "kuow-games" });
+    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "shelby", visibility: "shared" });
+    insertThoughtRecord(db, { content: "alpha apple", visibility: "shared" });
+  }
+  it("scopes FTS to slug OR shared", () => {
+    const db = new Database(":memory:"); runMigrations(db); seed(db);
+    const r = searchThoughts(db, { query: "alpha", project_identifier: "shelby", include_shared: true });
+    expect(r.total_count).toBe(3);
+    db.close();
+  });
+  it("scopes FTS to slug only when include_shared is false", () => {
+    const db = new Database(":memory:"); runMigrations(db); seed(db);
+    const r = searchThoughts(db, { query: "alpha", project_identifier: "shelby", include_shared: false });
+    expect(r.total_count).toBe(2);
+    db.close();
+  });
+  it("shared_only returns only shared", () => {
+    const db = new Database(":memory:"); runMigrations(db); seed(db);
+    const r = searchThoughts(db, { query: "alpha", shared_only: true });
+    expect(r.total_count).toBe(2);
+    db.close();
   });
 });
