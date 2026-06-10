@@ -9,6 +9,30 @@ export function slugify(name: string): string {
 }
 
 /**
+ * Shared detection logic: walk up from cwd to find the project root and
+ * remote, then derive a slug — without any database writes.
+ *
+ * Returns the slug and the detected info, or null if no project marker is found.
+ */
+function detectSlug(db: Database.Database, cwd: string): { slug: string; remote: string | null; projectRoot: string } | null {
+  const detected = detectProject(cwd);
+  if (!detected) return null;
+
+  if (detected.remote) {
+    // Registry match takes priority (returns the human-confirmed slug).
+    const existing = findProjectByRepo(db, detected.remote);
+    if (existing) {
+      return { slug: existing.slug, remote: detected.remote, projectRoot: detected.projectRoot };
+    }
+    const normalized = normalizeGitRemote(detected.remote);
+    return { slug: slugify(path.basename(normalized)), remote: detected.remote, projectRoot: detected.projectRoot };
+  }
+
+  // No remote — derive slug from directory basename.
+  return { slug: slugify(path.basename(detected.projectRoot)), remote: null, projectRoot: detected.projectRoot };
+}
+
+/**
  * Resolve the project slug for a working directory. Matches the registry by git
  * remote; if a real project root is detected (detectProject non-null):
  *   - has a remote  → registry match or provision from remote basename
@@ -23,24 +47,29 @@ export function slugify(name: string): string {
  * project_identifier (the macOS app does this from its active-project context).
  */
 export function resolveProjectIdentifier(db: Database.Database, cwd: string): string | null {
-  const detected = detectProject(cwd);
-  if (!detected) {
-    // No project marker found — don't auto-provision anything.
-    return null;
-  }
-  if (detected.remote) {
-    const existing = findProjectByRepo(db, detected.remote);
-    if (existing) return existing.slug;
-    const normalized = normalizeGitRemote(detected.remote);
-    const slug = slugify(path.basename(normalized));
-    upsertProvisional(db, slug, [normalized], [detected.projectRoot]);
-    return slug;
-  }
-  // Real project root with no remote — provision from dir basename.
-  const base = path.basename(detected.projectRoot);
-  const slug = slugify(base);
-  upsertProvisional(db, slug, [], [detected.projectRoot]);
+  const info = detectSlug(db, cwd);
+  if (!info) return null;
+
+  const { slug, remote, projectRoot } = info;
+
+  // Only provision if no existing entry for this slug.
+  const normalized = remote ? normalizeGitRemote(remote) : null;
+  upsertProvisional(db, slug, normalized ? [normalized] : [], [projectRoot]);
   return slug;
+}
+
+/**
+ * Read-only variant of resolveProjectIdentifier: derives the current project
+ * slug from cwd WITHOUT writing anything to the database.
+ *
+ * - Registry hit (remote matches a registered project) → returns that project's slug.
+ * - Detected project with unmatched remote → returns slugified remote basename.
+ * - Detected project with no remote → returns slugified directory basename.
+ * - No project marker found → returns null.
+ */
+export function currentProjectSlug(db: Database.Database, cwd: string): string | null {
+  const info = detectSlug(db, cwd);
+  return info ? info.slug : null;
 }
 
 function upsertProvisional(db: Database.Database, slug: string, repos: string[], paths: string[]): void {

@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrations } from "../../src/db/migrations.js";
-import { upsertProject, getProjectBySlug } from "../../src/db/projects.js";
-import { resolveProjectIdentifier } from "../../src/db/resolve-project.js";
+import { upsertProject, getProjectBySlug, listProjects } from "../../src/db/projects.js";
+import { resolveProjectIdentifier, currentProjectSlug } from "../../src/db/resolve-project.js";
 
 let db: Database.Database;
 beforeEach(() => { db = new Database(":memory:"); runMigrations(db); });
@@ -55,5 +55,47 @@ describe("resolveProjectIdentifier", () => {
     const p = getProjectBySlug(db, slug!);
     expect(p?.provisional).toBe(true);
     expect(p?.memberRepos).toEqual([]);
+  });
+});
+
+describe("currentProjectSlug (read-only)", () => {
+  it("returns the registry slug when the remote matches a registered project (no write)", () => {
+    upsertProject(db, {
+      slug: "shelby",
+      displayName: "Shelby",
+      memberRepos: ["github.com/Studio-Moser/Shelby-MCP"],
+      memberPaths: [],
+      provisional: false,
+    });
+    const root = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
+    const countBefore = listProjects(db).length;
+
+    const slug = currentProjectSlug(db, root);
+
+    expect(slug).toBe("shelby");
+    // Read-only: no new project should have been written
+    expect(listProjects(db).length).toBe(countBefore);
+  });
+
+  it("returns slugified basename of remote for an unmatched repo (no write)", () => {
+    const root = repo("https://github.com/acme/Cool-Repo.git");
+    const countBefore = listProjects(db).length;
+
+    const slug = currentProjectSlug(db, root);
+
+    expect(slug).toBe("cool-repo");
+    // Read-only: nothing written
+    expect(listProjects(db).length).toBe(countBefore);
+  });
+
+  it("returns null for a non-project directory (no write)", () => {
+    // Plain temp dir — no markers at all
+    const dir = mkdtempSync(join(tmpdir(), "plain-"));
+    const countBefore = listProjects(db).length;
+
+    const slug = currentProjectSlug(db, dir);
+
+    expect(slug).toBeNull();
+    expect(listProjects(db).length).toBe(countBefore);
   });
 });
