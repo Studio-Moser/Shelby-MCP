@@ -147,6 +147,22 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    description: "Normalize legacy display-name project_identifiers to registry slugs",
+    up: (db) => {
+      const map: Array<[string, string]> = [
+        ["Shelby", "shelby"],
+        ["The Crooked Line", "the-crooked-line"],
+        ["KUOW Games", "kuow-games"],
+        ["Ausra Photos", "ausra-photos"],
+      ];
+      const upd = db.prepare("UPDATE thoughts SET project_identifier = ? WHERE project_identifier = ?");
+      for (const [from, to] of map) upd.run(to, from);
+      // Empty-string scope is meaningless — treat as orphan (NULL), repaired later.
+      db.prepare("UPDATE thoughts SET project_identifier = NULL WHERE project_identifier = ''").run();
+    },
+  },
 ];
 
 export function getSchemaVersion(db: Database.Database): number {
