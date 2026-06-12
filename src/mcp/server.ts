@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { CompleteRequestSchema, SetLevelRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CompleteRequestSchema, RootsListChangedNotificationSchema, SetLevelRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { LoggingLevel } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { ShelbyConfig } from "../config.js";
@@ -17,6 +17,9 @@ import { handleGetBrief } from "../tools/brief.js";
 import { handleSelectContext } from "../tools/context.js";
 import type { ToolResult } from "../tools/helpers.js";
 import { applyDefaultScope } from "./scope-defaults.js";
+import { pickResolutionDir } from "./resolve-dir.js";
+import type { RootRef } from "./resolve-dir.js";
+import { ensureSeedProjects } from "../db/seed.js";
 import {
   MAX_CONTENT_LENGTH,
   MAX_SUMMARY_LENGTH,
@@ -47,6 +50,46 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     name: "shelbymcp",
     version: VERSION,
   });
+
+  // Seed the project registry so resolution can match known paths.
+  ensureSeedProjects(db.db);
+
+  // ---------------------------------------------------------------------------
+  // Client roots — used to resolve the caller's working directory.
+  // The server runs at process.cwd() = "/" in production (launched by macOS app),
+  // so we prefer the first file:// root advertised by the MCP client instead.
+  // ---------------------------------------------------------------------------
+  let clientRoots: RootRef[] | undefined;
+  let rootsFetched = false;
+
+  async function refreshRoots(): Promise<void> {
+    try {
+      const res = await server.server.listRoots();
+      clientRoots = res.roots as RootRef[];
+    } catch {
+      // Client does not support roots — leave clientRoots undefined.
+    }
+    rootsFetched = true;
+  }
+
+  // Re-fetch when the client signals its roots have changed.
+  server.server.setNotificationHandler(RootsListChangedNotificationSchema, () => {
+    void refreshRoots();
+  });
+
+  /** Lazily trigger the first roots fetch (no-op after the first call). */
+  function ensureRoots(): void {
+    if (!rootsFetched) {
+      rootsFetched = true; // set eagerly to prevent concurrent fetches
+      void refreshRoots();
+    }
+  }
+
+  /** The directory to use for project resolution in the current handler call. */
+  function resolutionDir(): string {
+    ensureRoots();
+    return pickResolutionDir(clientRoots, process.cwd());
+  }
 
   // Initialize embedding config from environment
   const embeddingConfig = getEmbeddingConfig();
@@ -157,7 +200,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("capture_thought", async (args) => {
-      const result = handleCaptureThought(db, args as Record<string, unknown>);
+      const result = handleCaptureThought(db, args as Record<string, unknown>, resolutionDir());
       // Auto-embed after capture when a server-side embedding provider is configured
       if (!result.isError && embeddingConfig.provider !== "none") {
         try {
@@ -232,7 +275,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("search_thoughts", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
       return handleSearchThoughts(db, scoped as Record<string, unknown>);
     }),
   );
@@ -270,7 +313,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("list_thoughts", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
       return handleListThoughts(db, scoped as Record<string, unknown>);
     }),
   );
@@ -455,7 +498,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("get_brief", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
       return handleGetBrief(db, scoped as Record<string, unknown>);
     }),
   );
@@ -487,7 +530,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("select_context", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, process.cwd());
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
       return handleSelectContext(db, scoped as Record<string, unknown>);
     }),
   );

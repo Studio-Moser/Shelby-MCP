@@ -31,6 +31,7 @@ export interface SelectContextArgs {
   include_brief?: boolean;
   include_stats?: boolean;
   limit?: number;
+  shared_only?: boolean;
 }
 
 export function handleSelectContext(
@@ -54,6 +55,11 @@ export function handleSelectContext(
   }
 
   const limit = clampLimit(a.limit);
+  // When shared_only is set (and no explicit project_identifier), all reads are
+  // restricted to visibility='shared' thoughts — the fail-safe that prevents
+  // cross-project contamination when no project slug can be resolved.
+  // Mirrors the pattern in brief.ts:59.
+  const sharedOnly = a.shared_only === true && a.project_identifier === undefined;
   const sections: string[] = [];
 
   // Optional brief header. We reuse get_brief to avoid forking the essentials
@@ -63,6 +69,7 @@ export function handleSelectContext(
     const briefResult = handleGetBrief(db, {
       scope: "essentials",
       project_identifier: a.project_identifier,
+      shared_only: sharedOnly,
     });
     if (!briefResult.isError) {
       try {
@@ -88,6 +95,7 @@ export function handleSelectContext(
     since: a.since,
     project_identifier: a.project_identifier,
     include_shared: a.include_shared,
+    shared_only: sharedOnly,
     limit,
   });
 
@@ -131,6 +139,7 @@ interface CollectArgs {
   since: string | undefined;
   project_identifier: string | undefined;
   include_shared: boolean | undefined;
+  shared_only: boolean;
   limit: number;
 }
 
@@ -150,6 +159,7 @@ function collectThoughts(
         since: args.since,
         project_identifier: args.project_identifier,
         include_shared: args.include_shared ?? true,
+        shared_only: args.shared_only,
         limit: args.limit,
       });
       pool.push(...result.results);
@@ -161,6 +171,7 @@ function collectThoughts(
       since: args.since,
       project_identifier: args.project_identifier,
       include_shared: args.include_shared ?? true,
+      shared_only: args.shared_only,
       limit: args.limit,
     });
     pool.push(...result.results);

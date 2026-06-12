@@ -5,6 +5,7 @@ import {
   upsertProject,
   getProjectBySlug,
   findProjectByRepo,
+  findProjectByPath,
   listProjects,
   normalizeGitRemote,
 } from "../../src/db/projects.js";
@@ -45,5 +46,22 @@ describe("projects registry", () => {
     const p = getProjectBySlug(db, "x");
     expect(p?.displayName).toBe("X2");
     expect(p?.provisional).toBe(false);
+  });
+});
+
+describe("findProjectByPath", () => {
+  it("matches the project whose member_path is the longest prefix of dir", () => {
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: ["/Users/tim/Projects/Shelby"], provisional: false });
+    upsertProject(db, { slug: "tcl", displayName: "TCL", memberRepos: [], memberPaths: ["/Users/tim/Projects/The Crooked Line"], provisional: false });
+
+    expect(findProjectByPath(db, "/Users/tim/Projects/Shelby")?.slug).toBe("shelby");
+    expect(findProjectByPath(db, "/Users/tim/Projects/Shelby/Shelby-MCP/src")?.slug).toBe("shelby");
+    expect(findProjectByPath(db, "/Users/tim/Projects/Other")).toBeNull();
+  });
+
+  it("prefers the longest matching member_path when paths nest", () => {
+    upsertProject(db, { slug: "outer", displayName: "Outer", memberRepos: [], memberPaths: ["/Users/tim/Projects"], provisional: false });
+    upsertProject(db, { slug: "inner", displayName: "Inner", memberRepos: [], memberPaths: ["/Users/tim/Projects/Shelby"], provisional: false });
+    expect(findProjectByPath(db, "/Users/tim/Projects/Shelby/x")?.slug).toBe("inner");
   });
 });

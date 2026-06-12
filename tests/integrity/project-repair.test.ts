@@ -33,6 +33,12 @@ describe("repair classification", () => {
     expect(report.flagged.some((i) => i.id === id)).toBe(true);
     expect(report.highConfidence.some((i) => i.id === id)).toBe(false);
   });
+  it("high-confidence by distinctive source string", () => {
+    const id = insertThought(db, { content: "x", source: "deep-dive-graphify-techniques-for-shelby" });
+    const report = planProjectRepairs(db);
+    const item = report.highConfidence.find((i) => i.id === id);
+    expect(item?.suggestedSlug).toBe("shelby");
+  });
   it("ignores already-resolved thoughts", () => {
     const id = insertThought(db, { content: "ok", project_identifier: "shelby" });
     const report = planProjectRepairs(db);

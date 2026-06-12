@@ -102,3 +102,22 @@ export function findProjectByRepo(db: Database.Database, remote: string): Projec
   }
   return null;
 }
+
+/**
+ * Return the registered project whose member_paths contains the longest prefix
+ * of `dir` (exact match or `dir` is a sub-path), or null. This is what lets a
+ * markerless multi-repo container directory resolve to its project slug.
+ */
+export function findProjectByPath(db: Database.Database, dir: string): Project | null {
+  let best: Project | null = null;
+  let bestLen = -1;
+  for (const p of listProjects(db)) {
+    for (const mp of p.memberPaths) {
+      if (mp.length > bestLen && (dir === mp || dir.startsWith(mp + "/"))) {
+        bestLen = mp.length;
+        best = p;
+      }
+    }
+  }
+  return best;
+}

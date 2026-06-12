@@ -158,6 +158,58 @@ describe("handleSelectContext", () => {
     expect(data.document).not.toContain("Kuow slug thought");
   });
 
+  it("shared_only: returns only shared thoughts, excludes all project-scoped thoughts", () => {
+    // A personal decision in project "a" — must NOT leak
+    capture("Project A private decision", {
+      project_identifier: "project-a",
+      type: "decision",
+      summary: "Project A private decision",
+    });
+    // A personal note in project "b" — must NOT leak
+    capture("Project B private note", {
+      project_identifier: "project-b",
+      type: "note",
+      summary: "Project B private note",
+    });
+    // A shared reference — MUST appear
+    capture("Shared reference", {
+      visibility: "shared",
+      type: "reference",
+      summary: "Shared reference",
+    });
+
+    const result = handleSelectContext(db, { shared_only: true });
+    expect(result.isError).toBeUndefined();
+    const data = parseResult(result);
+
+    expect(data.matched_count).toBe(1);
+    expect(data.document).toContain("Shared reference");
+    expect(data.document).not.toContain("Project A private decision");
+    expect(data.document).not.toContain("Project B private note");
+  });
+
+  it("shared_only with include_brief: brief header is also shared-only (no cross-project leak)", () => {
+    // A decision in project "a" that would appear in a normal brief — must NOT leak via the brief header
+    capture("Project A critical decision", {
+      project_identifier: "project-a",
+      type: "decision",
+      summary: "Project A critical decision",
+    });
+    // A shared decision that SHOULD appear in the brief header
+    capture("Shared critical decision", {
+      visibility: "shared",
+      type: "decision",
+      summary: "Shared critical decision",
+    });
+
+    const result = handleSelectContext(db, { shared_only: true, include_brief: true });
+    expect(result.isError).toBeUndefined();
+    const data = parseResult(result);
+
+    expect(data.document).not.toContain("Project A critical decision");
+    expect(data.document).toContain("Shared critical decision");
+  });
+
   it("rejects non-string-array types", () => {
     const result = handleSelectContext(db, { types: [1, 2, 3] as unknown as string[] });
     expect(result.isError).toBe(true);

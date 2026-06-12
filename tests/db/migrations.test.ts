@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { getSchemaVersion, runMigrations } from "../../src/db/migrations.js";
+import { getSchemaVersion, getMigrations, runMigrations, setSchemaVersion } from "../../src/db/migrations.js";
 
 describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
   let db: ThoughtDatabase;
@@ -14,8 +14,8 @@ describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
     db?.close();
   });
 
-  it("schema version is 6 after all migrations", () => {
-    expect(getSchemaVersion(db.db)).toBe(6);
+  it("schema version is 7 after all migrations", () => {
+    expect(getSchemaVersion(db.db)).toBe(7);
   });
 
   it("thoughts table has source_agent column", () => {
@@ -105,7 +105,7 @@ describe("migration v6 — project identity", () => {
     const db = new Database(":memory:");
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(6);
+    expect(getSchemaVersion(db)).toBe(7);
 
     const thoughtCols = db.prepare("PRAGMA table_info(thoughts)").all() as Array<{ name: string }>;
     expect(thoughtCols.map((c) => c.name)).toContain("project_identifier");
@@ -115,5 +115,24 @@ describe("migration v6 — project identity", () => {
       expect.arrayContaining(["slug","display_name","member_repos","member_paths","provisional","created_at","updated_at"]),
     );
     db.close();
+  });
+});
+
+describe("migration v7 — normalize legacy display-name project_identifiers", () => {
+  it("v7 normalizes legacy display-name project_identifiers to slugs", () => {
+    const db = new Database(":memory:");
+    // Advance through v6 only, seed legacy rows, then let runMigrations apply v7 to them.
+    for (const m of getMigrations().filter((x) => x.version <= 6)) m.up(db);
+    setSchemaVersion(db, 6);
+    const now = new Date().toISOString();
+    const ins = db.prepare("INSERT INTO thoughts (id, content, type, source, created_at, updated_at, project_identifier) VALUES (?,?,?,?,?,?,?)");
+    ins.run("a", "x", "note", "t", now, now, "Shelby");
+    ins.run("b", "y", "note", "t", now, now, "The Crooked Line");
+    ins.run("c", "z", "note", "t", now, now, "");
+    runMigrations(db); // applies v7 only
+    const get = db.prepare("SELECT project_identifier AS p FROM thoughts WHERE id = ?");
+    expect((get.get("a") as any).p).toBe("shelby");
+    expect((get.get("b") as any).p).toBe("the-crooked-line");
+    expect((get.get("c") as any).p).toBeNull();
   });
 });

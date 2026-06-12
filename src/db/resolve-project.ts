@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import path from "node:path";
 import { detectProject } from "./project-detector.js";
-import { findProjectByRepo, getProjectBySlug, upsertProject, normalizeGitRemote } from "./projects.js";
+import { findProjectByRepo, findProjectByPath, getProjectBySlug, upsertProject, normalizeGitRemote } from "./projects.js";
 
 /** lowercase, spaces/underscores → hyphens, strip other unsafe chars. */
 export function slugify(name: string): string {
@@ -15,6 +15,11 @@ export function slugify(name: string): string {
  * Returns the slug and the detected info, or null if no project marker is found.
  */
 function detectSlug(db: Database.Database, cwd: string): { slug: string; remote: string | null; projectRoot: string } | null {
+  // Registry path match first — handles markerless multi-repo containers and is
+  // setup-portable: the caller's real dir maps to a human-curated slug directly.
+  const byPath = findProjectByPath(db, cwd);
+  if (byPath) return { slug: byPath.slug, remote: null, projectRoot: cwd };
+
   const detected = detectProject(cwd);
   if (!detected) return null;
 
