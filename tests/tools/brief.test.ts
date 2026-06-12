@@ -140,6 +140,17 @@ describe("handleGetBrief", () => {
   });
 });
 
+describe("get_brief shared_only fail-safe", () => {
+  it("returns a shared-only brief when no project resolves", () => {
+    capture("Project A decision", { type: "decision", project_identifier: "a", summary: "Project A decision" });
+    capture("A user fact about Tim", { type: "reference", visibility: "shared", summary: "A user fact about Tim" });
+    const result = handleGetBrief(db, { shared_only: true });
+    const data = parseResult(result);
+    expect(data.brief).toContain("A user fact about Tim");
+    expect(data.brief).not.toContain("Project A decision");
+  });
+});
+
 describe("get_brief slug scoping", () => {
   it("includes current slug + shared, excludes other projects, labels Shared", () => {
     insertThought(db.db, { content: "shelby decision", type: "decision", summary: "shelby decision", project_identifier: "shelby" });

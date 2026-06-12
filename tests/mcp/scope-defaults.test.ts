@@ -94,15 +94,10 @@ describe("applyDefaultScope", () => {
     expect(result.include_shared).toBe(false);
   });
 
-  it("returns args unchanged (no project_identifier) when cwd is a non-project directory", () => {
-    const cwd = plainDir();
-    const args = { query: "hello" };
-
-    const result = applyDefaultScope(args, db, cwd);
-
-    // No slug resolved → no injection
+  it("falls back to shared-only (never global) when cwd does not resolve", () => {
+    const result = applyDefaultScope({ query: "hello" }, db, plainDir());
     expect(result.project_identifier).toBeUndefined();
-    // No mutation
+    expect(result.shared_only).toBe(true);   // new fail-safe
     expect(result.query).toBe("hello");
   });
 

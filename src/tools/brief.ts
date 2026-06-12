@@ -25,6 +25,7 @@ export type BriefScope = "essentials" | "recent" | "full";
 export interface BriefArgs {
   scope?: BriefScope;
   project_identifier?: string;
+  shared_only?: boolean;
 }
 
 // "Essentials" are the thought types that represent durable, reusable context.
@@ -52,18 +53,28 @@ export function handleGetBrief(
   }
 
   const slug = a.project_identifier;
+  // When shared_only is set (and no explicit project_identifier), all reads are
+  // restricted to visibility='shared' thoughts — the fail-safe path that prevents
+  // cross-project contamination when no project slug can be resolved.
+  const sharedOnly = a.shared_only === true && slug === undefined;
 
   const essentials: ThoughtSummary[] =
     scope === "essentials" || scope === "full"
-      ? fetchEssentials(db, slug)
+      ? sharedOnly ? fetchShared(db) : fetchEssentials(db, slug)
       : [];
   const recent: ThoughtSummary[] =
-    scope === "recent" || scope === "full" ? fetchRecent(db, slug) : [];
+    scope === "recent" || scope === "full"
+      ? fetchRecent(db, slug, sharedOnly)
+      : [];
 
   // Shared section: visibility='shared' thoughts across all projects.
   // Fetch before deduplication so we can filter shared ids out of the other sections.
+  // In shared-only mode, essentials already == fetchShared, so skip the separate fetch
+  // to avoid double-counting — we'll reuse the essentials array as the shared set.
   const shared: ThoughtSummary[] =
-    scope === "essentials" || scope === "full" ? fetchShared(db) : [];
+    scope === "essentials" || scope === "full"
+      ? sharedOnly ? [] : fetchShared(db)
+      : [];
 
   // Remove any thought that appears in the Shared section from Essentials and
   // Recent so each thought renders exactly once.
@@ -154,8 +165,18 @@ function fetchEssentials(
 function fetchRecent(
   db: ThoughtDatabase,
   slug: string | undefined,
+  sharedOnly = false,
 ): ThoughtSummary[] {
   const since = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
+  if (sharedOnly) {
+    // Shared-only fail-safe path: only return visibility='shared' thoughts.
+    const result = listThoughts(db.db, {
+      since,
+      shared_only: true,
+      limit: RECENT_LIMIT,
+    });
+    return result.results;
+  }
   // include_shared is false here — the Shared section owns shared rows so they
   // don't appear in both sections.
   const result = listThoughts(db.db, {

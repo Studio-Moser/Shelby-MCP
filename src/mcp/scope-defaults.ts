@@ -38,7 +38,8 @@ export function applyDefaultScope(
 
   // Attempt to derive the current project slug from cwd.
   const slug = currentProjectSlug(db, cwd);
-  if (!slug) return args;
+  // No slug resolved → fail safe to shared-only (never expose every project).
+  if (!slug) return { ...args, shared_only: true };
 
   return {
     ...args,
