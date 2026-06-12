@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { getThought, updateThought, type ThoughtRecord } from "../db/thoughts.js";
+import { getThought, updateThought } from "../db/thoughts.js";
 import { upsertProject, getProjectBySlug, listProjects, type Project } from "../db/projects.js";
 import { DEFAULT_KNOWN_PROJECTS, DEFAULT_TOPIC_CLUSTERS } from "./seed-data.js";
 
@@ -61,7 +61,18 @@ function inferByTopics(topics: string[], topicClusters: Record<string, string>):
   return { slug: null, ambiguous: false };
 }
 
-function classify(t: ThoughtRecord, projects: Project[], topicClusters: Record<string, string>): RepairItem {
+/** Map a capture source/source_agent string to a slug when it unambiguously names one project. */
+function inferBySource(source: string | null): string | null {
+  if (!source) return null;
+  const s = source.toLowerCase();
+  if (s.includes("shelby") || s.includes("graphify")) return "shelby";
+  if (s.includes("crooked") || s.includes("tcl") || s.includes("gdelt") || s.includes("polymarket")) return "the-crooked-line";
+  if (s.includes("ausra")) return "ausra-photos";
+  if (s.includes("kuow")) return "kuow-games";
+  return null;
+}
+
+function classify(t: { id: string; project: string | null; topics: string[]; source: string | null }, projects: Project[], topicClusters: Record<string, string>): RepairItem {
   const byPath = inferByPath(t.project, projects);
   if (byPath) {
     return {
@@ -80,6 +91,15 @@ function classify(t: ThoughtRecord, projects: Project[], topicClusters: Record<s
       reason: `distinctive topic → ${byTopic.slug}`,
     };
   }
+  const bySource = inferBySource(t.source);
+  if (bySource) {
+    return {
+      id: t.id,
+      suggestedSlug: bySource,
+      confidence: "high",
+      reason: `distinctive source → ${bySource}`,
+    };
+  }
   return {
     id: t.id,
     suggestedSlug: null,
@@ -88,12 +108,13 @@ function classify(t: ThoughtRecord, projects: Project[], topicClusters: Record<s
   };
 }
 
-/** Minimal thought shape sufficient for classify() / inferByPath() / inferByTopics(). */
+/** Minimal thought shape sufficient for classify() / inferByPath() / inferByTopics() / inferBySource(). */
 interface RepairCandidate {
   id: string;
   project: string | null;
   topics: string[];
   project_identifier: string | null;
+  source: string | null;
 }
 
 /**
@@ -103,14 +124,15 @@ interface RepairCandidate {
 function repairCandidates(db: Database.Database): RepairCandidate[] {
   const rows = db
     .prepare(
-      "SELECT id, project, project_identifier, topics FROM thoughts WHERE project_identifier IS NULL OR project_identifier = ''",
+      "SELECT id, project, project_identifier, topics, source FROM thoughts WHERE project_identifier IS NULL OR project_identifier = ''",
     )
-    .all() as Array<{ id: string; project: string | null; project_identifier: string | null; topics: string | null }>;
+    .all() as Array<{ id: string; project: string | null; project_identifier: string | null; topics: string | null; source: string | null }>;
   return rows.map((r) => ({
     id: r.id,
     project: r.project,
     project_identifier: r.project_identifier,
     topics: parseJsonArrayRaw(r.topics),
+    source: r.source,
   }));
 }
 
@@ -131,7 +153,7 @@ export function planProjectRepairs(db: Database.Database, topicClusters: Record<
   let scanned = 0;
   for (const t of repairCandidates(db)) {
     scanned++;
-    const item = classify(t as ThoughtRecord, projects, topicClusters);
+    const item = classify(t, projects, topicClusters);
     if (item.confidence === "high") highConfidence.push(item);
     else flagged.push(item);
   }
