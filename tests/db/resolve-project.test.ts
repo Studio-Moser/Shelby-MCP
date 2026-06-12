@@ -98,4 +98,12 @@ describe("currentProjectSlug (read-only)", () => {
     expect(slug).toBeNull();
     expect(listProjects(db).length).toBe(countBefore);
   });
+
+  it("resolves a markerless container dir via the registry member_paths", () => {
+    // No .git / package.json marker here — only a registry path match.
+    const dir = mkdtempSync(join(tmpdir(), "container-"));
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [dir], provisional: false });
+    expect(currentProjectSlug(db, dir)).toBe("shelby");        // read path
+    expect(resolveProjectIdentifier(db, dir)).toBe("shelby");  // write path
+  });
 });
