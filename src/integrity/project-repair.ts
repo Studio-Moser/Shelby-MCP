@@ -191,6 +191,12 @@ export function repairProjects(
   for (const item of report.flagged) {
     const t = getThought(db, item.id);
     if (!t) continue;
+    // FLAG CONTRACT (parity with Shelby-MacOS, ADR 0001):
+    // `needs_project_review` = "deterministic repair could not place this; it is QUEUED
+    // for review." A future agentic classifier MUST treat these as candidates (INCLUDE
+    // them) and, when it decides to leave a thought unclassified, write a SEPARATE
+    // terminal flag `ai_reviewed: true` (NOT `needs_project_review`) to avoid re-review.
+    // Do not exclude `needs_project_review` from a classifier's candidate query.
     const meta: Record<string, unknown> = {
       ...(t.metadata ?? {}),
       needs_project_review: true,

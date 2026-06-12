@@ -89,6 +89,15 @@ describe("apply", () => {
     const t = getThought(db, id);
     expect(t?.metadata?.repaired_from).toBe("null");
   });
+
+  it("ambiguous repair writes needs_project_review and never ai_reviewed", () => {
+    // seed an ambiguous orphan: generic topics that map to no single project
+    const id = insertThought(db, { content: "z", topics: ["research-source", "competitive"] });
+    repairProjects(db, { apply: true });
+    const meta = getThought(db, id)?.metadata as Record<string, unknown>;
+    expect(meta.needs_project_review).toBe(true);
+    expect(meta.ai_reviewed).toBeUndefined();
+  });
 });
 
 describe("data injection", () => {
