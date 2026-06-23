@@ -15,6 +15,7 @@ export const DEFAULT_KNOWN_PROJECTS: Project[] = [
       "github.com/Studio-Moser/Shelby-MCP",
       "github.com/Studio-Moser/Shelby-MacOS",
       "github.com/Studio-Moser/Shelby-Strategy",
+      "github.com/Studio-Moser/Shelby-Docs",
       "github.com/Studio-Moser/Shelby-Website",
     ],
     memberPaths: ["/Users/timmoser/Projects/Shelby"],
