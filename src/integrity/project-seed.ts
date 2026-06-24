@@ -34,10 +34,49 @@ export function seedDefaultPath(): string {
   return join(homedir(), ".shelbymcp", "projects.seed.json");
 }
 
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/** Validate one raw project entry. Returns null if it is malformed. */
+function parseSeedProject(raw: unknown): SeedProject | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.slug !== "string" || typeof o.displayName !== "string") return null;
+  if (o.memberRepos !== undefined && !isStringArray(o.memberRepos)) return null;
+  if (o.memberPaths !== undefined && !isStringArray(o.memberPaths)) return null;
+  if (o.sourceAliases !== undefined && !isStringArray(o.sourceAliases)) return null;
+  if (o.provisional !== undefined && typeof o.provisional !== "boolean") return null;
+  return {
+    slug: o.slug,
+    displayName: o.displayName,
+    memberRepos: o.memberRepos as string[] | undefined,
+    memberPaths: o.memberPaths as string[] | undefined,
+    provisional: o.provisional as boolean | undefined,
+    sourceAliases: o.sourceAliases as string[] | undefined,
+  };
+}
+
+/** Validate the topic-cluster map. Returns null if any value is not a string. */
+function parseTopicClusters(raw: unknown): Record<string, string> | null {
+  if (raw === undefined) return {};
+  if (typeof raw !== "object" || raw === null) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v !== "string") return null;
+    out[k] = v;
+  }
+  return out;
+}
+
 /**
- * Load the seed from `path`. Returns `EMPTY_SEED` when the file is absent or
- * unparseable — never throws, so a missing/corrupt config can't break server
- * start.
+ * Load the seed from `path`. Returns `EMPTY_SEED` when the file is absent,
+ * unparseable, or **malformed** — never throws, so a missing/corrupt config
+ * can't break server start. Validation is strict and whole-file (mirrors the
+ * Swift `ProjectSeed` Codable): any project entry missing a string
+ * `slug`/`displayName`, any mistyped member field, or any non-string topic
+ * value rejects the entire config to `EMPTY_SEED` — so no phantom rows reach
+ * the registry.
  */
 export function loadProjectSeed(path: string = seedDefaultPath()): ProjectSeed {
   try {
@@ -45,11 +84,19 @@ export function loadProjectSeed(path: string = seedDefaultPath()): ProjectSeed {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (typeof parsed !== "object" || parsed === null) return EMPTY_SEED;
     const obj = parsed as { projects?: unknown; topicClusters?: unknown };
-    const projects = Array.isArray(obj.projects) ? (obj.projects as SeedProject[]) : [];
-    const topicClusters =
-      typeof obj.topicClusters === "object" && obj.topicClusters !== null
-        ? (obj.topicClusters as Record<string, string>)
-        : {};
+
+    const rawProjects = obj.projects === undefined ? [] : obj.projects;
+    if (!Array.isArray(rawProjects)) return EMPTY_SEED;
+    const projects: SeedProject[] = [];
+    for (const raw of rawProjects) {
+      const project = parseSeedProject(raw);
+      if (project === null) return EMPTY_SEED; // strict: reject the whole file
+      projects.push(project);
+    }
+
+    const topicClusters = parseTopicClusters(obj.topicClusters);
+    if (topicClusters === null) return EMPTY_SEED;
+
     return { projects, topicClusters };
   } catch {
     return EMPTY_SEED;

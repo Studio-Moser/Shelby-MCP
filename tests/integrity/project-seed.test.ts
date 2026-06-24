@@ -66,6 +66,38 @@ describe("loadProjectSeed", () => {
     }
   });
 
+  it("rejects the whole file to EMPTY when a project entry lacks a string slug", () => {
+    // Parity with Swift's strict Codable: any malformed element → EMPTY (so no
+    // phantom NULL-slug rows reach the registry).
+    const p = tmpPath();
+    writeFileSync(p, JSON.stringify({ projects: [{ displayName: "X" }] }));
+    try {
+      expect(loadProjectSeed(p)).toEqual(EMPTY_SEED);
+    } finally {
+      rmSync(p, { force: true });
+    }
+  });
+
+  it("rejects the whole file to EMPTY when a topicCluster value is not a string", () => {
+    const p = tmpPath();
+    writeFileSync(p, JSON.stringify({ topicClusters: { x: 123 } }));
+    try {
+      expect(loadProjectSeed(p)).toEqual(EMPTY_SEED);
+    } finally {
+      rmSync(p, { force: true });
+    }
+  });
+
+  it("rejects the whole file to EMPTY when a member field is mistyped", () => {
+    const p = tmpPath();
+    writeFileSync(p, JSON.stringify({ projects: [{ slug: "x", displayName: "X", memberPaths: "not-an-array" }] }));
+    try {
+      expect(loadProjectSeed(p)).toEqual(EMPTY_SEED);
+    } finally {
+      rmSync(p, { force: true });
+    }
+  });
+
   it("defaults optional project fields when omitted", () => {
     const p = tmpPath();
     writeFileSync(p, JSON.stringify({ projects: [{ slug: "x", displayName: "X" }] }));
