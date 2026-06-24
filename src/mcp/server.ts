@@ -20,6 +20,7 @@ import { applyDefaultScope } from "./scope-defaults.js";
 import { pickResolutionDir } from "./resolve-dir.js";
 import type { RootRef } from "./resolve-dir.js";
 import { ensureSeedProjects } from "../db/seed.js";
+import { loadProjectSeed, toProjects } from "../integrity/project-seed.js";
 import {
   MAX_CONTENT_LENGTH,
   MAX_SUMMARY_LENGTH,
@@ -51,8 +52,9 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     version: VERSION,
   });
 
-  // Seed the project registry so resolution can match known paths.
-  ensureSeedProjects(db.db);
+  // Seed the project registry from the per-user config (#308) so resolution can
+  // match known paths. Empty on a fresh install — nothing bundled.
+  ensureSeedProjects(db.db, toProjects(loadProjectSeed()));
 
   // ---------------------------------------------------------------------------
   // Client roots — used to resolve the caller's working directory.

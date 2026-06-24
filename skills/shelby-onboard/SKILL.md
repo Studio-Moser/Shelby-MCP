@@ -37,7 +37,7 @@ Ask about:
 **Capture as:**
 - Type: `reference` — these are stable facts about the person
 - Topics: `["identity"]` plus anything specific (e.g., `["identity", "ios", "startup"]`)
-- Summary: one-line distillation (e.g., "Tim is a senior iOS engineer and solo founder building Shelby, based in Austin")
+- Summary: one-line distillation (e.g., "a senior iOS engineer and solo founder building a productivity app, based in a mid-size city")
 
 ### Round 2: What Are You Working On?
 

@@ -1,5 +1,6 @@
 import { ThoughtDatabase } from "../db/database.js";
 import { repairProjects, type RepairReport } from "../integrity/project-repair.js";
+import { loadProjectSeed, toProjects, sourceAliasMap } from "../integrity/project-seed.js";
 
 /**
  * Pure formatter for a RepairReport.  All output logic lives here so it can be
@@ -62,7 +63,14 @@ export function formatRepairReport(report: RepairReport, apply: boolean): string
 export function runRepairProjects(dbPath: string, apply: boolean): void {
   const db = new ThoughtDatabase(dbPath);
   try {
-    const report = repairProjects(db.db, { apply });
+    // Inject the per-user seed (#308/#309) — empty on a fresh install.
+    const seed = loadProjectSeed();
+    const report = repairProjects(db.db, {
+      apply,
+      projects: toProjects(seed),
+      topicClusters: seed.topicClusters,
+      sourceAliases: sourceAliasMap(seed),
+    });
     const output = formatRepairReport(report, apply);
     console.error(output);
   } finally {

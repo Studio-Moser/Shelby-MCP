@@ -61,18 +61,31 @@ function inferByTopics(topics: string[], topicClusters: Record<string, string>):
   return { slug: null, ambiguous: false };
 }
 
-/** Map a capture source/source_agent string to a slug when it unambiguously names one project. */
-function inferBySource(source: string | null): string | null {
+/**
+ * Map a capture source string to a slug using the registry-derived source-alias
+ * map (#309) instead of a hardcoded ladder of one developer's project names.
+ * With no configured aliases this returns null — a fresh install makes no
+ * source-based assignment. Match order is deterministic: longest alias first
+ * (more specific wins), then lexicographic.
+ */
+function inferBySource(source: string | null, aliases: Record<string, string>): string | null {
   if (!source) return null;
+  const keys = Object.keys(aliases);
+  if (keys.length === 0) return null;
   const s = source.toLowerCase();
-  if (s.includes("shelby") || s.includes("graphify")) return "shelby";
-  if (s.includes("crooked") || s.includes("tcl") || s.includes("gdelt") || s.includes("polymarket")) return "the-crooked-line";
-  if (s.includes("ausra")) return "ausra-photos";
-  if (s.includes("kuow")) return "kuow-games";
+  keys.sort((a, b) => (a.length !== b.length ? b.length - a.length : a < b ? -1 : 1));
+  for (const alias of keys) {
+    if (s.includes(alias)) return aliases[alias] ?? null;
+  }
   return null;
 }
 
-function classify(t: { id: string; project: string | null; topics: string[]; source: string | null }, projects: Project[], topicClusters: Record<string, string>): RepairItem {
+function classify(
+  t: { id: string; project: string | null; topics: string[]; source: string | null },
+  projects: Project[],
+  topicClusters: Record<string, string>,
+  sourceAliases: Record<string, string>,
+): RepairItem {
   const byPath = inferByPath(t.project, projects);
   if (byPath) {
     return {
@@ -91,7 +104,7 @@ function classify(t: { id: string; project: string | null; topics: string[]; sou
       reason: `distinctive topic → ${byTopic.slug}`,
     };
   }
-  const bySource = inferBySource(t.source);
+  const bySource = inferBySource(t.source, sourceAliases);
   if (bySource) {
     return {
       id: t.id,
@@ -146,14 +159,18 @@ function parseJsonArrayRaw(raw: string | null): string[] {
   }
 }
 
-export function planProjectRepairs(db: Database.Database, topicClusters: Record<string, string> = DEFAULT_TOPIC_CLUSTERS): RepairReport {
+export function planProjectRepairs(
+  db: Database.Database,
+  topicClusters: Record<string, string> = DEFAULT_TOPIC_CLUSTERS,
+  sourceAliases: Record<string, string> = {},
+): RepairReport {
   const projects = listProjects(db);
   const highConfidence: RepairItem[] = [];
   const flagged: RepairItem[] = [];
   let scanned = 0;
   for (const t of repairCandidates(db)) {
     scanned++;
-    const item = classify(t, projects, topicClusters);
+    const item = classify(t, projects, topicClusters, sourceAliases);
     if (item.confidence === "high") highConfidence.push(item);
     else flagged.push(item);
   }
@@ -162,12 +179,20 @@ export function planProjectRepairs(db: Database.Database, topicClusters: Record<
 
 export function repairProjects(
   db: Database.Database,
-  opts: { apply: boolean; projects?: Project[]; topicClusters?: Record<string, string> },
+  opts: {
+    apply: boolean;
+    projects?: Project[];
+    topicClusters?: Record<string, string>;
+    sourceAliases?: Record<string, string>;
+  },
 ): RepairReport {
+  // Defaults are EMPTY (#308/#309): no bundled projects/topics/aliases. The
+  // production caller (cli/repair-projects) injects the per-user seed.
   const projects = opts.projects ?? DEFAULT_KNOWN_PROJECTS;
   const topicClusters = opts.topicClusters ?? DEFAULT_TOPIC_CLUSTERS;
+  const sourceAliases = opts.sourceAliases ?? {};
   seedKnownProjects(db, projects);
-  const report = planProjectRepairs(db, topicClusters);
+  const report = planProjectRepairs(db, topicClusters, sourceAliases);
   if (!opts.apply) return report;
 
   let applied = 0;

@@ -76,7 +76,7 @@ Find *actionable* tasks that may have been forgotten. The goal is to surface thi
 
 1. Use \`list_thoughts\` with \`type: "task"\` and \`until\` set to 14 days ago to find older tasks
 2. For each, read the content via \`get_thought\` and assess whether it's actually stale:
-   - **Flag it** if it reads like a one-off action item that was never completed (e.g., "fix the login bug", "email Tim about the deploy", "update the staging config")
+   - **Flag it** if it reads like a one-off action item that was never completed (e.g., "fix the login bug", "email the team about the deploy", "update the staging config")
    - **Skip it** if it's a standing practice, ongoing guideline, or reference (e.g., "always use ESM imports", "run tests before merging", "prefer composition over inheritance"). These aren't stale — they're meant to persist.
    - **Skip it** if it has a \`consolidated_into\` value (already handled)
    - **Skip it** if it has recent edges linking it to other thoughts (it's being actively referenced)
