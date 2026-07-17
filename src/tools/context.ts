@@ -32,6 +32,7 @@ export interface SelectContextArgs {
   include_stats?: boolean;
   limit?: number;
   shared_only?: boolean;
+  all_projects?: boolean;
 }
 
 export function handleSelectContext(
@@ -69,7 +70,9 @@ export function handleSelectContext(
     const briefResult = handleGetBrief(db, {
       scope: "essentials",
       project_identifier: a.project_identifier,
+      include_shared: a.include_shared,
       shared_only: sharedOnly,
+      all_projects: a.all_projects,
     });
     if (!briefResult.isError) {
       try {

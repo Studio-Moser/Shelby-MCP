@@ -105,14 +105,46 @@ describe("handleSelectContext", () => {
     const result = handleSelectContext(db, {
       types: ["note"],
       include_brief: true,
+      all_projects: true,
     });
     const data = parseResult(result);
-    // The brief header should mention the decision (from essentials)
-    expect(data.document).toContain("Essentials");
+    // The curated brief header should mention the decision.
+    expect(data.document).toContain("Shelby memory context");
     expect(data.document).toContain("Important decision");
     // The main selection should be the note
     expect(data.document).toContain("Selected Context");
     expect(data.document).toContain("A note");
+  });
+
+  it("forwards include_shared:false to the curated brief", () => {
+    capture("Local decision", {
+      type: "decision",
+      summary: "Local decision",
+      project_identifier: "shelby",
+    });
+    capture("Shared preference", {
+      type: "decision",
+      summary: "Shared preference",
+      project_identifier: "shelby",
+      visibility: "shared",
+      metadata: { extra: { briefEligible: true, briefRole: "preference" } },
+    });
+    capture("Selected note", {
+      type: "note",
+      summary: "Selected note",
+      project_identifier: "shelby",
+    });
+
+    const result = handleSelectContext(db, {
+      types: ["note"],
+      project_identifier: "shelby",
+      include_shared: false,
+      include_brief: true,
+    });
+    const data = parseResult(result);
+    expect(data.document).toContain("Local decision");
+    expect(data.document).toContain("Selected note");
+    expect(data.document).not.toContain("Shared preference");
   });
 
   it("include_stats appends a stats footer", () => {

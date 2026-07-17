@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Curated `get_brief` policy with trusted exact-project/shared eligibility, sensitivity and prompt-injection filtering, consolidation/refutation handling, deterministic role lanes, summary deduplication, an 800-token default budget, structured items, and omission diagnostics. The MCP schema now exposes `include_shared`; `select_context` reuses the same curated essentials policy.
+
 ### Changed
+
 - Schema version stamp bumped from 4 → 5 to align with Shelby-MacOS's Swift memory implementation, per [ADR 0001 §8](https://github.com/Studio-Moser/Shelby-Docs/blob/main/docs/adr/0001-memory-server-architecture-contract.md). No actual schema change — the v5 migration is a no-op version stamp. Both codebases now advance through the same migration sequence so cross-codebase tooling and conformance tests can rely on a single number.
 - Logged server version constant updated from `0.1.0` → `0.3.0` to match `package.json`. Comment added to keep them in sync.
 
 ## [0.1.0] - 2026-03-28
 
 ### Added
+
 - MCP server with stdio JSON-RPC protocol via `@modelcontextprotocol/sdk`
 - SQLite database with WAL mode, FTS5 full-text search, and vector similarity
 - Knowledge graph with typed edges (refines, cites, refuted_by, tags, related, follows)
