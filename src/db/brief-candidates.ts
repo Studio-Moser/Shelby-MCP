@@ -44,7 +44,7 @@ export interface BriefCandidateScope {
 }
 
 const ELIGIBLE_SHARED = `visibility = 'shared' AND json_valid(metadata)
-  AND json_extract(metadata, '$.extra.briefEligible') = 1`;
+  AND json_type(metadata, '$.extra.briefEligible') = 'true'`;
 
 function scopePriority(scope: BriefCandidateScope): string {
   if (scope.all_projects === true) {
@@ -82,7 +82,7 @@ export function loadBriefCandidates(
     ORDER BY
       CASE WHEN ${requestedScope} THEN 1 ELSE 0 END DESC,
       CASE WHEN json_valid(t.metadata) AND (
-        json_extract(t.metadata, '$.extra.briefEligible') = 1 OR
+        json_type(t.metadata, '$.extra.briefEligible') = 'true' OR
         json_extract(t.metadata, '$.extra.briefRole') IN
           ('constraint', 'decision', 'milestone', 'blocker', 'preference')
       ) THEN 1 ELSE 0 END DESC,

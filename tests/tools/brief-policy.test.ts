@@ -148,6 +148,53 @@ describe("brief candidate query", () => {
     expect(selected.items.map((item) => item.id)).toContain("requested-legacy");
   });
 
+  it("rejects numeric shared eligibility before the cap without starving valid project context", () => {
+    const insert = db.db.prepare(`
+      INSERT INTO thoughts
+        (id, content, summary, type, source, trust_level, project_identifier, visibility,
+         metadata, created_at, updated_at, reinforcement_count)
+      VALUES (@id, 'content', @summary, 'decision', 'test', 'trusted', @project, @visibility,
+         @metadata, @created_at, @updated_at, @reinforcement)
+    `);
+    for (let index = 0; index < 260; index++) {
+      insert.run({
+        id: `malformed-shared-${String(index).padStart(3, "0")}`,
+        summary: `Malformed shared milestone ${index}`,
+        project: null,
+        visibility: "shared",
+        metadata: JSON.stringify({ extra: { briefEligible: 1, briefRole: "milestone" } }),
+        created_at: now,
+        updated_at: now,
+        reinforcement: 100,
+      });
+    }
+    insert.run({
+      id: "valid-project-decision",
+      summary: "Valid requested project decision",
+      project: "shelby",
+      visibility: "personal",
+      metadata: "{}",
+      created_at: "2020-01-01T00:00:00Z",
+      updated_at: "2020-01-01T00:00:00Z",
+      reinforcement: 0,
+    });
+
+    const loaded = loadBriefCandidates(db.db, now, {
+      project_identifier: "shelby",
+      include_shared: true,
+    });
+    expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
+    expect(loaded[0]?.id).toBe("valid-project-decision");
+    const selected = selectBriefItems(loaded, {
+      scope: "essentials",
+      project_identifier: "shelby",
+      include_shared: true,
+      now,
+    });
+    expect(selected.items.map((item) => item.id)).toEqual(["valid-project-decision"]);
+    expect(selected.omitted_counts.ineligible).toBe(BRIEF_CANDIDATE_LIMIT - 1);
+  });
+
   it("treats only currently valid outgoing refutations as active", () => {
     const target = insertThought(db.db, { content: "target", summary: "Target", project_identifier: "shelby" });
     const active = insertThought(db.db, { content: "active", summary: "Active", project_identifier: "shelby" });
