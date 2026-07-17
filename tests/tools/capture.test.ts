@@ -6,7 +6,8 @@ import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
 import { getEdgesBetween } from "../../src/db/edges.js";
-import { listProjects } from "../../src/db/projects.js";
+import { listProjects, upsertProject } from "../../src/db/projects.js";
+import { resolveProjectScope } from "../../src/db/resolve-project.js";
 
 function makeGitRepo(remote: string): string {
   const root = mkdtempSync(join(tmpdir(), "cap-"));
@@ -26,8 +27,14 @@ afterEach(() => {
 });
 
 function parseResult(result: object): any {
-  const r = result as any;
-  return JSON.parse(r.content[0].text);
+  const r = result as { content?: Array<{ text?: string }> };
+  const text = r.content?.[0]?.text;
+  if (!text) throw new Error("Expected tool result text");
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Expected JSON tool result: ${text}`, { cause: error });
+  }
 }
 
 describe("handleCaptureThought", () => {
@@ -121,7 +128,7 @@ describe("handleCaptureThought", () => {
     const result = handleCaptureThought(db, {});
     const r = result as any;
     expect(r.isError).toBe(true);
-    const data = JSON.parse(r.content[0].text);
+    const data = parseResult(result);
     expect(data.error).toBe("invalid_input");
   });
 
@@ -181,7 +188,7 @@ describe("handleCaptureThought", () => {
   it("stamps project_identifier from cwd when not provided explicitly", () => {
     const root = makeGitRepo("git@github.com:acme/My-Project.git");
     try {
-      const result = handleCaptureThought(db, { content: "Auto-resolved project" }, root);
+      const result = handleCaptureThought(db, { content: "Auto-resolved project" }, resolveProjectScope(db.db, [root]));
       const data = parseResult(result);
       const thought = getThought(db.db, data.id);
       expect(thought!.project_identifier).toBe("my-project");
@@ -214,12 +221,13 @@ describe("handleCaptureThought", () => {
     // Even when cwd is a temp git repo with an unknown remote, capturing with
     // an explicit project_identifier must skip the filesystem walk + registry write.
     const root = makeGitRepo("git@github.com:acme/UnknownProject.git");
+    upsertProject(db.db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
     const beforeCount = listProjects(db.db).length;
     try {
       const result = handleCaptureThought(
         db,
         { content: "Explicit slug thought", project_identifier: "shelby" },
-        root,
+        resolveProjectScope(db.db, [root]),
       );
       expect(result.isError).toBeFalsy();
       const afterCount = listProjects(db.db).length;

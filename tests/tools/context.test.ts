@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleSelectContext } from "../../src/tools/context.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
+import { upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
 
@@ -14,11 +15,20 @@ afterEach(() => {
 });
 
 function parseResult(result: object): any {
-  const r = result as any;
-  return JSON.parse(r.content[0].text);
+  const text = (result as { content?: Array<{ text?: string }> }).content?.[0]?.text;
+  if (!text) throw new Error("Expected tool result text");
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Expected JSON tool result: ${text}`, { cause: error });
+  }
 }
 
 function capture(content: string, extra: Record<string, unknown> = {}): void {
+  const slug = extra.project_identifier;
+  if (typeof slug === "string") {
+    upsertProject(db.db, { slug, displayName: slug, memberRepos: [], memberPaths: [], provisional: false });
+  }
   handleCaptureThought(db, { content, ...extra });
 }
 
