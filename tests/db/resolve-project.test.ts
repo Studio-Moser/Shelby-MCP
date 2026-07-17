@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrations } from "../../src/db/migrations.js";
 import { upsertProject, getProjectBySlug, listProjects } from "../../src/db/projects.js";
-import { resolveProjectIdentifier, currentProjectSlug } from "../../src/db/resolve-project.js";
+import { resolveProjectIdentifier, currentProjectSlug, resolveProjectScope, slugify } from "../../src/db/resolve-project.js";
 
 let db: Database.Database;
 beforeEach(() => { db = new Database(":memory:"); runMigrations(db); });
@@ -16,6 +16,71 @@ function repo(remote: string): string {
   writeFileSync(join(root, ".git", "config"), `[remote "origin"]\n\turl = ${remote}\n`);
   return root;
 }
+
+describe("resolveProjectScope", () => {
+  it("keeps slugify byte-identical to ADR 0001", () => {
+    expect(slugify("  My_Project -- Name!  ")).toBe("my-project-name");
+    expect(slugify("___")).toBe("project");
+  });
+
+  it("accepts only registered canonical explicit slugs and gives them precedence", () => {
+    const root = repo("https://github.com/acme/other.git");
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
+
+    expect(resolveProjectScope(db, [root], "shelby")).toEqual({
+      kind: "resolved", slug: "shelby", source: "explicit",
+    });
+    expect(resolveProjectScope(db, [root], "Shelby")).toEqual({
+      kind: "invalid_explicit", slug: "Shelby",
+    });
+    expect(resolveProjectScope(db, [root], "missing")).toEqual({
+      kind: "invalid_explicit", slug: "missing",
+    });
+  });
+
+  it("uses the registry's longest member-path match", () => {
+    const container = mkdtempSync(join(tmpdir(), "rp-container-"));
+    const nested = join(container, "nested", "repo");
+    mkdirSync(nested, { recursive: true });
+    upsertProject(db, { slug: "outer", displayName: "Outer", memberRepos: [], memberPaths: [container], provisional: false });
+    upsertProject(db, { slug: "inner", displayName: "Inner", memberRepos: [], memberPaths: [join(container, "nested")], provisional: false });
+
+    expect(resolveProjectScope(db, [nested])).toMatchObject({ kind: "resolved", slug: "inner", source: "member_path" });
+  });
+
+  it("matches normalized HTTPS and SCP-style remotes", () => {
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: ["github.com/Studio-Moser/Shelby-MCP"], memberPaths: [], provisional: false });
+    const https = repo("https://github.com/Studio-Moser/Shelby-MCP.git");
+    const scp = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
+
+    expect(resolveProjectScope(db, [https])).toMatchObject({ kind: "resolved", slug: "shelby", source: "git_remote" });
+    expect(resolveProjectScope(db, [scp])).toMatchObject({ kind: "resolved", slug: "shelby", source: "git_remote" });
+  });
+
+  it("combines same-slug roots and reports different-slug roots as ambiguous", () => {
+    const one = repo("https://github.com/acme/one.git");
+    const oneAgain = repo("git@github.com:acme/one.git");
+    const two = repo("https://github.com/acme/two.git");
+
+    expect(resolveProjectScope(db, [one, oneAgain])).toMatchObject({ kind: "resolved", slug: "one", source: "derived" });
+    expect(resolveProjectScope(db, [one, two])).toEqual({ kind: "ambiguous", slugs: ["one", "two"] });
+  });
+
+  it("leaves markerless unregistered containers unresolved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rp-plain-"));
+    expect(resolveProjectScope(db, [dir])).toEqual({ kind: "unresolved" });
+  });
+
+  it("resolves a git worktree from the common repository config", () => {
+    const common = mkdtempSync(join(tmpdir(), "rp-common-"));
+    mkdirSync(join(common, ".git", "worktrees", "feature"), { recursive: true });
+    writeFileSync(join(common, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:acme/worktree.git\n');
+    const worktree = mkdtempSync(join(tmpdir(), "rp-worktree-"));
+    writeFileSync(join(worktree, ".git"), `gitdir: ${join(common, ".git", "worktrees", "feature")}\n`);
+
+    expect(resolveProjectScope(db, [worktree])).toMatchObject({ kind: "resolved", slug: "worktree", source: "derived" });
+  });
+});
 
 describe("resolveProjectIdentifier", () => {
   it("returns the slug of a registered project matching the repo remote", () => {
