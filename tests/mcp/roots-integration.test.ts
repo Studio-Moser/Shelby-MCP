@@ -28,7 +28,9 @@ describe("initial MCP roots", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const client = new Client({ name: "roots-client", version: "1.0.0" }, { capabilities: { roots: { listChanged: true } } });
+    let rootsRequests = 0;
     client.setRequestHandler(ListRootsRequestSchema, async () => {
+      rootsRequests += 1;
       await gate;
       return { roots: [{ uri: pathToFileURL(root).href, name: "scoped" }] };
     });
@@ -45,5 +47,10 @@ describe("initial MCP roots", () => {
     release();
     const result = await call;
     expect(result.isError).not.toBe(true);
+    expect(rootsRequests).toBe(1);
+
+    await client.sendRootsListChanged();
+    await client.callTool({ name: "list_thoughts", arguments: {} });
+    expect(rootsRequests).toBe(2);
   });
 });
