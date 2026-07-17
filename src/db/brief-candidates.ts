@@ -46,6 +46,46 @@ export interface BriefCandidateScope {
 const ELIGIBLE_SHARED = `visibility = 'shared' AND json_valid(metadata)
   AND json_type(metadata, '$.extra.briefEligible') = 'true'`;
 
+const VALID_EXPLICIT_METADATA = `json_valid(t.metadata)
+  AND json_type(t.metadata) = 'object'
+  AND json_type(t.metadata, '$.extra') = 'object'
+  AND json_type(t.metadata, '$.extra.briefEligible') = 'true'
+  AND (
+    json_type(t.metadata, '$.extra.briefRole') IS NULL OR
+    (json_type(t.metadata, '$.extra.briefRole') = 'text' AND
+      json_extract(t.metadata, '$.extra.briefRole') IN
+        ('constraint', 'decision', 'milestone', 'blocker', 'preference', 'recent'))
+  )
+  AND (
+    json_type(t.metadata, '$.extra.sensitivity') IS NULL OR
+    (json_type(t.metadata, '$.extra.sensitivity') = 'text' AND
+      json_extract(t.metadata, '$.extra.sensitivity') = 'normal')
+  )`;
+
+const LEGACY_SAFE = `t.type IN ('decision', 'reference', 'insight')
+  AND json_valid(t.metadata)
+  AND json_type(t.metadata) = 'object'
+  AND (
+    json_type(t.metadata, '$.extra') IS NULL OR
+    (json_type(t.metadata, '$.extra') = 'object'
+      AND (
+        json_type(t.metadata, '$.extra.briefEligible') IS NULL OR
+        json_type(t.metadata, '$.extra.briefEligible') = 'true'
+      )
+      AND (
+        json_type(t.metadata, '$.extra.briefRole') IS NULL OR
+        (json_type(t.metadata, '$.extra.briefRole') = 'text' AND
+          json_extract(t.metadata, '$.extra.briefRole') IN
+            ('constraint', 'decision', 'milestone', 'blocker', 'preference', 'recent'))
+      )
+      AND (
+        json_type(t.metadata, '$.extra.sensitivity') IS NULL OR
+        (json_type(t.metadata, '$.extra.sensitivity') = 'text' AND
+          json_extract(t.metadata, '$.extra.sensitivity') = 'normal')
+      )
+    )
+  )`;
+
 function scopePriority(scope: BriefCandidateScope): string {
   if (scope.all_projects === true) {
     return `(visibility != 'shared' OR (${ELIGIBLE_SHARED}))`;
@@ -81,11 +121,11 @@ export function loadBriefCandidates(
     FROM thoughts t
     ORDER BY
       CASE WHEN ${requestedScope} THEN 1 ELSE 0 END DESC,
-      CASE WHEN json_valid(t.metadata) AND (
-        json_type(t.metadata, '$.extra.briefEligible') = 'true' OR
-        json_extract(t.metadata, '$.extra.briefRole') IN
-          ('constraint', 'decision', 'milestone', 'blocker', 'preference')
-      ) THEN 1 ELSE 0 END DESC,
+      CASE
+        WHEN ${VALID_EXPLICIT_METADATA} THEN 2
+        WHEN ${LEGACY_SAFE} THEN 1
+        ELSE 0
+      END DESC,
       t.reinforcement_count DESC,
       t.updated_at DESC,
       t.id ASC

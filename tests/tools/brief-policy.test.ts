@@ -102,6 +102,52 @@ describe("brief candidate query", () => {
     expect(loaded.some((item) => item.id === "noise-000")).toBe(true);
   });
 
+  it("does not let ineligible exact-project roles starve an older legacy decision", () => {
+    const insert = db.db.prepare(`
+      INSERT INTO thoughts
+        (id, content, summary, type, source, trust_level, project_identifier, visibility,
+         metadata, created_at, updated_at, reinforcement_count)
+      VALUES (@id, 'content', @summary, 'decision', 'test', 'trusted', 'shelby', 'personal',
+         @metadata, @created_at, @updated_at, 100)
+    `);
+    const invalidMetadata = [
+      { extra: { briefEligible: false, briefRole: "milestone" } },
+      { extra: { briefEligible: "yes", briefRole: "milestone" } },
+      { extra: "malformed" },
+      { extra: ["malformed"] },
+    ];
+    for (let index = 0; index < 260; index++) {
+      insert.run({
+        id: `ineligible-${String(index).padStart(3, "0")}`,
+        summary: `Ineligible exact-project role ${index}`,
+        metadata: JSON.stringify(invalidMetadata[index % invalidMetadata.length]),
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    insert.run({
+      id: "older-legacy-decision",
+      summary: "Older valid legacy decision",
+      metadata: "{}",
+      created_at: "2020-01-01T00:00:00Z",
+      updated_at: "2020-01-01T00:00:00Z",
+    });
+
+    const loaded = loadBriefCandidates(db.db, now, {
+      project_identifier: "shelby",
+      include_shared: true,
+    });
+    expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
+    expect(loaded[0]?.id).toBe("older-legacy-decision");
+    const selected = selectBriefItems(loaded, {
+      scope: "essentials",
+      project_identifier: "shelby",
+      include_shared: true,
+      now,
+    });
+    expect(selected.items.map((item) => item.id)).toEqual(["older-legacy-decision"]);
+  });
+
   it("does not let tagged records from other projects starve the requested project", () => {
     const insert = db.db.prepare(`
       INSERT INTO thoughts
