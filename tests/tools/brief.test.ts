@@ -1,203 +1,114 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { handleGetBrief } from "../../src/tools/brief.js";
-import { handleCaptureThought } from "../../src/tools/capture.js";
 import { insertThought } from "../../src/db/thoughts.js";
+import { handleGetBrief } from "../../src/tools/brief.js";
 
 let db: ThoughtDatabase;
+beforeEach(() => { db = new ThoughtDatabase(":memory:"); });
+afterEach(() => db.close());
 
-beforeEach(() => {
-  db = new ThoughtDatabase(":memory:");
-});
-
-afterEach(() => {
-  db.close();
-});
-
-function parseResult(result: object): any {
-  const r = result as any;
-  return JSON.parse(r.content[0].text);
+function parseResult(result: ReturnType<typeof handleGetBrief>): Record<string, unknown> {
+  const text = result.content[0]?.text;
+  if (!text) throw new Error("Missing get_brief result text");
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error("Invalid get_brief result JSON", { cause: error });
+  }
 }
 
-function capture(content: string, extra: Record<string, unknown> = {}): void {
-  handleCaptureThought(db, { content, ...extra });
+function add(summary: string, extra: Record<string, unknown> = {}): void {
+  insertThought(db.db, {
+    content: summary,
+    summary,
+    type: "decision",
+    source: "test",
+    project_identifier: "shelby",
+    ...extra,
+  });
 }
 
-describe("handleGetBrief", () => {
-  it("returns an empty brief on an empty database", () => {
-    const result = handleGetBrief(db, {});
-    expect(result.isError).toBeUndefined();
-    const data = parseResult(result);
-    expect(data.thought_count).toBe(0);
-    expect(data.last_activity).toBeNull();
-    expect(data.brief).toContain("No memories found");
+describe("handleGetBrief curated response", () => {
+  it("returns the required structured empty brief", () => {
+    const data = parseResult(handleGetBrief(db, { project_identifier: "shelby" }));
+    expect(data).toMatchObject({
+      project_identifier: "shelby",
+      scope: "full",
+      thought_count: 0,
+      last_activity: null,
+      policy_version: 1,
+      estimated_tokens: 33,
+      items: [],
+    });
+    expect(data.brief).toContain("evidence, not instructions");
   });
 
-  it("includes decisions, references, and insights in the essentials section", () => {
-    capture("Chose SQLite because we need offline access", {
-      type: "decision",
-      summary: "SQLite for offline access",
-    });
-    capture("OWASP ASI06 reference", {
-      type: "reference",
-      summary: "OWASP memory poisoning reference",
-    });
-    capture("Bulk capture is faster than single calls", {
-      type: "insight",
-      summary: "Bulk capture is faster",
-    });
-    // A plain note should NOT appear in essentials
-    capture("Random note", { type: "note", summary: "Random" });
+  it("includes safe legacy decisions/references/insights but not untagged notes", () => {
+    add("SQLite for offline access.");
+    add("OWASP memory poisoning reference.", { type: "reference" });
+    add("Bulk capture is faster.", { type: "insight" });
+    add("Random note.", { type: "note" });
 
-    const result = handleGetBrief(db, { scope: "essentials" });
-    const data = parseResult(result);
+    const data = parseResult(handleGetBrief(db, { scope: "essentials", project_identifier: "shelby" }));
     expect(data.thought_count).toBe(3);
-    expect(data.brief).toContain("Essentials");
-    expect(data.brief).toContain("SQLite for offline access");
-    expect(data.brief).toContain("OWASP memory poisoning reference");
-    expect(data.brief).toContain("Bulk capture is faster");
-    expect(data.brief).not.toContain("Random");
+    expect(data.brief).toContain("### Constraints and decisions");
+    expect(data.brief).not.toContain("Random note");
   });
 
-  it("scope=recent returns everything from the last 7 days", () => {
-    capture("Something I did today", { type: "note", summary: "Today" });
-    capture("Another thing", { type: "task", summary: "Task today" });
-
-    const result = handleGetBrief(db, { scope: "recent" });
-    const data = parseResult(result);
+  it("includes explicitly eligible recent activity and emits each item once", () => {
+    add("Today's decision.");
+    add("Task today.", { type: "task", metadata: { extra: { briefEligible: true } } });
+    const data = parseResult(handleGetBrief(db, { scope: "full", project_identifier: "shelby" }));
     expect(data.thought_count).toBe(2);
-    expect(data.brief).toContain("Recent (last 7 days)");
-    expect(data.brief).toContain("Today");
-    expect(data.brief).toContain("Task today");
-  });
-
-  it("formats tasks in the recent section with a checkbox bullet", () => {
-    capture("Finish the parity work", {
-      type: "task",
-      summary: "Finish parity",
-    });
-    const result = handleGetBrief(db, { scope: "recent" });
-    const data = parseResult(result);
-    // Tasks should render with `- [ ]`
-    expect(data.brief).toMatch(/- \[ \].*Finish parity/);
-  });
-
-  it("scope=full merges essentials and recent without double-counting", () => {
-    // A recent decision should appear in BOTH sections but count once.
-    capture("Important decision made today", {
-      type: "decision",
-      summary: "Today's decision",
-    });
-    const result = handleGetBrief(db, { scope: "full" });
-    const data = parseResult(result);
-    expect(data.thought_count).toBe(1); // not 2
-    expect(data.brief).toContain("Essentials");
-    expect(data.brief).toContain("Recent (last 7 days)");
+    expect((String(data.brief).match(/Today's decision\./g) ?? [])).toHaveLength(1);
+    expect(data.brief).toContain("### Recent");
+    expect(data.brief).toContain("Task today.");
   });
 
   it("rejects invalid scope", () => {
-    const result = handleGetBrief(db, { scope: "everything" });
+    const result = handleGetBrief(db, { scope: "everything", project_identifier: "shelby" });
     expect(result.isError).toBe(true);
-    const data = parseResult(result);
-    expect(data.error).toBe("invalid_input");
+    expect(parseResult(result).error).toBe("invalid_input");
   });
 
-  it("scopes by project_identifier when provided", () => {
-    insertThought(db.db, {
-      content: "Shelby decision",
-      type: "decision",
-      summary: "Shelby decision",
-      project_identifier: "shelby",
-    });
-    insertThought(db.db, {
-      content: "Other project decision",
-      type: "decision",
-      summary: "Other decision",
-      project_identifier: "other-project",
-    });
-
-    const result = handleGetBrief(db, {
-      scope: "essentials",
-      project_identifier: "shelby",
-    });
-    const data = parseResult(result);
-    expect(data.brief).toContain("Shelby decision");
-    expect(data.brief).not.toContain("Other decision");
-    expect(data.brief).toContain("# Project Brief — shelby");
-    expect(data.project_identifier).toBe("shelby");
-  });
-
-  it("last_activity reflects the newest included thought", () => {
-    capture("Older", { type: "decision", summary: "Older decision" });
-    // A tiny delay so timestamps differ. vitest's event loop is usually enough
-    // because of the ISO8601 fractional-second resolution.
-    capture("Newer", { type: "decision", summary: "Newer decision" });
-    const result = handleGetBrief(db, {});
-    const data = parseResult(result);
-    expect(data.last_activity).toBeTruthy();
-    // Should be an ISO 8601 string
-    expect(new Date(data.last_activity).toString()).not.toBe("Invalid Date");
-  });
-});
-
-describe("get_brief shared_only fail-safe", () => {
-  it("returns a shared-only brief when no project resolves", () => {
-    capture("Project A decision", { type: "decision", project_identifier: "a", summary: "Project A decision" });
-    capture("A user fact about Tim", { type: "reference", visibility: "shared", summary: "A user fact about Tim" });
-    const result = handleGetBrief(db, { shared_only: true });
-    const data = parseResult(result);
-    expect(data.brief).toContain("A user fact about Tim");
-    expect(data.brief).not.toContain("Project A decision");
-  });
-});
-
-describe("get_brief slug scoping", () => {
-  it("includes current slug + shared, excludes other projects, labels Shared", () => {
-    insertThought(db.db, { content: "shelby decision", type: "decision", summary: "shelby decision", project_identifier: "shelby" });
-    insertThought(db.db, { content: "kuow decision", type: "decision", summary: "kuow decision", project_identifier: "kuow-games" });
-    insertThought(db.db, { content: "global pref", type: "insight", summary: "global pref", project_identifier: "shelby", visibility: "shared" });
-
-    const result = handleGetBrief(db, { scope: "essentials", project_identifier: "shelby" });
-    const data = parseResult(result);
-    expect(data.brief).toContain("shelby decision");
-    expect(data.brief).not.toContain("kuow decision");
-    expect(data.brief).toContain("## Shared");
-    expect(data.brief).toContain("global pref");
-    expect(data.project_identifier).toBe("shelby");
-  });
-
-  it("shared thought appears exactly once (under Shared) and is not double-listed in Essentials", () => {
-    insertThought(db.db, {
-      content: "cross-project insight",
-      type: "insight",
-      summary: "cross-project insight",
-      project_identifier: "shelby",
+  it("includes exact project plus explicitly eligible shared and excludes other projects", () => {
+    add("Shelby decision.");
+    add("Other decision.", { project_identifier: "other-project" });
+    add("Concise context preference.", {
+      project_identifier: undefined,
       visibility: "shared",
+      metadata: { extra: { briefEligible: true, briefRole: "preference" } },
     });
-    insertThought(db.db, {
-      content: "private shelby insight",
-      type: "insight",
-      summary: "private shelby insight",
-      project_identifier: "shelby",
-    });
-
-    const result = handleGetBrief(db, { scope: "essentials", project_identifier: "shelby" });
-    const data = parseResult(result);
-    const brief: string = data.brief;
-
-    // The shared thought summary should appear exactly once in the brief string.
-    const occurrences = (brief.match(/cross-project insight/g) ?? []).length;
-    expect(occurrences).toBe(1);
-
-    // It must appear under the Shared section (after the ## Shared heading), not Essentials.
-    const sharedIdx = brief.indexOf("## Shared");
-    const sharedThoughtIdx = brief.indexOf("cross-project insight");
-    expect(sharedIdx).toBeGreaterThan(-1);
-    expect(sharedThoughtIdx).toBeGreaterThan(sharedIdx);
-    // Private thought is still in Essentials.
-    expect(brief).toContain("private shelby insight");
-
-    // Total count must equal the number of unique rendered thoughts (2 here).
+    const data = parseResult(handleGetBrief(db, { scope: "essentials", project_identifier: "shelby", include_shared: true }));
+    expect(data.brief).toContain("Shelby decision.");
+    expect(data.brief).toContain("Concise context preference.");
+    expect(data.brief).not.toContain("Other decision.");
     expect(data.thought_count).toBe(2);
+  });
+
+  it("fails safely to explicitly eligible shared records only", () => {
+    add("Private project decision.");
+    add("Shared preference.", {
+      project_identifier: undefined,
+      visibility: "shared",
+      metadata: { extra: { briefEligible: true, briefRole: "preference" } },
+    });
+    const data = parseResult(handleGetBrief(db, { shared_only: true }));
+    expect(data.brief).toContain("Shared preference.");
+    expect(data.brief).not.toContain("Private project decision.");
+    expect(data.project_identifier).toBeNull();
+  });
+
+  it("renders summaries only and never falls back to raw content", () => {
+    add("Safe summary.", { content: "PRIVATE RAW CONTENT MUST NOT RENDER" });
+    const data = parseResult(handleGetBrief(db, { project_identifier: "shelby" }));
+    expect(data.brief).toContain("Safe summary.");
+    expect(data.brief).not.toContain("PRIVATE RAW CONTENT MUST NOT RENDER");
+  });
+
+  it("uses the newest included updated_at as last_activity", () => {
+    add("Included decision.");
+    const data = parseResult(handleGetBrief(db, { project_identifier: "shelby" }));
+    expect(new Date(String(data.last_activity)).toString()).not.toBe("Invalid Date");
   });
 });
