@@ -105,10 +105,11 @@ describe("handleSelectContext", () => {
     const result = handleSelectContext(db, {
       types: ["note"],
       include_brief: true,
+      all_projects: true,
     });
     const data = parseResult(result);
-    // The brief header should mention the decision (from essentials)
-    expect(data.document).toContain("Essentials");
+    // The curated brief header should mention the decision.
+    expect(data.document).toContain("Shelby memory context");
     expect(data.document).toContain("Important decision");
     // The main selection should be the note
     expect(data.document).toContain("Selected Context");

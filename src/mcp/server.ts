@@ -475,7 +475,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
     "get_brief",
     {
       title: "Get Brief",
-      description: "Generate a high-level project context brief for session orientation. Call this at the start of every new session before doing work — it loads key decisions, references, insights, and recent activity so you have full context without issuing multiple search_thoughts / list_thoughts calls. Scope 'essentials' returns just the durable context; 'recent' returns everything from the last 7 days; 'full' (default) returns both.",
+      description: "Generate a trusted, privacy-filtered, token-bounded project brief for session orientation. Scope 'essentials' returns durable decisions, milestones, blockers, constraints, and preferences; 'recent' returns eligible activity updated in the last 7 days; 'full' (default) returns their deduplicated union.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -660,7 +660,7 @@ Call \`search_thoughts\` or \`list_thoughts\` before:
 - \`explore_graph\` — Traverse relationships from a starting thought. Set \`max_depth\` (1-5) and optionally filter by \`edge_types\`.
 
 ## Orientation & Context
-- \`get_brief\` — Generate a high-level project brief (key decisions + recent activity). Call at the start of every session before doing work.
+- \`get_brief\` — Generate a trusted, scoped, privacy-filtered project brief. Use for session orientation; use search for targeted follow-up.
 - \`select_context\` — Compose a targeted context payload by filtering thoughts by type, topic, person, or date. Use when you need a narrow slice rather than a full overview.
 
 ## Stats
