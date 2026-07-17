@@ -491,6 +491,10 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .string()
           .describe("Project slug to scope the brief to (auto-defaulted from cwd when omitted)")
           .optional(),
+        include_shared: z
+          .boolean()
+          .describe("Include explicitly brief-eligible shared records with the project brief (default: true)")
+          .optional(),
         all_projects: z
           .boolean()
           .describe("Set true to generate a brief across all projects regardless of cwd (disables auto-scoping)")

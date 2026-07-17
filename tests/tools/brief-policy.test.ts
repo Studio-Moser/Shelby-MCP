@@ -50,6 +50,15 @@ describe("brief policy eligibility", () => {
     expect(normalizeBriefSummary("sk-abcdefgh12345678")).toBeNull();
   });
 
+  it("deduplicates exact normalized summaries without uncontracted case folding", () => {
+    const result = selectBriefItems([
+      candidate({ id: "upper", summary: "Case-sensitive decision." }),
+      candidate({ id: "lower", summary: "case-sensitive decision." }),
+    ], { scope: "essentials", project_identifier: "shelby", now });
+    expect(result.items.map((item) => item.id)).toEqual(["lower", "upper"]);
+    expect(result.omitted_counts.duplicate).toBe(0);
+  });
+
   it("keeps explicit old blockers essential and fully filters all-project recall", () => {
     const result = selectBriefItems([
       candidate({ id: "blocker", type: "task", updated_at: "2025-01-01T00:00:00Z", metadata: { extra: { briefEligible: true, briefRole: "blocker" } } }),
@@ -84,10 +93,59 @@ describe("brief candidate query", () => {
     });
     db.db.prepare("UPDATE thoughts SET metadata = '{bad json', reinforcement_count = 99 WHERE id = 'noise-000'").run();
 
-    const loaded = loadBriefCandidates(db.db, now);
+    const loaded = loadBriefCandidates(db.db, now, {
+      project_identifier: "shelby",
+      include_shared: true,
+    });
     expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
     expect(loaded[0]?.id).toBe("old-milestone");
     expect(loaded.some((item) => item.id === "noise-000")).toBe(true);
+  });
+
+  it("does not let tagged records from other projects starve the requested project", () => {
+    const insert = db.db.prepare(`
+      INSERT INTO thoughts
+        (id, content, summary, type, source, trust_level, project_identifier, visibility,
+         metadata, created_at, updated_at, reinforcement_count)
+      VALUES (@id, 'content', @summary, @type, 'test', 'trusted', @project, 'personal',
+         @metadata, @created_at, @updated_at, @reinforcement)
+    `);
+    for (let index = 0; index < 260; index++) {
+      insert.run({
+        id: `other-${String(index).padStart(3, "0")}`,
+        summary: `Other tagged milestone ${index}`,
+        type: "decision",
+        project: "other-project",
+        metadata: JSON.stringify({ extra: { briefEligible: true, briefRole: "milestone" } }),
+        created_at: now,
+        updated_at: now,
+        reinforcement: 100,
+      });
+    }
+    insert.run({
+      id: "requested-legacy",
+      summary: "Requested project decision",
+      type: "decision",
+      project: "shelby",
+      metadata: "{}",
+      created_at: "2020-01-01T00:00:00Z",
+      updated_at: "2020-01-01T00:00:00Z",
+      reinforcement: 0,
+    });
+
+    const loaded = loadBriefCandidates(db.db, now, {
+      project_identifier: "shelby",
+      include_shared: true,
+    });
+    expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
+    expect(loaded[0]?.id).toBe("requested-legacy");
+    const selected = selectBriefItems(loaded, {
+      scope: "essentials",
+      project_identifier: "shelby",
+      include_shared: true,
+      now,
+    });
+    expect(selected.items.map((item) => item.id)).toContain("requested-legacy");
   });
 
   it("treats only currently valid outgoing refutations as active", () => {

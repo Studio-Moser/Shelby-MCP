@@ -27,15 +27,16 @@ export function handleGetBrief(
   }
 
   const now = a.now ?? new Date().toISOString();
-  const candidates = loadBriefCandidates(db.db, now);
-  const policy = selectBriefItems(candidates, {
+  const policyInput = {
     scope,
     project_identifier: a.project_identifier,
     include_shared: a.include_shared ?? true,
     shared_only: a.shared_only,
     all_projects: a.all_projects,
     now,
-  });
+  };
+  const candidates = loadBriefCandidates(db.db, now, policyInput);
+  const policy = selectBriefItems(candidates, policyInput);
   const budget = Math.max(600, Math.min(a.token_budget ?? 800, 900));
   const rendered = renderTokenBoundBrief(policy.items, policy.omitted_counts, budget);
   const lastActivity = rendered.items.reduce<string | null>(

@@ -77,15 +77,19 @@ describe("canonical brief-policy fixture", () => {
   });
 
   it.each(["essentials", "recent", "full"] as BriefScope[])("matches %s ordering", (scope) => {
-    const result = selectBriefItems(loadBriefCandidates(db.db, fixture.request.now), {
-      ...fixture.request,
-      scope,
-    });
+    const request = { ...fixture.request, scope };
+    const result = selectBriefItems(
+      loadBriefCandidates(db.db, fixture.request.now, request),
+      request,
+    );
     expect(result.items.map((item) => item.id)).toEqual(fixture.expected_by_scope[scope]);
   });
 
   it("matches roles, omissions, markdown, and UTF-8 token estimate", () => {
-    const selected = selectBriefItems(loadBriefCandidates(db.db, fixture.request.now), fixture.request);
+    const selected = selectBriefItems(
+      loadBriefCandidates(db.db, fixture.request.now, fixture.request),
+      fixture.request,
+    );
     const rendered = renderTokenBoundBrief(selected.items, selected.omitted_counts, 800);
     expect(rendered.items.map((item) => item.id)).toEqual(fixture.expected.ordered_item_ids);
     expect(rendered.items.map((item) => item.role)).toEqual(fixture.expected.ordered_roles);

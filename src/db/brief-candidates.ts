@@ -36,11 +36,36 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
   }
 }
 
-/** Load the bounded, deterministically prioritized input to the brief policy. */
+export interface BriefCandidateScope {
+  project_identifier?: string;
+  include_shared?: boolean;
+  shared_only?: boolean;
+  all_projects?: boolean;
+}
+
+const ELIGIBLE_SHARED = `visibility = 'shared' AND json_valid(metadata)
+  AND json_extract(metadata, '$.extra.briefEligible') = 1`;
+
+function scopePriority(scope: BriefCandidateScope): string {
+  if (scope.all_projects === true) {
+    return `(visibility != 'shared' OR (${ELIGIBLE_SHARED}))`;
+  }
+  if (scope.shared_only === true || scope.project_identifier === undefined) {
+    return `(${ELIGIBLE_SHARED})`;
+  }
+  if (scope.include_shared === false) {
+    return `(visibility != 'shared' AND project_identifier = @project_identifier)`;
+  }
+  return `((visibility != 'shared' AND project_identifier = @project_identifier) OR (${ELIGIBLE_SHARED}))`;
+}
+
+/** Load bounded candidates with potentially eligible requested-scope rows before diagnostics. */
 export function loadBriefCandidates(
   db: Database.Database,
   now: string,
+  scope: BriefCandidateScope = {},
 ): BriefCandidate[] {
+  const requestedScope = scopePriority(scope);
   const rows = db.prepare(`
     SELECT
       t.id, t.project_identifier, t.visibility, t.trust_level, t.type,
@@ -55,6 +80,7 @@ export function loadBriefCandidates(
       ) AS actively_refuted
     FROM thoughts t
     ORDER BY
+      CASE WHEN ${requestedScope} THEN 1 ELSE 0 END DESC,
       CASE WHEN json_valid(t.metadata) AND (
         json_extract(t.metadata, '$.extra.briefEligible') = 1 OR
         json_extract(t.metadata, '$.extra.briefRole') IN
@@ -64,7 +90,11 @@ export function loadBriefCandidates(
       t.updated_at DESC,
       t.id ASC
     LIMIT @limit
-  `).all({ now, limit: BRIEF_CANDIDATE_LIMIT }) as CandidateRow[];
+  `).all({
+    now,
+    limit: BRIEF_CANDIDATE_LIMIT,
+    project_identifier: scope.project_identifier ?? null,
+  }) as CandidateRow[];
 
   return rows.map((row) => ({
     ...row,

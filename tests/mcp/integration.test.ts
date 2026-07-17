@@ -3,11 +3,17 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "../../src/mcp/server.js";
 import type { ThoughtDatabase } from "../../src/db/database.js";
+import { upsertProject } from "../../src/db/projects.js";
+import { insertThought } from "../../src/db/thoughts.js";
 
 /** Parse the JSON text from an MCP tool result. */
 function parseResult(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
   const content = result.content as Array<{ type: string; text: string }>;
-  return JSON.parse(content[0].text);
+  try {
+    return JSON.parse(content[0]?.text ?? "");
+  } catch (error) {
+    throw new Error("Invalid MCP tool result JSON", { cause: error });
+  }
 }
 
 describe("MCP Integration", () => {
@@ -15,7 +21,15 @@ describe("MCP Integration", () => {
   let db: ThoughtDatabase;
 
   beforeEach(async () => {
-    const created = createServer({ dbPath: ":memory:", verbose: false, logFile: null });
+    const created = createServer({
+      dbPath: ":memory:",
+      verbose: false,
+      logFile: null,
+      transport: "stdio",
+      httpPort: 3100,
+      httpHost: "127.0.0.1",
+      apiKey: null,
+    });
     db = created.db;
     const server = created.server;
 
@@ -49,6 +63,64 @@ describe("MCP Integration", () => {
       "update_thought",
     ]);
     expect(tools).toHaveLength(11);
+  });
+
+  it("exposes include_shared and applies shared/all-project brief scope", async () => {
+    upsertProject(db.db, {
+      slug: "shelby",
+      displayName: "Shelby",
+      memberRepos: [],
+      memberPaths: [],
+      provisional: false,
+    });
+    insertThought(db.db, {
+      content: "local",
+      summary: "Local Shelby decision",
+      type: "decision",
+      project_identifier: "shelby",
+    });
+    insertThought(db.db, {
+      content: "other",
+      summary: "Other project decision",
+      type: "decision",
+      project_identifier: "other-project",
+    });
+    insertThought(db.db, {
+      content: "shared",
+      summary: "Shared eligible preference",
+      type: "decision",
+      visibility: "shared",
+      metadata: { extra: { briefEligible: true, briefRole: "preference" } },
+    });
+
+    const tools = await client.listTools();
+    const briefTool = tools.tools.find((tool) => tool.name === "get_brief");
+    expect(briefTool?.inputSchema).toHaveProperty("properties.include_shared");
+
+    const localOnly = parseResult(await client.callTool({
+      name: "get_brief",
+      arguments: { project_identifier: "shelby", include_shared: false },
+    })) as { brief: string };
+    expect(localOnly.brief).toContain("Local Shelby decision");
+    expect(localOnly.brief).not.toContain("Shared eligible preference");
+    expect(localOnly.brief).not.toContain("Other project decision");
+
+    const withShared = parseResult(await client.callTool({
+      name: "get_brief",
+      arguments: { project_identifier: "shelby", include_shared: true },
+    })) as { brief: string };
+    expect(withShared.brief).toContain("Local Shelby decision");
+    expect(withShared.brief).toContain("Shared eligible preference");
+    expect(withShared.brief).not.toContain("Other project decision");
+
+    const allProjects = parseResult(await client.callTool({
+      name: "get_brief",
+      arguments: { all_projects: true },
+    })) as { brief: string; project_identifier: string | null };
+    expect(allProjects.project_identifier).toBeNull();
+    expect(allProjects.brief).toContain("Local Shelby decision");
+    expect(allProjects.brief).toContain("Other project decision");
+    expect(allProjects.brief).toContain("Shared eligible preference");
   });
 
   // ---- 2. Capture and retrieve ----

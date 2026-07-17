@@ -180,10 +180,9 @@ export function selectBriefItems(
   const summaries = new Set<string>();
   const items: BriefItem[] = [];
   for (const item of eligible) {
-    const summaryKey = item.summary.toLocaleLowerCase("en-US");
-    if (ids.has(item.id) || summaries.has(summaryKey)) { omitted.duplicate++; continue; }
+    if (ids.has(item.id) || summaries.has(item.summary)) { omitted.duplicate++; continue; }
     ids.add(item.id);
-    summaries.add(summaryKey);
+    summaries.add(item.summary);
     const { explicitEligible: _, reinforcementCount: __, ...briefItem } = item;
     items.push(briefItem);
   }
