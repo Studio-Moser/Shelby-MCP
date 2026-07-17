@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { detectProject } from "./project-detector.js";
 import { findProjectByRepo, findProjectByPath, getProjectBySlug, upsertProject, normalizeGitRemote } from "./projects.js";
@@ -8,77 +9,127 @@ export function slugify(name: string): string {
   return name.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "") || "project";
 }
 
-/**
- * Shared detection logic: walk up from cwd to find the project root and
- * remote, then derive a slug — without any database writes.
- *
- * Returns the slug and the detected info, or null if no project marker is found.
- */
-function detectSlug(db: Database.Database, cwd: string): { slug: string; remote: string | null; projectRoot: string } | null {
-  // Registry path match first — handles markerless multi-repo containers and is
-  // setup-portable: the caller's real dir maps to a human-curated slug directly.
+export type ProjectScopeResolution =
+  | {
+      kind: "resolved";
+      slug: string;
+      source: "explicit" | "member_path" | "git_remote" | "derived";
+      memberPaths?: string[];
+      memberRepos?: string[];
+    }
+  | { kind: "unresolved" }
+  | { kind: "ambiguous"; slugs: string[] }
+  | { kind: "invalid_explicit"; slug: string };
+
+function canonicalPath(input: string): string {
+  return existsSync(input) ? realpathSync.native(input) : path.resolve(input);
+}
+
+type PathResolution = Extract<ProjectScopeResolution, { kind: "resolved" }> | { kind: "slug_collision" };
+
+function resolvePath(db: Database.Database, input: string): PathResolution | null {
+  const cwd = canonicalPath(input);
   const byPath = findProjectByPath(db, cwd);
-  if (byPath) return { slug: byPath.slug, remote: null, projectRoot: cwd };
+  if (byPath) {
+    return { kind: "resolved", slug: byPath.slug, source: "member_path" };
+  }
 
   const detected = detectProject(cwd);
   if (!detected) return null;
+  const projectRoot = canonicalPath(detected.projectRoot);
 
   if (detected.remote) {
-    // Registry match takes priority (returns the human-confirmed slug).
-    const existing = findProjectByRepo(db, detected.remote);
-    if (existing) {
-      return { slug: existing.slug, remote: detected.remote, projectRoot: detected.projectRoot };
+    const normalizedRemote = normalizeGitRemote(detected.remote);
+    const byRepo = findProjectByRepo(db, normalizedRemote);
+    if (byRepo) {
+      return { kind: "resolved", slug: byRepo.slug, source: "git_remote" };
     }
-    const normalized = normalizeGitRemote(detected.remote);
-    return { slug: slugify(path.basename(normalized)), remote: detected.remote, projectRoot: detected.projectRoot };
+    const slug = slugify(path.basename(normalizedRemote));
+    if (getProjectBySlug(db, slug)) return { kind: "slug_collision" };
+    return {
+      kind: "resolved",
+      slug,
+      source: "derived",
+      memberPaths: [projectRoot],
+      memberRepos: [normalizedRemote],
+    };
   }
 
-  // No remote — derive slug from directory basename.
-  return { slug: slugify(path.basename(detected.projectRoot)), remote: null, projectRoot: detected.projectRoot };
+  const slug = slugify(path.basename(projectRoot));
+  if (getProjectBySlug(db, slug)) return { kind: "slug_collision" };
+  return {
+    kind: "resolved",
+    slug,
+    source: "derived",
+    memberPaths: [projectRoot],
+    memberRepos: [],
+  };
 }
 
-/**
- * Resolve the project slug for a working directory. Matches the registry by git
- * remote; if a real project root is detected (detectProject non-null):
- *   - has a remote  → registry match or provision from remote basename
- *   - no remote     → provision from the project-root basename
- *
- * Returns null when detectProject finds no project marker (e.g. the server's
- * home/install dir). Callers should treat null as "unresolved" and not stamp a
- * provisional project.
- *
- * Note: for HTTP transport / clients that launch the server outside the project
- * dir, cwd-resolution is best-effort; callers should pass an explicit
- * project_identifier (the macOS app does this from its active-project context).
- */
+/** Resolve explicit or multi-root scope without mutating the project registry. */
+export function resolveProjectScope(
+  db: Database.Database,
+  paths: string[],
+  explicit?: string,
+): ProjectScopeResolution {
+  if (explicit !== undefined) {
+    if (slugify(explicit) !== explicit || !getProjectBySlug(db, explicit)) {
+      return { kind: "invalid_explicit", slug: explicit };
+    }
+    return { kind: "resolved", slug: explicit, source: "explicit" };
+  }
+
+  const pathResolutions = paths.flatMap((candidate) => {
+    const resolved = resolvePath(db, candidate);
+    return resolved ? [resolved] : [];
+  });
+  if (pathResolutions.some((result) => result.kind === "slug_collision")) {
+    return { kind: "unresolved" };
+  }
+  const resolutions = pathResolutions.filter(
+    (result): result is Extract<ProjectScopeResolution, { kind: "resolved" }> => result.kind === "resolved",
+  );
+  if (resolutions.length === 0) return { kind: "unresolved" };
+
+  const slugs = [...new Set(resolutions.map((result) => result.slug))].sort();
+  if (slugs.length > 1) return { kind: "ambiguous", slugs };
+
+  const priority = { member_path: 0, git_remote: 1, derived: 2, explicit: 3 } as const;
+  const best = resolutions.sort((a, b) => priority[a.source] - priority[b.source])[0]!;
+  if (best.source !== "derived") return best;
+
+  return {
+    ...best,
+    memberPaths: [...new Set(resolutions.flatMap((result) => result.memberPaths ?? []))],
+    memberRepos: [...new Set(resolutions.flatMap((result) => result.memberRepos ?? []))],
+  };
+}
+
+/** Persist a detected derived scope before a personal capture. */
+export function upsertProvisionalProject(
+  db: Database.Database,
+  resolution: Extract<ProjectScopeResolution, { kind: "resolved" }>,
+): void {
+  if (resolution.source !== "derived" || getProjectBySlug(db, resolution.slug)) return;
+  upsertProject(db, {
+    slug: resolution.slug,
+    displayName: resolution.slug,
+    memberRepos: resolution.memberRepos ?? [],
+    memberPaths: resolution.memberPaths ?? [],
+    provisional: true,
+  });
+}
+
+/** Backward-compatible single-directory write resolution. */
 export function resolveProjectIdentifier(db: Database.Database, cwd: string): string | null {
-  const info = detectSlug(db, cwd);
-  if (!info) return null;
-
-  const { slug, remote, projectRoot } = info;
-
-  // Only provision if no existing entry for this slug.
-  const normalized = remote ? normalizeGitRemote(remote) : null;
-  upsertProvisional(db, slug, normalized ? [normalized] : [], [projectRoot]);
-  return slug;
+  const result = resolveProjectScope(db, [cwd]);
+  if (result.kind !== "resolved") return null;
+  upsertProvisionalProject(db, result);
+  return result.slug;
 }
 
-/**
- * Read-only variant of resolveProjectIdentifier: derives the current project
- * slug from cwd WITHOUT writing anything to the database.
- *
- * - Registry hit (remote matches a registered project) → returns that project's slug.
- * - Detected project with unmatched remote → returns slugified remote basename.
- * - Detected project with no remote → returns slugified directory basename.
- * - No project marker found → returns null.
- */
+/** Backward-compatible single-directory read resolution. */
 export function currentProjectSlug(db: Database.Database, cwd: string): string | null {
-  const info = detectSlug(db, cwd);
-  return info ? info.slug : null;
-}
-
-function upsertProvisional(db: Database.Database, slug: string, repos: string[], paths: string[]): void {
-  const existing = getProjectBySlug(db, slug);
-  if (existing) return; // don't clobber an existing (possibly human-confirmed) project
-  upsertProject(db, { slug, displayName: slug, memberRepos: repos, memberPaths: paths, provisional: true });
+  const result = resolveProjectScope(db, [cwd]);
+  return result.kind === "resolved" ? result.slug : null;
 }

@@ -4,6 +4,7 @@ import { handleSearchThoughts } from "../../src/tools/search.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { handleManageEdges } from "../../src/tools/graph.js";
 import { storeEmbedding } from "../../src/db/vectors.js";
+import { upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
 
@@ -16,11 +17,20 @@ afterEach(() => {
 });
 
 function parseResult(result: object): any {
-  const r = result as any;
-  return JSON.parse(r.content[0].text);
+  const text = (result as { content?: Array<{ text?: string }> }).content?.[0]?.text;
+  if (!text) throw new Error("Expected tool result text");
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Expected JSON tool result: ${text}`, { cause: error });
+  }
 }
 
 function captureId(content: string, extra: Record<string, unknown> = {}): string {
+  const slug = extra.project_identifier;
+  if (typeof slug === "string") {
+    upsertProject(db.db, { slug, displayName: slug, memberRepos: [], memberPaths: [], provisional: false });
+  }
   const result = handleCaptureThought(db, { content, ...extra });
   return parseResult(result).id;
 }

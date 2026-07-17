@@ -30,7 +30,21 @@ export function detectProject(cwd: string): DetectedProject | null {
 }
 
 function readOriginRemote(projectRoot: string): string | null {
-  const cfgPath = path.join(projectRoot, ".git", "config");
+  const dotGit = path.join(projectRoot, ".git");
+  let cfgPath = path.join(dotGit, "config");
+  try {
+    if (fs.statSync(dotGit).isFile()) {
+      const pointer = fs.readFileSync(dotGit, "utf8").trim();
+      const match = /^gitdir:\s*(.+)$/i.exec(pointer);
+      const gitDirRef = match?.[1];
+      if (!gitDirRef) return null;
+      const gitDir = path.resolve(projectRoot, gitDirRef);
+      cfgPath = path.resolve(gitDir, "..", "..", "config");
+    }
+  } catch {
+    return null;
+  }
+
   let text: string;
   try {
     text = fs.readFileSync(cfgPath, "utf8");

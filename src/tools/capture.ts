@@ -2,7 +2,8 @@ import type { ThoughtDatabase } from "../db/database.js";
 import { insertThought, getThought } from "../db/thoughts.js";
 import { linkThoughts } from "../db/edges.js";
 import { searchThoughts, sanitizeFTSQuery } from "../db/fts.js";
-import { resolveProjectIdentifier } from "../db/resolve-project.js";
+import { resolveProjectScope, upsertProvisionalProject } from "../db/resolve-project.js";
+import type { ProjectScopeResolution } from "../db/resolve-project.js";
 import {
   toolSuccess,
   toolError,
@@ -200,10 +201,40 @@ function captureSingle(
   return { id, linked, skipped };
 }
 
+function captureScope(
+  db: ThoughtDatabase,
+  args: { project_identifier?: string; visibility?: string; type?: string },
+  detectedScope: ProjectScopeResolution,
+): { slug: string | null; resolution?: Extract<ProjectScopeResolution, { kind: "resolved" }> } | ToolResult {
+  const resolution = args.project_identifier
+    ? resolveProjectScope(db.db, [], args.project_identifier)
+    : detectedScope;
+  if (resolution.kind === "invalid_explicit") {
+    return toolError("project_scope_invalid", `project_identifier "${resolution.slug}" is unknown or noncanonical. Pass a registered canonical project_identifier.`);
+  }
+
+  const visibility = args.visibility ?? (args.type === "preference" ? "shared" : "personal");
+  if (visibility === "shared" && !args.project_identifier) return { slug: null };
+  if (resolution.kind === "unresolved") {
+    return toolError("project_scope_unresolved", "Personal captures require a project. Pass a registered project_identifier or configure MCP client roots.");
+  }
+  if (resolution.kind === "ambiguous") {
+    return toolError("project_scope_ambiguous", `Client roots resolve to multiple projects (${resolution.slugs.join(", ")}). Pass a registered project_identifier.`);
+  }
+
+  return { slug: resolution.slug, resolution };
+}
+
+function isToolError(
+  value: { slug: string | null; resolution?: Extract<ProjectScopeResolution, { kind: "resolved" }> } | ToolResult,
+): value is ToolResult {
+  return "content" in value;
+}
+
 export function handleCaptureThought(
   db: ThoughtDatabase,
   args: Record<string, unknown>,
-  cwd: string = process.cwd(),
+  detectedScope: ProjectScopeResolution = resolveProjectScope(db.db, [process.cwd()]),
 ): ToolResult {
   const a = args as unknown as CaptureArgs;
 
@@ -220,27 +251,26 @@ export function handleCaptureThought(
       );
     }
 
-    // Only resolve from cwd when at least one thought lacks an explicit project_identifier.
-    // This avoids the filesystem walk + registry write when every thought already specifies it.
-    const needsResolution = a.thoughts.some((t) => !t.project_identifier);
-    const resolvedSlug: string | null = needsResolution
-      ? resolveProjectIdentifier(db.db, cwd)
-      : null;
-
-    const results: Array<{ id: string; linked: string[]; skipped: string[] }> = [];
     for (const thought of a.thoughts) {
       if (!thought.content || typeof thought.content !== "string") {
-        return toolError(
-          "invalid_input",
-          "Each thought in bulk capture must have a content string",
-        );
+        return toolError("invalid_input", "Each thought in bulk capture must have a content string");
       }
       const err = validateThoughtInput(thought);
-      if (err) {
-        return toolError("invalid_input", err);
-      }
-      results.push(captureSingle(db, thought, resolvedSlug));
+      if (err) return toolError("invalid_input", err);
     }
+
+    const scopes = a.thoughts.map((thought) => captureScope(db, thought, detectedScope));
+    const scopeError = scopes.find(isToolError);
+    if (scopeError) return scopeError;
+
+    const results = db.db.transaction(() => a.thoughts!.map((thought, index) => {
+      const scope = scopes[index] as {
+        slug: string | null;
+        resolution?: Extract<ProjectScopeResolution, { kind: "resolved" }>;
+      };
+      if (scope.resolution) upsertProvisionalProject(db.db, scope.resolution);
+      return captureSingle(db, thought, scope.slug);
+    }))();
 
     return toolSuccess({
       captured: results.length,
@@ -266,27 +296,28 @@ export function handleCaptureThought(
     return toolError("invalid_input", singleErr);
   }
 
-  // Only resolve from cwd when the explicit project_identifier is absent.
-  // This avoids the filesystem walk + registry write when the caller already specifies it.
-  const resolvedSlug: string | null = a.project_identifier
-    ? null
-    : resolveProjectIdentifier(db.db, cwd);
+  const scope = captureScope(db, a, detectedScope);
+  if (isToolError(scope)) return scope;
+  const content = a.content;
 
-  const result = captureSingle(db, {
-    content: a.content,
-    summary: a.summary,
-    type: a.type,
-    source: a.source,
-    source_agent: a.source_agent,
-    trust_level: a.trust_level,
-    project: a.project,
-    project_identifier: a.project_identifier,
-    visibility: a.visibility,
-    topics: a.topics,
-    people: a.people,
-    metadata: a.metadata,
-    related_to: a.related_to,
-  }, resolvedSlug);
+  const result = db.db.transaction(() => {
+    if (scope.resolution) upsertProvisionalProject(db.db, scope.resolution);
+    return captureSingle(db, {
+      content,
+      summary: a.summary,
+      type: a.type,
+      source: a.source,
+      source_agent: a.source_agent,
+      trust_level: a.trust_level,
+      project: a.project,
+      project_identifier: a.project_identifier,
+      visibility: a.visibility,
+      topics: a.topics,
+      people: a.people,
+      metadata: a.metadata,
+      related_to: a.related_to,
+    }, scope.slug);
+  })();
 
   const suggested_connections = findSuggestedConnections(
     db,

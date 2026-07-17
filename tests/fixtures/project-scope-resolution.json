@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "description": "Shared HMC project-scope cases. Swift parity must preserve resolution kind, slug and provenance.",
+  "cases": [
+    {
+      "name": "registered explicit wins",
+      "projects": [{ "slug": "alpha", "member_paths": ["/workspace/alpha"], "member_repos": [] }],
+      "roots": ["/workspace/other"],
+      "explicit": "alpha",
+      "expected": { "kind": "resolved", "slug": "alpha", "source": "explicit" }
+    },
+    {
+      "name": "unknown explicit fails",
+      "projects": [],
+      "roots": ["/workspace/alpha"],
+      "explicit": "missing",
+      "expected": { "kind": "invalid_explicit", "slug": "missing" }
+    },
+    {
+      "name": "longest member path wins",
+      "projects": [
+        { "slug": "workspace", "member_paths": ["/workspace"], "member_repos": [] },
+        { "slug": "alpha", "member_paths": ["/workspace/alpha"], "member_repos": [] }
+      ],
+      "roots": ["/workspace/alpha/packages/app"],
+      "expected": { "kind": "resolved", "slug": "alpha", "source": "member_path" }
+    },
+    {
+      "name": "different registered roots are ambiguous",
+      "projects": [
+        { "slug": "alpha", "member_paths": ["/workspace/alpha"], "member_repos": [] },
+        { "slug": "beta", "member_paths": ["/workspace/beta"], "member_repos": [] }
+      ],
+      "roots": ["/workspace/alpha", "/workspace/beta"],
+      "expected": { "kind": "ambiguous", "slugs": ["alpha", "beta"] }
+    },
+    {
+      "name": "markerless unknown root is unresolved",
+      "projects": [],
+      "roots": ["/workspace/unknown"],
+      "expected": { "kind": "unresolved" }
+    }
+  ]
+}

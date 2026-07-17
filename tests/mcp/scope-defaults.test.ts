@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,12 +8,8 @@ import { upsertProject } from "../../src/db/projects.js";
 import { applyDefaultScope } from "../../src/mcp/scope-defaults.js";
 
 let db: Database.Database;
-beforeEach(() => {
-  db = new Database(":memory:");
-  runMigrations(db);
-});
+beforeEach(() => { db = new Database(":memory:"); runMigrations(db); });
 
-/** Build a temp dir that looks like a git repo with the given remote. */
 function repo(remote: string): string {
   const root = mkdtempSync(join(tmpdir(), "sd-"));
   mkdirSync(join(root, ".git"));
@@ -21,101 +17,48 @@ function repo(remote: string): string {
   return root;
 }
 
-/** A non-project directory (no markers). */
-function plainDir(): string {
-  return mkdtempSync(join(tmpdir(), "sd-plain-"));
+function argsOf(result: ReturnType<typeof applyDefaultScope>) {
+  expect(result.kind).toBe("applied");
+  if (result.kind !== "applied") throw new Error(result.message);
+  return result.args;
 }
 
 describe("applyDefaultScope", () => {
-  it("injects project_identifier and include_shared when nothing is set and cwd resolves", () => {
-    upsertProject(db, {
-      slug: "shelby",
-      displayName: "Shelby",
-      memberRepos: ["github.com/Studio-Moser/Shelby-MCP"],
-      memberPaths: [],
-      provisional: false,
+  it("injects resolved project and shared records", () => {
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: ["github.com/Studio-Moser/Shelby-MCP"], memberPaths: [], provisional: false });
+    expect(argsOf(applyDefaultScope({}, db, [repo("git@github.com:Studio-Moser/Shelby-MCP.git")]))).toMatchObject({
+      project_identifier: "shelby", include_shared: true,
     });
-    const cwd = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
-
-    const result = applyDefaultScope({}, db, cwd);
-
-    expect(result.project_identifier).toBe("shelby");
-    expect(result.include_shared).toBe(true);
   });
 
-  it("leaves args unchanged when all_projects: true is set (opt-out)", () => {
-    upsertProject(db, {
-      slug: "shelby",
-      displayName: "Shelby",
-      memberRepos: ["github.com/Studio-Moser/Shelby-MCP"],
-      memberPaths: [],
-      provisional: false,
+  it("preserves all_projects and explicit include_shared", () => {
+    const all = { all_projects: true };
+    expect(argsOf(applyDefaultScope(all, db, []))).toBe(all);
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
+    expect(argsOf(applyDefaultScope({ project_identifier: "shelby", include_shared: false }, db, []))).toMatchObject({
+      project_identifier: "shelby", include_shared: false,
     });
-    const cwd = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
-
-    const args = { all_projects: true };
-    const result = applyDefaultScope(args, db, cwd);
-
-    expect(result).toBe(args); // same reference — untouched
-    expect(result.project_identifier).toBeUndefined();
   });
 
-  it("leaves args unchanged when project_identifier is already explicitly set", () => {
-    upsertProject(db, {
-      slug: "shelby",
-      displayName: "Shelby",
-      memberRepos: ["github.com/Studio-Moser/Shelby-MCP"],
-      memberPaths: [],
-      provisional: false,
+  it("rejects unknown and noncanonical explicit slugs, including all-project reads", () => {
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
+    expect(applyDefaultScope({ project_identifier: "missing" }, db, [])).toMatchObject({ kind: "error", category: "project_scope_invalid" });
+    expect(applyDefaultScope({ project_identifier: "Shelby" }, db, [])).toMatchObject({ kind: "error", category: "project_scope_invalid" });
+    expect(applyDefaultScope({ all_projects: true, project_identifier: "missing" }, db, [])).toMatchObject({
+      kind: "error", category: "project_scope_invalid",
     });
-    const cwd = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
-
-    const args = { project_identifier: "other-project" };
-    const result = applyDefaultScope(args, db, cwd);
-
-    expect(result).toBe(args); // same reference — untouched
-    expect(result.project_identifier).toBe("other-project");
   });
 
-  it("preserves existing include_shared value when injecting project_identifier", () => {
+  it("fails unresolved, ambiguous, and colliding roots closed to shared-only", () => {
+    expect(argsOf(applyDefaultScope({ query: "hello" }, db, []))).toMatchObject({ shared_only: true, query: "hello" });
+    const one = repo("https://github.com/acme/one.git");
+    const two = repo("https://github.com/acme/two.git");
+    expect(argsOf(applyDefaultScope({}, db, [one, two]))).toMatchObject({ shared_only: true });
+
     upsertProject(db, {
-      slug: "shelby",
-      displayName: "Shelby",
-      memberRepos: ["github.com/Studio-Moser/Shelby-MCP"],
-      memberPaths: [],
-      provisional: false,
+      slug: "shared-name", displayName: "Original", memberRepos: ["github.com/owner/shared-name"], memberPaths: [], provisional: false,
     });
-    const cwd = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
-
-    const result = applyDefaultScope({ include_shared: false }, db, cwd);
-
-    expect(result.project_identifier).toBe("shelby");
-    // Caller explicitly set include_shared=false — that should be respected.
-    expect(result.include_shared).toBe(false);
-  });
-
-  it("falls back to shared-only (never global) when cwd does not resolve", () => {
-    const result = applyDefaultScope({ query: "hello" }, db, plainDir());
-    expect(result.project_identifier).toBeUndefined();
-    expect(result.shared_only).toBe(true);   // new fail-safe
-    expect(result.query).toBe("hello");
-  });
-
-  it("passes through other args fields unchanged when injecting scope", () => {
-    upsertProject(db, {
-      slug: "shelby",
-      displayName: "Shelby",
-      memberRepos: ["github.com/Studio-Moser/Shelby-MCP"],
-      memberPaths: [],
-      provisional: false,
-    });
-    const cwd = repo("git@github.com:Studio-Moser/Shelby-MCP.git");
-
-    const result = applyDefaultScope({ query: "auth", limit: 5, offset: 10 }, db, cwd);
-
-    expect(result.project_identifier).toBe("shelby");
-    expect(result.query).toBe("auth");
-    expect(result.limit).toBe(5);
-    expect(result.offset).toBe(10);
+    const collision = repo("https://gitlab.com/other/shared-name.git");
+    expect(argsOf(applyDefaultScope({}, db, [collision]))).toMatchObject({ shared_only: true });
   });
 });

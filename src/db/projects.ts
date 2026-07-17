@@ -1,4 +1,6 @@
 import type Database from "better-sqlite3";
+import { existsSync, realpathSync } from "node:fs";
+import path from "node:path";
 
 export interface Project {
   slug: string;
@@ -109,12 +111,14 @@ export function findProjectByRepo(db: Database.Database, remote: string): Projec
  * markerless multi-repo container directory resolve to its project slug.
  */
 export function findProjectByPath(db: Database.Database, dir: string): Project | null {
+  const target = existsSync(dir) ? realpathSync.native(dir) : path.resolve(dir);
   let best: Project | null = null;
   let bestLen = -1;
   for (const p of listProjects(db)) {
-    for (const mp of p.memberPaths) {
-      if (mp.length > bestLen && (dir === mp || dir.startsWith(mp + "/"))) {
-        bestLen = mp.length;
+    for (const memberPath of p.memberPaths) {
+      const candidate = existsSync(memberPath) ? realpathSync.native(memberPath) : path.resolve(memberPath);
+      if (candidate.length > bestLen && (target === candidate || target.startsWith(candidate + path.sep))) {
+        bestLen = candidate.length;
         best = p;
       }
     }
