@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,7 +41,7 @@ export function normalizeFileRoots(roots: RootRef[] | undefined): string[] {
 
 /** Use cwd only for no-roots clients, and never treat production / as a project. */
 export function fallbackResolutionRoots(cwd: string): ResolutionRootResult {
-  if (!path.isAbsolute(cwd) || cwd === path.parse(cwd).root || !existsSync(cwd)) {
+  if (!path.isAbsolute(cwd) || cwd === path.parse(cwd).root || !existsSync(cwd) || !statSync(cwd).isDirectory()) {
     return { kind: "unresolved" };
   }
   return { kind: "resolved", paths: [realpathSync.native(cwd)] };

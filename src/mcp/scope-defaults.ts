@@ -18,8 +18,6 @@ export function applyDefaultScope(
   db: Database.Database,
   paths: string[],
 ): AppliedScope {
-  if (args.all_projects === true) return { kind: "applied", args };
-
   const resolution = resolveProjectScope(db, paths, args.project_identifier);
   if (resolution.kind === "invalid_explicit") {
     return {
@@ -28,6 +26,7 @@ export function applyDefaultScope(
       message: `project_identifier "${resolution.slug}" is unknown or noncanonical. Pass a registered canonical project_identifier or configure project roots.`,
     };
   }
+  if (args.all_projects === true) return { kind: "applied", args };
   if (resolution.kind !== "resolved") {
     return { kind: "applied", args: { ...args, project_identifier: undefined, shared_only: true } };
   }

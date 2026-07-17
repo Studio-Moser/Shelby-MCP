@@ -61,4 +61,25 @@ describe("capture project scope", () => {
     expect(getProjectBySlug(db.db, "new-project")).toMatchObject({ provisional: true, memberRepos: ["github.com/acme/new-project"] });
     expect(db.db.prepare("SELECT project_identifier FROM thoughts").get()).toEqual({ project_identifier: "new-project" });
   });
+
+  it("rejects a derived slug collision without inserting or exposing the registered project", () => {
+    upsertProject(db.db, {
+      slug: "shared-name", displayName: "Original", memberRepos: ["github.com/owner/shared-name"], memberPaths: [], provisional: false,
+    });
+    const scope = resolveProjectScope(db.db, [repo("https://gitlab.com/other/shared-name.git")]);
+
+    expect(scope).toEqual({ kind: "unresolved" });
+    expect(error(handleCaptureThought(db, { content: "Wrong project" }, scope))).toBe("project_scope_unresolved");
+    expect(count()).toBe(0);
+    expect(getProjectBySlug(db.db, "shared-name")?.memberRepos).toEqual(["github.com/owner/shared-name"]);
+  });
+
+  it("rolls back provisional registration when thought insertion fails", () => {
+    const scope = resolveProjectScope(db.db, [repo("https://github.com/acme/atomic-project.git")]);
+    db.db.exec("CREATE TRIGGER reject_thought BEFORE INSERT ON thoughts BEGIN SELECT RAISE(ABORT, 'blocked'); END");
+
+    expect(() => handleCaptureThought(db, { content: "Personal" }, scope)).toThrow("blocked");
+    expect(getProjectBySlug(db.db, "atomic-project")).toBeNull();
+    expect(count()).toBe(0);
+  });
 });

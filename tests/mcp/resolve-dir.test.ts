@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,9 +48,13 @@ describe("fallbackResolutionRoots", () => {
     expect(fallbackResolutionRoots(cwd)).toEqual({ kind: "resolved", paths: [realpathSync.native(cwd)] });
   });
 
-  it("rejects root, relative and missing cwd values", () => {
+  it("rejects root, relative, missing, and regular-file cwd values", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "roots-file-")), "not-a-directory");
+    writeFileSync(file, "x");
+
     expect(fallbackResolutionRoots("/")).toEqual({ kind: "unresolved" });
     expect(fallbackResolutionRoots("relative/path")).toEqual({ kind: "unresolved" });
     expect(fallbackResolutionRoots(join(tmpdir(), "missing-roots-cwd"))).toEqual({ kind: "unresolved" });
+    expect(fallbackResolutionRoots(file)).toEqual({ kind: "unresolved" });
   });
 });

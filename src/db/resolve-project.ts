@@ -25,7 +25,9 @@ function canonicalPath(input: string): string {
   return existsSync(input) ? realpathSync.native(input) : path.resolve(input);
 }
 
-function resolvePath(db: Database.Database, input: string): Extract<ProjectScopeResolution, { kind: "resolved" }> | null {
+type PathResolution = Extract<ProjectScopeResolution, { kind: "resolved" }> | { kind: "slug_collision" };
+
+function resolvePath(db: Database.Database, input: string): PathResolution | null {
   const cwd = canonicalPath(input);
   const byPath = findProjectByPath(db, cwd);
   if (byPath) {
@@ -42,18 +44,22 @@ function resolvePath(db: Database.Database, input: string): Extract<ProjectScope
     if (byRepo) {
       return { kind: "resolved", slug: byRepo.slug, source: "git_remote" };
     }
+    const slug = slugify(path.basename(normalizedRemote));
+    if (getProjectBySlug(db, slug)) return { kind: "slug_collision" };
     return {
       kind: "resolved",
-      slug: slugify(path.basename(normalizedRemote)),
+      slug,
       source: "derived",
       memberPaths: [projectRoot],
       memberRepos: [normalizedRemote],
     };
   }
 
+  const slug = slugify(path.basename(projectRoot));
+  if (getProjectBySlug(db, slug)) return { kind: "slug_collision" };
   return {
     kind: "resolved",
-    slug: slugify(path.basename(projectRoot)),
+    slug,
     source: "derived",
     memberPaths: [projectRoot],
     memberRepos: [],
@@ -73,10 +79,16 @@ export function resolveProjectScope(
     return { kind: "resolved", slug: explicit, source: "explicit" };
   }
 
-  const resolutions = paths.flatMap((candidate) => {
+  const pathResolutions = paths.flatMap((candidate) => {
     const resolved = resolvePath(db, candidate);
     return resolved ? [resolved] : [];
   });
+  if (pathResolutions.some((result) => result.kind === "slug_collision")) {
+    return { kind: "unresolved" };
+  }
+  const resolutions = pathResolutions.filter(
+    (result): result is Extract<ProjectScopeResolution, { kind: "resolved" }> => result.kind === "resolved",
+  );
   if (resolutions.length === 0) return { kind: "unresolved" };
 
   const slugs = [...new Set(resolutions.map((result) => result.slug))].sort();

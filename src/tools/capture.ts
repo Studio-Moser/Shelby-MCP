@@ -205,7 +205,7 @@ function captureScope(
   db: ThoughtDatabase,
   args: { project_identifier?: string; visibility?: string; type?: string },
   detectedScope: ProjectScopeResolution,
-): { slug: string | null } | ToolResult {
+): { slug: string | null; resolution?: Extract<ProjectScopeResolution, { kind: "resolved" }> } | ToolResult {
   const resolution = args.project_identifier
     ? resolveProjectScope(db.db, [], args.project_identifier)
     : detectedScope;
@@ -222,11 +222,12 @@ function captureScope(
     return toolError("project_scope_ambiguous", `Client roots resolve to multiple projects (${resolution.slugs.join(", ")}). Pass a registered project_identifier.`);
   }
 
-  upsertProvisionalProject(db.db, resolution);
-  return { slug: resolution.slug };
+  return { slug: resolution.slug, resolution };
 }
 
-function isToolError(value: { slug: string | null } | ToolResult): value is ToolResult {
+function isToolError(
+  value: { slug: string | null; resolution?: Extract<ProjectScopeResolution, { kind: "resolved" }> } | ToolResult,
+): value is ToolResult {
   return "content" in value;
 }
 
@@ -262,9 +263,14 @@ export function handleCaptureThought(
     const scopeError = scopes.find(isToolError);
     if (scopeError) return scopeError;
 
-    const results = a.thoughts.map((thought, index) =>
-      captureSingle(db, thought, (scopes[index] as { slug: string | null }).slug),
-    );
+    const results = db.db.transaction(() => a.thoughts!.map((thought, index) => {
+      const scope = scopes[index] as {
+        slug: string | null;
+        resolution?: Extract<ProjectScopeResolution, { kind: "resolved" }>;
+      };
+      if (scope.resolution) upsertProvisionalProject(db.db, scope.resolution);
+      return captureSingle(db, thought, scope.slug);
+    }))();
 
     return toolSuccess({
       captured: results.length,
@@ -292,22 +298,26 @@ export function handleCaptureThought(
 
   const scope = captureScope(db, a, detectedScope);
   if (isToolError(scope)) return scope;
+  const content = a.content;
 
-  const result = captureSingle(db, {
-    content: a.content,
-    summary: a.summary,
-    type: a.type,
-    source: a.source,
-    source_agent: a.source_agent,
-    trust_level: a.trust_level,
-    project: a.project,
-    project_identifier: a.project_identifier,
-    visibility: a.visibility,
-    topics: a.topics,
-    people: a.people,
-    metadata: a.metadata,
-    related_to: a.related_to,
-  }, scope.slug);
+  const result = db.db.transaction(() => {
+    if (scope.resolution) upsertProvisionalProject(db.db, scope.resolution);
+    return captureSingle(db, {
+      content,
+      summary: a.summary,
+      type: a.type,
+      source: a.source,
+      source_agent: a.source_agent,
+      trust_level: a.trust_level,
+      project: a.project,
+      project_identifier: a.project_identifier,
+      visibility: a.visibility,
+      topics: a.topics,
+      people: a.people,
+      metadata: a.metadata,
+      related_to: a.related_to,
+    }, scope.slug);
+  })();
 
   const suggested_connections = findSuggestedConnections(
     db,

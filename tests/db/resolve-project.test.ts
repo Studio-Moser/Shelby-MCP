@@ -66,6 +66,19 @@ describe("resolveProjectScope", () => {
     expect(resolveProjectScope(db, [one, two])).toEqual({ kind: "ambiguous", slugs: ["one", "two"] });
   });
 
+  it("fails closed when an unmatched remote derives an occupied slug", () => {
+    upsertProject(db, {
+      slug: "shared-name",
+      displayName: "Original",
+      memberRepos: ["github.com/owner/shared-name"],
+      memberPaths: [],
+      provisional: false,
+    });
+    const unrelated = repo("https://gitlab.com/other/shared-name.git");
+
+    expect(resolveProjectScope(db, [unrelated])).toEqual({ kind: "unresolved" });
+  });
+
   it("leaves markerless unregistered containers unresolved", () => {
     const dir = mkdtempSync(join(tmpdir(), "rp-plain-"));
     expect(resolveProjectScope(db, [dir])).toEqual({ kind: "unresolved" });

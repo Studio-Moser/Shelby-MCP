@@ -40,16 +40,25 @@ describe("applyDefaultScope", () => {
     });
   });
 
-  it("rejects unknown and noncanonical explicit slugs", () => {
+  it("rejects unknown and noncanonical explicit slugs, including all-project reads", () => {
     upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
     expect(applyDefaultScope({ project_identifier: "missing" }, db, [])).toMatchObject({ kind: "error", category: "project_scope_invalid" });
     expect(applyDefaultScope({ project_identifier: "Shelby" }, db, [])).toMatchObject({ kind: "error", category: "project_scope_invalid" });
+    expect(applyDefaultScope({ all_projects: true, project_identifier: "missing" }, db, [])).toMatchObject({
+      kind: "error", category: "project_scope_invalid",
+    });
   });
 
-  it("fails unresolved and ambiguous roots closed to shared-only", () => {
+  it("fails unresolved, ambiguous, and colliding roots closed to shared-only", () => {
     expect(argsOf(applyDefaultScope({ query: "hello" }, db, []))).toMatchObject({ shared_only: true, query: "hello" });
     const one = repo("https://github.com/acme/one.git");
     const two = repo("https://github.com/acme/two.git");
     expect(argsOf(applyDefaultScope({}, db, [one, two]))).toMatchObject({ shared_only: true });
+
+    upsertProject(db, {
+      slug: "shared-name", displayName: "Original", memberRepos: ["github.com/owner/shared-name"], memberPaths: [], provisional: false,
+    });
+    const collision = repo("https://gitlab.com/other/shared-name.git");
+    expect(argsOf(applyDefaultScope({}, db, [collision]))).toMatchObject({ shared_only: true });
   });
 });
