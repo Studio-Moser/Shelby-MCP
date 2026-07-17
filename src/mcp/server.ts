@@ -17,8 +17,9 @@ import { handleGetBrief } from "../tools/brief.js";
 import { handleSelectContext } from "../tools/context.js";
 import type { ToolResult } from "../tools/helpers.js";
 import { applyDefaultScope } from "./scope-defaults.js";
-import { pickResolutionDir } from "./resolve-dir.js";
-import type { RootRef } from "./resolve-dir.js";
+import { fallbackResolutionRoots, normalizeFileRoots } from "./resolve-dir.js";
+import type { ResolutionRootResult } from "./resolve-dir.js";
+import { resolveProjectScope } from "../db/resolve-project.js";
 import { ensureSeedProjects } from "../db/seed.js";
 import { loadProjectSeed, toProjects } from "../integrity/project-seed.js";
 import {
@@ -29,6 +30,7 @@ import {
   MAX_PEOPLE_COUNT,
   MAX_PERSON_LENGTH,
   MAX_BULK_THOUGHTS,
+  toolError,
 } from "../tools/helpers.js";
 import { getEmbeddingConfig, generateEmbedding, getEmbeddingProviderId } from "../db/embedding.js";
 import { storeEmbedding } from "../db/vectors.js";
@@ -56,41 +58,31 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
   // match known paths. Empty on a fresh install — nothing bundled.
   ensureSeedProjects(db.db, toProjects(loadProjectSeed()));
 
-  // ---------------------------------------------------------------------------
-  // Client roots — used to resolve the caller's working directory.
-  // The server runs at process.cwd() = "/" in production (launched by macOS app),
-  // so we prefer the first file:// root advertised by the MCP client instead.
-  // ---------------------------------------------------------------------------
-  let clientRoots: RootRef[] | undefined;
-  let rootsFetched = false;
+  // Await and memoize the first client roots request so the first scoped call
+  // cannot race ahead with the server's launch directory.
+  let rootsPromise: Promise<ResolutionRootResult> | undefined;
 
-  async function refreshRoots(): Promise<void> {
+  async function fetchResolutionRoots(): Promise<ResolutionRootResult> {
     try {
-      const res = await server.server.listRoots();
-      clientRoots = res.roots as RootRef[];
+      const response = await server.server.listRoots();
+      const paths = normalizeFileRoots(response.roots);
+      return paths.length > 0 ? { kind: "resolved", paths } : { kind: "unresolved" };
     } catch {
-      // Client does not support roots — leave clientRoots undefined.
+      return fallbackResolutionRoots(process.cwd());
     }
-    rootsFetched = true;
   }
 
-  // Re-fetch when the client signals its roots have changed.
+  function resolutionRoots(): Promise<ResolutionRootResult> {
+    rootsPromise ??= fetchResolutionRoots();
+    return rootsPromise;
+  }
+
   server.server.setNotificationHandler(RootsListChangedNotificationSchema, () => {
-    void refreshRoots();
+    rootsPromise = undefined;
   });
 
-  /** Lazily trigger the first roots fetch (no-op after the first call). */
-  function ensureRoots(): void {
-    if (!rootsFetched) {
-      rootsFetched = true; // set eagerly to prevent concurrent fetches
-      void refreshRoots();
-    }
-  }
-
-  /** The directory to use for project resolution in the current handler call. */
-  function resolutionDir(): string {
-    ensureRoots();
-    return pickResolutionDir(clientRoots, process.cwd());
+  function pathsFrom(result: ResolutionRootResult): string[] {
+    return result.kind === "unresolved" ? [] : result.paths;
   }
 
   // Initialize embedding config from environment
@@ -202,7 +194,9 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("capture_thought", async (args) => {
-      const result = handleCaptureThought(db, args as Record<string, unknown>, resolutionDir());
+      const roots = await resolutionRoots();
+      const scope = resolveProjectScope(db.db, pathsFrom(roots));
+      const result = handleCaptureThought(db, args as Record<string, unknown>, scope);
       // Auto-embed after capture when a server-side embedding provider is configured
       if (!result.isError && embeddingConfig.provider !== "none") {
         try {
@@ -276,9 +270,11 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         graph_depth: z.number().describe("Graph traversal depth after retrieval (0 = none, max 5). When >= 1, related thoughts reachable via graph edges are included in graph_related.").optional(),
       },
     },
-    withLogging("search_thoughts", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
-      return handleSearchThoughts(db, scoped as Record<string, unknown>);
+    withLogging("search_thoughts", async (args) => {
+      const roots = await resolutionRoots();
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, pathsFrom(roots));
+      if (scoped.kind === "error") return toolError(scoped.category, scoped.message);
+      return handleSearchThoughts(db, scoped.args as Record<string, unknown>);
     }),
   );
 
@@ -314,9 +310,11 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         offset: z.number().describe("Pagination offset").optional(),
       },
     },
-    withLogging("list_thoughts", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
-      return handleListThoughts(db, scoped as Record<string, unknown>);
+    withLogging("list_thoughts", async (args) => {
+      const roots = await resolutionRoots();
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, pathsFrom(roots));
+      if (scoped.kind === "error") return toolError(scoped.category, scoped.message);
+      return handleListThoughts(db, scoped.args as Record<string, unknown>);
     }),
   );
 
@@ -499,9 +497,11 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .optional(),
       },
     },
-    withLogging("get_brief", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
-      return handleGetBrief(db, scoped as Record<string, unknown>);
+    withLogging("get_brief", async (args) => {
+      const roots = await resolutionRoots();
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, pathsFrom(roots));
+      if (scoped.kind === "error") return toolError(scoped.category, scoped.message);
+      return handleGetBrief(db, scoped.args as Record<string, unknown>);
     }),
   );
 
@@ -531,9 +531,11 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         limit: z.number().describe("Max thoughts to return (default: 20, max: 100)").optional(),
       },
     },
-    withLogging("select_context", (args) => {
-      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, resolutionDir());
-      return handleSelectContext(db, scoped as Record<string, unknown>);
+    withLogging("select_context", async (args) => {
+      const roots = await resolutionRoots();
+      const scoped = applyDefaultScope(args as Record<string, unknown>, db.db, pathsFrom(roots));
+      if (scoped.kind === "error") return toolError(scoped.category, scoped.message);
+      return handleSelectContext(db, scoped.args as Record<string, unknown>);
     }),
   );
 
