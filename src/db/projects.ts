@@ -37,9 +37,7 @@ function parseArray(raw: string | null): string[] {
 	if (!raw) return [];
 	try {
 		const value: unknown = JSON.parse(raw);
-		return Array.isArray(value)
-			? value.filter((item) => typeof item === "string")
-			: [];
+		return Array.isArray(value) ? value : [];
 	} catch {
 		return [];
 	}
