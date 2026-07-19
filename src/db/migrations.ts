@@ -1,17 +1,18 @@
 import type Database from "better-sqlite3";
+import { deriveExistingProjectId } from "./project-identity.js";
 
 export interface Migration {
-  version: number;
-  description: string;
-  up: (db: Database.Database) => void;
+	version: number;
+	description: string;
+	up: (db: Database.Database) => void;
 }
 
 const migrations: Migration[] = [
-  {
-    version: 1,
-    description: "Initial schema — thoughts, FTS5, edges",
-    up: (db) => {
-      db.exec(`
+	{
+		version: 1,
+		description: "Initial schema — thoughts, FTS5, edges",
+		up: (db) => {
+			db.exec(`
         CREATE TABLE IF NOT EXISTS thoughts (
           id              TEXT PRIMARY KEY,
           content         TEXT NOT NULL,
@@ -72,13 +73,13 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
         CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(edge_type);
       `);
-    },
-  },
-  {
-    version: 2,
-    description: "OAuth 2.1 — oauth_clients table",
-    up: (db) => {
-      db.exec(`
+		},
+	},
+	{
+		version: 2,
+		description: "OAuth 2.1 — oauth_clients table",
+		up: (db) => {
+			db.exec(`
         CREATE TABLE IF NOT EXISTS oauth_clients (
           client_id     TEXT PRIMARY KEY,
           client_name   TEXT,
@@ -86,51 +87,52 @@ const migrations: Migration[] = [
           registered_at INTEGER NOT NULL
         );
       `);
-    },
-  },
-  {
-    version: 3,
-    description: "Temporal edges — valid_from, valid_until",
-    up: (db) => {
-      db.exec(`
+		},
+	},
+	{
+		version: 3,
+		description: "Temporal edges — valid_from, valid_until",
+		up: (db) => {
+			db.exec(`
         ALTER TABLE edges ADD COLUMN valid_from TEXT;
         ALTER TABLE edges ADD COLUMN valid_until TEXT;
         CREATE INDEX IF NOT EXISTS idx_edges_valid_until ON edges(valid_until);
       `);
-    },
-  },
-  {
-    version: 4,
-    description: "source_agent and trust_level columns on thoughts",
-    up: (db) => {
-      db.exec(`
+		},
+	},
+	{
+		version: 4,
+		description: "source_agent and trust_level columns on thoughts",
+		up: (db) => {
+			db.exec(`
         ALTER TABLE thoughts ADD COLUMN source_agent TEXT;
         ALTER TABLE thoughts ADD COLUMN trust_level TEXT CHECK(trust_level IN ('trusted', 'unverified', 'external')) NOT NULL DEFAULT 'trusted';
         CREATE INDEX IF NOT EXISTS idx_thoughts_trust_level ON thoughts(trust_level);
         CREATE INDEX IF NOT EXISTS idx_thoughts_source_agent ON thoughts(source_agent);
       `);
-    },
-  },
-  {
-    version: 5,
-    description: "version-stamp alignment with Shelby-MacOS (no schema change)",
-    up: (_db) => {
-      // No-op migration. This exists to keep the schema version sequence
-      // aligned with the Shelby-MacOS Swift memory implementation, which
-      // independently advanced to v5 (covering the same source_agent +
-      // trust_level + temporal-edge work that npm bundled into v3+v4).
-      // Per ADR 0001 §8 (Shelby-Strategy/docs/adr/0001-memory-server-architecture-contract.md):
-      // "Adding a column = +1. ... Both implementations advance through the
-      // same sequence." Bumping the version stamp here keeps `getSchemaVersion`
-      // results consistent across the two implementations so cross-codebase
-      // tooling and conformance tests can rely on a single number.
-    },
-  },
-  {
-    version: 6,
-    description: "Project identity — project_identifier column + projects registry",
-    up: (db) => {
-      db.exec(`
+		},
+	},
+	{
+		version: 5,
+		description: "version-stamp alignment with Shelby-MacOS (no schema change)",
+		up: (_db) => {
+			// No-op migration. This exists to keep the schema version sequence
+			// aligned with the Shelby-MacOS Swift memory implementation, which
+			// independently advanced to v5 (covering the same source_agent +
+			// trust_level + temporal-edge work that npm bundled into v3+v4).
+			// Per ADR 0001 §8 (Shelby-Strategy/docs/adr/0001-memory-server-architecture-contract.md):
+			// "Adding a column = +1. ... Both implementations advance through the
+			// same sequence." Bumping the version stamp here keeps `getSchemaVersion`
+			// results consistent across the two implementations so cross-codebase
+			// tooling and conformance tests can rely on a single number.
+		},
+	},
+	{
+		version: 6,
+		description:
+			"Project identity — project_identifier column + projects registry",
+		up: (db) => {
+			db.exec(`
         ALTER TABLE thoughts ADD COLUMN project_identifier TEXT;
         CREATE INDEX IF NOT EXISTS idx_thoughts_project_identifier ON thoughts(project_identifier);
 
@@ -145,56 +147,155 @@ const migrations: Migration[] = [
         );
         CREATE INDEX IF NOT EXISTS idx_projects_provisional ON projects(provisional);
       `);
-    },
-  },
-  {
-    version: 7,
-    description: "Normalize legacy display-name project_identifiers to registry slugs",
-    up: (db) => {
-      const map: Array<[string, string]> = [
-        ["Shelby", "shelby"],
-        ["The Crooked Line", "the-crooked-line"],
-        ["KUOW Games", "kuow-games"],
-        ["Ausra Photos", "ausra-photos"],
-      ];
-      const upd = db.prepare("UPDATE thoughts SET project_identifier = ? WHERE project_identifier = ?");
-      for (const [from, to] of map) upd.run(to, from);
-      // Empty-string scope is meaningless — treat as orphan (NULL), repaired later.
-      db.prepare("UPDATE thoughts SET project_identifier = NULL WHERE project_identifier = ''").run();
-    },
-  },
+		},
+	},
+	{
+		version: 7,
+		description:
+			"Normalize legacy display-name project_identifiers to registry slugs",
+		up: (db) => {
+			const map: Array<[string, string]> = [
+				["Shelby", "shelby"],
+				["The Crooked Line", "the-crooked-line"],
+				["KUOW Games", "kuow-games"],
+				["Ausra Photos", "ausra-photos"],
+			];
+			const upd = db.prepare(
+				"UPDATE thoughts SET project_identifier = ? WHERE project_identifier = ?",
+			);
+			for (const [from, to] of map) upd.run(to, from);
+			// Empty-string scope is meaningless — treat as orphan (NULL), repaired later.
+			db.prepare(
+				"UPDATE thoughts SET project_identifier = NULL WHERE project_identifier = ''",
+			).run();
+		},
+	},
+	{
+		version: 8,
+		description: "Canonical project identity and slug aliases",
+		up: (db) => {
+			const projects = db
+				.prepare("SELECT slug FROM projects ORDER BY slug")
+				.all() as Array<{
+				slug: string;
+			}>;
+			const identities = projects.map(({ slug }) => ({
+				slug,
+				projectId: deriveExistingProjectId(slug),
+			}));
+
+			db.exec(`
+        ALTER TABLE projects ADD COLUMN project_id TEXT;
+        ALTER TABLE projects ADD COLUMN current_slug TEXT;
+        ALTER TABLE projects ADD COLUMN identity_state TEXT;
+        ALTER TABLE thoughts ADD COLUMN project_id TEXT;
+
+        CREATE TABLE project_slug_aliases (
+          slug        TEXT PRIMARY KEY,
+          project_id  TEXT NOT NULL,
+          status      TEXT NOT NULL CHECK(status IN ('tentative', 'current', 'retired')),
+          claimed_at  TEXT NOT NULL,
+          retired_at  TEXT,
+          UNIQUE(project_id, slug)
+        );
+        CREATE UNIQUE INDEX one_current_slug_per_project
+          ON project_slug_aliases(project_id) WHERE status = 'current';
+        CREATE INDEX idx_thoughts_project_id ON thoughts(project_id);
+      `);
+
+			const updateProject = db.prepare(
+				`UPDATE projects
+         SET project_id = ?, current_slug = slug, identity_state = 'local_only'
+         WHERE slug = ?`,
+			);
+			const insertAlias = db.prepare(
+				`INSERT INTO project_slug_aliases (slug, project_id, status, claimed_at)
+         SELECT slug, ?, 'tentative', created_at FROM projects WHERE slug = ?`,
+			);
+			for (const { slug, projectId } of identities) {
+				updateProject.run(projectId, slug);
+				insertAlias.run(projectId, slug);
+			}
+
+			const thoughtBackfill = db
+				.prepare(
+					`UPDATE thoughts
+         SET project_id = (
+           SELECT projects.project_id
+           FROM projects
+           WHERE projects.slug = thoughts.project_identifier
+         )
+         WHERE EXISTS (
+           SELECT 1 FROM projects WHERE projects.slug = thoughts.project_identifier
+         )`,
+				)
+				.run();
+
+			db.exec(`
+        ALTER TABLE projects RENAME TO projects_v7;
+        CREATE TABLE projects (
+          slug            TEXT PRIMARY KEY,
+          display_name    TEXT NOT NULL,
+          member_repos    TEXT NOT NULL DEFAULT '[]',
+          member_paths    TEXT NOT NULL DEFAULT '[]',
+          provisional     INTEGER NOT NULL DEFAULT 0,
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL,
+          project_id      TEXT NOT NULL UNIQUE,
+          current_slug    TEXT NOT NULL UNIQUE,
+          identity_state  TEXT NOT NULL CHECK(identity_state IN ('local_only', 'pending', 'active', 'collision'))
+        );
+        INSERT INTO projects (
+          slug, display_name, member_repos, member_paths, provisional,
+          created_at, updated_at, project_id, current_slug, identity_state
+        )
+        SELECT
+          slug, display_name, member_repos, member_paths, provisional,
+          created_at, updated_at, project_id, current_slug, identity_state
+        FROM projects_v7;
+        DROP TABLE projects_v7;
+        CREATE INDEX idx_projects_provisional ON projects(provisional);
+      `);
+
+			console.error(
+				`[INFO] Migration v8 backfilled ${identities.length} projects, ${identities.length} aliases, and ${thoughtBackfill.changes} thoughts`,
+			);
+		},
+	},
 ];
 
 export function getSchemaVersion(db: Database.Database): number {
-  const row = db.pragma("user_version", { simple: true });
-  return typeof row === "number" ? row : 0;
+	const row = db.pragma("user_version", { simple: true });
+	return typeof row === "number" ? row : 0;
 }
 
 export function setSchemaVersion(db: Database.Database, version: number): void {
-  db.pragma(`user_version = ${version}`);
+	db.pragma(`user_version = ${version}`);
 }
 
 export function runMigrations(db: Database.Database): void {
-  const currentVersion = getSchemaVersion(db);
+	const currentVersion = getSchemaVersion(db);
 
-  const pending = migrations
-    .filter((m) => m.version > currentVersion)
-    .sort((a, b) => a.version - b.version);
+	const pending = migrations
+		.filter((m) => m.version > currentVersion)
+		.sort((a, b) => a.version - b.version);
 
-  for (const migration of pending) {
-    console.error(`[INFO] Running migration v${migration.version}: ${migration.description}`);
+	for (const migration of pending) {
+		console.error(
+			`[INFO] Running migration v${migration.version}: ${migration.description}`,
+		);
 
-    const runInTransaction = db.transaction(() => {
-      migration.up(db);
-      setSchemaVersion(db, migration.version);
-    });
+		const runInTransaction = db.transaction(() => {
+			migration.up(db);
+			setSchemaVersion(db, migration.version);
+		});
 
-    runInTransaction();
+		runInTransaction();
 
-    console.error(`[INFO] Migration v${migration.version} complete`);
-  }
+		console.error(`[INFO] Migration v${migration.version} complete`);
+	}
 }
 
 export function getMigrations(): Migration[] {
-  return migrations;
+	return migrations;
 }
