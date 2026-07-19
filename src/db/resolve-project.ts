@@ -6,9 +6,46 @@ import {
 	findProjectByRepo,
 	findProjectByPath,
 	getProjectByAlias,
+	getProjectById,
 	upsertProject,
 	normalizeGitRemote,
 } from "./projects.js";
+import {
+	isCanonicalProjectId,
+	type ProjectReferenceResolution,
+} from "./project-identity.js";
+
+/** Resolve immutable and compatibility project references without mutating the registry. */
+export function resolveProjectReference(
+	db: Database.Database,
+	input: { projectId?: string; projectIdentifier?: string },
+): ProjectReferenceResolution {
+	if (input.projectId !== undefined && !isCanonicalProjectId(input.projectId)) {
+		return { kind: "invalid_project_id" };
+	}
+
+	const byId = input.projectId
+		? getProjectById(db, input.projectId)
+		: undefined;
+	if (input.projectId && !byId) return { kind: "unknown_project_id" };
+
+	const byAlias = input.projectIdentifier
+		? getProjectByAlias(db, input.projectIdentifier)
+		: undefined;
+	if (input.projectIdentifier && !byAlias) return { kind: "unknown_alias" };
+	if (byId && byAlias && byId.projectId !== byAlias.projectId) {
+		return { kind: "conflicting_project_scope" };
+	}
+
+	const project = byId ?? byAlias;
+	return project
+		? {
+				kind: "resolved",
+				projectId: project.projectId,
+				currentSlug: project.currentSlug,
+			}
+		: { kind: "unresolved" };
+}
 
 /** lowercase, spaces/underscores → hyphens, strip other unsafe chars. */
 export function slugify(name: string): string {

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { getProjectBySlug, upsertProject } from "../../src/db/projects.js";
+import { getProjectByAlias, getProjectBySlug, upsertProject } from "../../src/db/projects.js";
 import { resolveProjectScope } from "../../src/db/resolve-project.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 
@@ -35,6 +35,31 @@ describe("capture project scope", () => {
     expect(db.db.prepare("SELECT project_identifier FROM thoughts").get()).toEqual({ project_identifier: "shelby" });
   });
 
+  it("accepts project_id and dual-writes UUID plus current compatibility slug", () => {
+    upsertProject(db.db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
+    const project = getProjectByAlias(db.db, "shelby")!;
+    const result = handleCaptureThought(db, { content: "Scoped", project_id: project.projectId }, { kind: "unresolved" });
+    expect(result.isError).toBeUndefined();
+    expect(db.db.prepare("SELECT project_id, project_identifier FROM thoughts").get()).toEqual({
+      project_id: project.projectId,
+      project_identifier: "shelby",
+    });
+  });
+
+  it("rejects unknown, malformed, and conflicting project IDs without insertion", () => {
+    upsertProject(db.db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
+    upsertProject(db.db, { slug: "other", displayName: "Other", memberRepos: [], memberPaths: [], provisional: false });
+    const projectId = getProjectByAlias(db.db, "shelby")!.projectId;
+    for (const input of [
+      { content: "No", project_id: "bad" },
+      { content: "No", project_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      { content: "No", project_id: projectId, project_identifier: "other" },
+    ]) {
+      expect(error(handleCaptureThought(db, input, { kind: "unresolved" }))).toBe("project_scope_invalid");
+    }
+    expect(count()).toBe(0);
+  });
+
   it("rejects unknown and noncanonical explicit slugs without insertion", () => {
     expect(error(handleCaptureThought(db, { content: "No", project_identifier: "missing" }, { kind: "unresolved" }))).toBe("project_scope_invalid");
     expect(error(handleCaptureThought(db, { content: "No", project_identifier: "Bad Slug" }, { kind: "unresolved" }))).toBe("project_scope_invalid");
@@ -59,7 +84,11 @@ describe("capture project scope", () => {
     const result = handleCaptureThought(db, { content: "Personal" }, scope);
     expect(result.isError).toBeUndefined();
     expect(getProjectBySlug(db.db, "new-project")).toMatchObject({ provisional: true, memberRepos: ["github.com/acme/new-project"] });
-    expect(db.db.prepare("SELECT project_identifier FROM thoughts").get()).toEqual({ project_identifier: "new-project" });
+    const project = getProjectByAlias(db.db, "new-project")!;
+    expect(db.db.prepare("SELECT project_id, project_identifier FROM thoughts").get()).toEqual({
+      project_id: project.projectId,
+      project_identifier: "new-project",
+    });
   });
 
   it("rejects a derived slug collision without inserting or exposing the registered project", () => {
