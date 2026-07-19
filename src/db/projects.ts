@@ -9,11 +9,11 @@ import {
 } from "./project-identity.js";
 
 export interface ProjectSeed {
-	slug: string;
-	displayName: string;
-	memberRepos: string[];
-	memberPaths: string[];
-	provisional: boolean;
+  slug: string;
+  displayName: string;
+  memberRepos: string[];
+  memberPaths: string[];
+  provisional: boolean;
 }
 
 export interface Project extends ProjectSeed {
@@ -23,36 +23,36 @@ export interface Project extends ProjectSeed {
 }
 
 interface RawProjectRow {
-	slug: string;
+  slug: string;
 	project_id: string;
 	current_slug: string;
 	identity_state: ProjectIdentityState;
-	display_name: string;
-	member_repos: string | null;
-	member_paths: string | null;
-	provisional: number;
+  display_name: string;
+  member_repos: string | null;
+  member_paths: string | null;
+  provisional: number;
 }
 
 function parseArray(raw: string | null): string[] {
-	if (!raw) return [];
-	try {
+  if (!raw) return [];
+  try {
 		const value: unknown = JSON.parse(raw);
 		return Array.isArray(value) ? value : [];
-	} catch {
-		return [];
-	}
+  } catch {
+    return [];
+  }
 }
 
 function rowToProject(row: RawProjectRow): Project {
-	return {
-		slug: row.slug,
+  return {
+    slug: row.slug,
 		projectId: row.project_id,
 		currentSlug: row.current_slug,
 		identityState: row.identity_state,
-		displayName: row.display_name,
-		memberRepos: parseArray(row.member_repos),
-		memberPaths: parseArray(row.member_paths),
-		provisional: row.provisional === 1,
+    displayName: row.display_name,
+    memberRepos: parseArray(row.member_repos),
+    memberPaths: parseArray(row.member_paths),
+    provisional: row.provisional === 1,
 	};
 }
 
@@ -65,7 +65,7 @@ function projectParams(input: ProjectSeed, now: string) {
 		provisional: input.provisional ? 1 : 0,
 		created_at: now,
 		updated_at: now,
-	};
+  };
 }
 
 /**
@@ -74,27 +74,27 @@ function projectParams(input: ProjectSeed, now: string) {
  * resolve the same string for the same repo.
  */
 export function normalizeGitRemote(url: string): string {
-	let result = url.trim();
-	if (result.endsWith(".git")) result = result.slice(0, -4);
-	if (result.includes("@") && result.includes(":") && !result.includes("://")) {
-		const afterAt = result.slice(result.indexOf("@") + 1);
-		result = afterAt.replace(":", "/");
-	}
-	if (result.startsWith("https://")) result = result.slice(8);
-	else if (result.startsWith("http://")) result = result.slice(7);
-	return result;
+  let result = url.trim();
+  if (result.endsWith(".git")) result = result.slice(0, -4);
+  if (result.includes("@") && result.includes(":") && !result.includes("://")) {
+    const afterAt = result.slice(result.indexOf("@") + 1);
+    result = afterAt.replace(":", "/");
+  }
+  if (result.startsWith("https://")) result = result.slice(8);
+  else if (result.startsWith("http://")) result = result.slice(7);
+  return result;
 }
 
 /** Compatibility writer for legacy callers. Existing identity columns are immutable. */
 export function upsertProject(db: Database.Database, input: ProjectSeed): void {
-	const now = new Date().toISOString();
+  const now = new Date().toISOString();
 	const params = {
 		...projectParams(input, now),
 		project_id: deriveExistingProjectId(input.slug),
 	};
 
 	db.transaction(() => {
-		db.prepare(
+  db.prepare(
 			`INSERT INTO projects (
          slug, project_id, current_slug, identity_state, display_name,
          member_repos, member_paths, provisional, created_at, updated_at
@@ -103,12 +103,12 @@ export function upsertProject(db: Database.Database, input: ProjectSeed): void {
          @slug, @project_id, @slug, 'local_only', @display_name,
          @member_repos, @member_paths, @provisional, @created_at, @updated_at
        )
-       ON CONFLICT(slug) DO UPDATE SET
-         display_name = excluded.display_name,
-         member_repos = excluded.member_repos,
-         member_paths = excluded.member_paths,
-         provisional  = excluded.provisional,
-         updated_at   = excluded.updated_at`,
+     ON CONFLICT(slug) DO UPDATE SET
+       display_name = excluded.display_name,
+       member_repos = excluded.member_repos,
+       member_paths = excluded.member_paths,
+       provisional  = excluded.provisional,
+       updated_at   = excluded.updated_at`,
 		).run(params);
 
 		db.prepare(
@@ -186,14 +186,14 @@ export function getProjectBySlug(
 	const row = db.prepare("SELECT * FROM projects WHERE slug = ?").get(slug) as
 		| RawProjectRow
 		| undefined;
-	return row ? rowToProject(row) : null;
+  return row ? rowToProject(row) : null;
 }
 
 export function listProjects(db: Database.Database): Project[] {
 	const rows = db
 		.prepare("SELECT * FROM projects ORDER BY slug")
 		.all() as RawProjectRow[];
-	return rows.map(rowToProject);
+  return rows.map(rowToProject);
 }
 
 /**
@@ -204,15 +204,15 @@ export function findProjectByRepo(
 	db: Database.Database,
 	remote: string,
 ): Project | null {
-	const target = normalizeGitRemote(remote);
+  const target = normalizeGitRemote(remote);
 	for (const project of listProjects(db)) {
 		if (
 			project.memberRepos.some((repo) => normalizeGitRemote(repo) === target)
 		) {
 			return project;
 		}
-	}
-	return null;
+  }
+  return null;
 }
 
 /**
@@ -224,8 +224,8 @@ export function findProjectByPath(
 	db: Database.Database,
 	dir: string,
 ): Project | null {
-	const target = existsSync(dir) ? realpathSync.native(dir) : path.resolve(dir);
-	let best: Project | null = null;
+  const target = existsSync(dir) ? realpathSync.native(dir) : path.resolve(dir);
+  let best: Project | null = null;
 	let bestLength = -1;
 	for (const project of listProjects(db)) {
 		for (const memberPath of project.memberPaths) {
@@ -238,8 +238,8 @@ export function findProjectByPath(
 			) {
 				bestLength = candidate.length;
 				best = project;
-			}
-		}
-	}
-	return best;
+      }
+    }
+  }
+  return best;
 }

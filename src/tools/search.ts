@@ -159,7 +159,7 @@ export function handleSearchThoughts(
           project_identifier: meta.project_identifier,
           visibility: meta.visibility,
           rrf_score:
-            (ftsRank ? 1 / (K + ftsRank) : 0) +
+        (ftsRank ? 1 / (K + ftsRank) : 0) +
             (vectorRank ? 1 / (K + vectorRank) : 0),
         };
       })

@@ -107,7 +107,7 @@ describe("handleUpdateThought", () => {
       expect(parseResult(handleUpdateThought(db, { id, ...reference })).updated).toBe(1);
       expect(getThought(db.db, id)).toMatchObject({ project_id: projectId, project_identifier: "current-slug" });
     }
-  });
+    });
 
   it("rejects unknown, conflicting, and arbitrary project references before thought SQL", () => {
     upsertProject(db.db, { slug: "one", displayName: "One", memberRepos: [], memberPaths: [], provisional: false });

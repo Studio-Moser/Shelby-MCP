@@ -12,8 +12,8 @@ import { ensureSeedProjects } from "../../src/db/seed.js";
 
 let db: Database.Database;
 beforeEach(() => {
-	db = new Database(":memory:");
-	runMigrations(db);
+  db = new Database(":memory:");
+  runMigrations(db);
 });
 
 // Neutral, depersonalized fixture seed (stands in for a user-authored
@@ -51,13 +51,13 @@ const TEST_PROJECTS: ProjectSeed[] = [
 ];
 
 describe("ensureSeedProjects", () => {
-	it("seeds nothing when no projects are injected (fresh install, #308)", () => {
-		ensureSeedProjects(db);
-		expect(listProjects(db).length).toBe(0);
-	});
+  it("seeds nothing when no projects are injected (fresh install, #308)", () => {
+    ensureSeedProjects(db);
+    expect(listProjects(db).length).toBe(0);
+  });
 
 	it("seeds missing projects through UUIDv4 local-only creation", () => {
-		ensureSeedProjects(db, TEST_PROJECTS);
+    ensureSeedProjects(db, TEST_PROJECTS);
 		const seeded = getProjectByAlias(db, "shelby");
 		expect(seeded?.memberPaths.length).toBeGreaterThan(0);
 		expect(seeded?.slug).toBe(seeded?.projectId);
@@ -65,8 +65,8 @@ describe("ensureSeedProjects", () => {
 		expect(seeded?.projectId).toMatch(
 			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
 		);
-		expect(listProjects(db).length).toBe(4);
-	});
+    expect(listProjects(db).length).toBe(4);
+  });
 
 	it.each(["tentative", "current"] as const)(
 		"resolves an existing %s alias without overwriting frozen identity",
@@ -106,7 +106,7 @@ describe("ensureSeedProjects", () => {
 		},
 	);
 
-	it("does not clobber a human-confirmed (non-provisional, edited) project", () => {
+  it("does not clobber a human-confirmed (non-provisional, edited) project", () => {
 		upsertProject(db, {
 			slug: "shelby",
 			displayName: "My Shelby",
@@ -114,7 +114,7 @@ describe("ensureSeedProjects", () => {
 			memberPaths: ["/custom"],
 			provisional: false,
 		});
-		ensureSeedProjects(db, TEST_PROJECTS);
+    ensureSeedProjects(db, TEST_PROJECTS);
 		expect(getProjectByAlias(db, "shelby")?.displayName).toBe("My Shelby");
-	});
+  });
 });

@@ -52,5 +52,5 @@ export function ensureSeedProjects(
 			provisional: project.provisional ? 1 : 0,
 			updated_at: new Date().toISOString(),
 		});
-	}
+  }
 }
