@@ -43,6 +43,16 @@ export function bufferToEmbedding(buf: Buffer): number[] {
   return result;
 }
 
+function parseTopics(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export function storeEmbedding(
   db: Database.Database,
   thoughtId: string,
@@ -77,6 +87,7 @@ export function searchByEmbedding(
   queryEmbedding: number[],
   limit?: number,
   threshold?: number,
+  eligibleThoughtIds?: ReadonlySet<string>,
 ): VectorSearchResult[] {
   const effectiveLimit = Math.max(1, Math.min(limit ?? 20, 100));
   const effectiveThreshold = threshold ?? 0.3;
@@ -96,6 +107,7 @@ export function searchByEmbedding(
 
   const scored: VectorSearchResult[] = [];
   for (const row of rows) {
+    if (eligibleThoughtIds && !eligibleThoughtIds.has(row.id)) continue;
     const emb = bufferToEmbedding(row.embedding);
     const sim = cosineSimilarity(queryEmbedding, emb);
     if (sim >= effectiveThreshold) {
@@ -103,7 +115,7 @@ export function searchByEmbedding(
         id: row.id,
         summary: row.summary,
         type: row.type,
-        topics: row.topics ? JSON.parse(row.topics) : [],
+        topics: parseTopics(row.topics),
         created_at: row.created_at,
         similarity: sim,
       });

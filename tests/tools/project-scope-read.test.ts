@@ -123,6 +123,40 @@ describe("authoritative UUID read scope", () => {
     }));
   });
 
+  it("applies UUID scope before vector and hybrid ranking truncation", () => {
+    for (let index = 0; index < 101; index++) {
+      const id = insertThought(db.db, {
+        content: `higher-scoring off-scope ${index}`,
+        summary: `Higher-scoring off-scope ${index}`,
+        project_id: OTHER_ID,
+        project_identifier: "other-project",
+      });
+      storeEmbedding(db.db, id, [1, index / 1000, 0]);
+    }
+    const eligibleId = insertThought(db.db, {
+      content: "eligible vector target",
+      summary: "Eligible vector target",
+      project_id: PROJECT_ID,
+      project_identifier: "current-slug",
+    });
+    storeEmbedding(db.db, eligibleId, [1, 1, 0]);
+
+    for (const args of [
+      { embedding: [1, 0, 0] },
+      { query: "lexically absent", embedding: [1, 0, 0] },
+    ]) {
+      const result = parse(handleSearchThoughts(db, {
+        ...args,
+        project_id: PROJECT_ID,
+        include_shared: false,
+      }));
+      expect(result.results, result.mode).toEqual([
+        expect.objectContaining({ id: eligibleId, project_id: PROJECT_ID }),
+      ]);
+      expect(result.total_count).toBe(1);
+    }
+  });
+
   it("invalid and conflicting references stop every public read before data SQL", () => {
     const handlers = [
       (toolDb: ThoughtDatabase, scope: Record<string, unknown>) => handleListThoughts(toolDb, scope),

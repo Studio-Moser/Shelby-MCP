@@ -45,6 +45,35 @@ function loadSearchMetadata(
   return new Map(rows.map((row) => [row.id, row]));
 }
 
+function eligibleVectorThoughtIds(
+  db: ThoughtDatabase,
+  args: SearchArgs,
+  projectId: string | undefined,
+): ReadonlySet<string> | undefined {
+  const whereClauses = ["embedding IS NOT NULL"];
+  const params: string[] = [];
+  if (args.type) {
+    whereClauses.push("type = ?");
+    params.push(args.type);
+  }
+  if (args.project) {
+    whereClauses.push("project = ?");
+    params.push(args.project);
+  }
+  if (args.shared_only) whereClauses.push("visibility = 'shared'");
+  if (projectId !== undefined) {
+    whereClauses.push(args.include_shared
+      ? "(project_id = ? OR visibility = 'shared')"
+      : "project_id = ?");
+    params.push(projectId);
+  }
+  if (whereClauses.length === 1) return undefined;
+  const rows = db.db.prepare(
+    `SELECT id FROM thoughts WHERE ${whereClauses.join(" AND ")}`,
+  ).all(...params) as Array<{ id: string }>;
+  return new Set(rows.map((row) => row.id));
+}
+
 function matchesFilters(
   item: { id: string; type: string },
   metadata: Map<string, SearchMetadata>,
@@ -84,10 +113,19 @@ export function handleSearchThoughts(
   const limit = clampLimit(a.limit);
   const offset = a.offset ?? 0;
   const graphDepth = Math.min(Math.max(a.graph_depth ?? 0, 0), 5);
+  const eligibleThoughtIds = a.embedding
+    ? eligibleVectorThoughtIds(db, a, projectId)
+    : undefined;
 
   if (a.embedding && !a.query) {
     const poolSize = projectId !== undefined || a.type || a.project || a.shared_only ? 100 : limit;
-    const candidates = searchByEmbedding(db.db, a.embedding, poolSize);
+    const candidates = searchByEmbedding(
+      db.db,
+      a.embedding,
+      poolSize,
+      undefined,
+      eligibleThoughtIds,
+    );
     const metadata = loadSearchMetadata(db, candidates.map((item) => item.id));
     const filtered = candidates
       .filter((item) => matchesFilters(item, metadata, a, projectId))
@@ -135,7 +173,13 @@ export function handleSearchThoughts(
       include_shared: a.include_shared,
       shared_only: a.shared_only,
     });
-    const vectorResult = searchByEmbedding(db.db, a.embedding, poolSize);
+    const vectorResult = searchByEmbedding(
+      db.db,
+      a.embedding,
+      poolSize,
+      undefined,
+      eligibleThoughtIds,
+    );
     const ftsRanks = new Map(ftsResult.results.map((item, index) => [item.id, index + 1]));
     const vectorRanks = new Map(vectorResult.map((item, index) => [item.id, index + 1]));
     const resultById = new Map<string, (typeof ftsResult.results)[number] | (typeof vectorResult)[number]>();
