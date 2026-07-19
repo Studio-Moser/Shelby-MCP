@@ -3,10 +3,10 @@
 // package with no config seeds nothing. These exports remain as EMPTY defaults
 // so callers that don't inject a seed contribute no projects/topics.
 
-import type { Project } from "../db/projects.js";
+import type { ProjectSeed } from "../db/projects.js";
 
 /** Empty by default — real projects load from the per-user seed config. */
-export const DEFAULT_KNOWN_PROJECTS: Project[] = [];
+export const DEFAULT_KNOWN_PROJECTS: ProjectSeed[] = [];
 
 /** Empty by default — real topic clusters load from the per-user seed config. */
 export const DEFAULT_TOPIC_CLUSTERS: Record<string, string> = {};

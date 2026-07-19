@@ -344,11 +344,12 @@ describe("thoughts CRUD", () => {
   });
 });
 
-describe("listThoughts slug scoping", () => {
+describe("listThoughts UUID scoping", () => {
+  const shelbyId = "c51d5ec3-6e12-50d9-bd02-a43e170a71c6";
   function seed(db: Database.Database) {
-    insertThought(db, { content: "a", project_identifier: "shelby" });
-    insertThought(db, { content: "b", project_identifier: "kuow-games" });
-    insertThought(db, { content: "c", project_identifier: "shelby", visibility: "shared" });
+    insertThought(db, { content: "a", project_id: shelbyId, project_identifier: "shelby" });
+    insertThought(db, { content: "b", project_id: "11111111-1111-4111-8111-111111111111", project_identifier: "kuow-games" });
+    insertThought(db, { content: "c", project_id: shelbyId, project_identifier: "shelby", visibility: "shared" });
     insertThought(db, { content: "d", visibility: "shared" });
     insertThought(db, { content: "e" });
   }
@@ -357,7 +358,7 @@ describe("listThoughts slug scoping", () => {
     const db = new BetterSqlite3(":memory:");
     runMigrations(db);
     seed(db);
-    const r = listThoughts(db, { project_identifier: "shelby", include_shared: true });
+    const r = listThoughts(db, { project_id: shelbyId, include_shared: true });
     expect(r.total_count).toBe(3);
     db.close();
   });
@@ -366,7 +367,7 @@ describe("listThoughts slug scoping", () => {
     const db = new BetterSqlite3(":memory:");
     runMigrations(db);
     seed(db);
-    const r = listThoughts(db, { project_identifier: "shelby", include_shared: false });
+    const r = listThoughts(db, { project_id: shelbyId, include_shared: false });
     expect(r.total_count).toBe(2);
     db.close();
   });

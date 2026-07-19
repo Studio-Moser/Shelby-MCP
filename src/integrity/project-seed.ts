@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Project } from "../db/projects.js";
+import type { ProjectSeed as RegistryProjectSeed } from "../db/projects.js";
 
 export interface SeedProject {
   slug: string;
@@ -42,11 +42,14 @@ function isStringArray(v: unknown): v is string[] {
 function parseSeedProject(raw: unknown): SeedProject | null {
   if (typeof raw !== "object" || raw === null) return null;
   const o = raw as Record<string, unknown>;
-  if (typeof o.slug !== "string" || typeof o.displayName !== "string") return null;
+	if (typeof o.slug !== "string" || typeof o.displayName !== "string")
+		return null;
   if (o.memberRepos !== undefined && !isStringArray(o.memberRepos)) return null;
   if (o.memberPaths !== undefined && !isStringArray(o.memberPaths)) return null;
-  if (o.sourceAliases !== undefined && !isStringArray(o.sourceAliases)) return null;
-  if (o.provisional !== undefined && typeof o.provisional !== "boolean") return null;
+	if (o.sourceAliases !== undefined && !isStringArray(o.sourceAliases))
+		return null;
+	if (o.provisional !== undefined && typeof o.provisional !== "boolean")
+		return null;
   return {
     slug: o.slug,
     displayName: o.displayName,
@@ -104,7 +107,7 @@ export function loadProjectSeed(path: string = seedDefaultPath()): ProjectSeed {
 }
 
 /** Registry `Project` records for seeding the `projects` table. */
-export function toProjects(seed: ProjectSeed): Project[] {
+export function toProjects(seed: ProjectSeed): RegistryProjectSeed[] {
   return seed.projects.map((p) => ({
     slug: p.slug,
     displayName: p.displayName,
@@ -118,7 +121,8 @@ export function toProjects(seed: ProjectSeed): Project[] {
 export function sourceAliasMap(seed: ProjectSeed): Record<string, string> {
   const map: Record<string, string> = {};
   for (const p of seed.projects) {
-    for (const alias of p.sourceAliases ?? []) map[alias.toLowerCase()] = p.slug;
+		for (const alias of p.sourceAliases ?? [])
+			map[alias.toLowerCase()] = p.slug;
   }
   return map;
 }

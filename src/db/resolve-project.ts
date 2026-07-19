@@ -2,11 +2,62 @@ import type Database from "better-sqlite3";
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { detectProject } from "./project-detector.js";
-import { findProjectByRepo, findProjectByPath, getProjectBySlug, upsertProject, normalizeGitRemote } from "./projects.js";
+import {
+	createLocalOnlyProject,
+	findProjectByRepo,
+	findProjectByPath,
+	getProjectByAlias,
+	getProjectById,
+	normalizeGitRemote,
+} from "./projects.js";
+import {
+	isCanonicalProjectId,
+	type ProjectReferenceResolution,
+} from "./project-identity.js";
+
+/** Resolve immutable and compatibility project references without mutating the registry. */
+export function resolveProjectReference(
+	db: Database.Database,
+	input: { projectId?: string; projectIdentifier?: string },
+): ProjectReferenceResolution {
+	if (input.projectId !== undefined && !isCanonicalProjectId(input.projectId)) {
+		return { kind: "invalid_project_id" };
+	}
+
+	const byId = input.projectId
+		? getProjectById(db, input.projectId)
+		: undefined;
+	if (input.projectId && !byId) return { kind: "unknown_project_id" };
+
+	const byAlias = input.projectIdentifier
+		? getProjectByAlias(db, input.projectIdentifier)
+		: undefined;
+	if (input.projectIdentifier && !byAlias) return { kind: "unknown_alias" };
+	if (byId && byAlias && byId.projectId !== byAlias.projectId) {
+		return { kind: "conflicting_project_scope" };
+	}
+
+	const project = byId ?? byAlias;
+	return project
+		? {
+				kind: "resolved",
+				projectId: project.projectId,
+				currentSlug: project.currentSlug,
+			}
+		: { kind: "unresolved" };
+}
 
 /** lowercase, spaces/underscores → hyphens, strip other unsafe chars. */
 export function slugify(name: string): string {
-  return name.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "") || "project";
+	return (
+		name
+			.trim()
+			.toLowerCase()
+			.replace(/[\s_]+/g, "-")
+			.replace(/[^a-z0-9-]/g, "")
+			.replace(/-+/g, "-")
+			.replace(/^-|-$/g, "") || "project"
+	);
 }
 
 export type ProjectScopeResolution =
@@ -25,13 +76,22 @@ function canonicalPath(input: string): string {
   return existsSync(input) ? realpathSync.native(input) : path.resolve(input);
 }
 
-type PathResolution = Extract<ProjectScopeResolution, { kind: "resolved" }> | { kind: "slug_collision" };
+type PathResolution =
+	| Extract<ProjectScopeResolution, { kind: "resolved" }>
+	| { kind: "slug_collision" };
 
-function resolvePath(db: Database.Database, input: string): PathResolution | null {
+function resolvePath(
+	db: Database.Database,
+	input: string,
+): PathResolution | null {
   const cwd = canonicalPath(input);
   const byPath = findProjectByPath(db, cwd);
   if (byPath) {
-    return { kind: "resolved", slug: byPath.slug, source: "member_path" };
+		return {
+			kind: "resolved",
+			slug: byPath.currentSlug,
+			source: "member_path",
+		};
   }
 
   const detected = detectProject(cwd);
@@ -42,10 +102,14 @@ function resolvePath(db: Database.Database, input: string): PathResolution | nul
     const normalizedRemote = normalizeGitRemote(detected.remote);
     const byRepo = findProjectByRepo(db, normalizedRemote);
     if (byRepo) {
-      return { kind: "resolved", slug: byRepo.slug, source: "git_remote" };
+			return {
+				kind: "resolved",
+				slug: byRepo.currentSlug,
+				source: "git_remote",
+			};
     }
     const slug = slugify(path.basename(normalizedRemote));
-    if (getProjectBySlug(db, slug)) return { kind: "slug_collision" };
+		if (getProjectByAlias(db, slug)) return { kind: "slug_collision" };
     return {
       kind: "resolved",
       slug,
@@ -56,7 +120,7 @@ function resolvePath(db: Database.Database, input: string): PathResolution | nul
   }
 
   const slug = slugify(path.basename(projectRoot));
-  if (getProjectBySlug(db, slug)) return { kind: "slug_collision" };
+	if (getProjectByAlias(db, slug)) return { kind: "slug_collision" };
   return {
     kind: "resolved",
     slug,
@@ -73,10 +137,11 @@ export function resolveProjectScope(
   explicit?: string,
 ): ProjectScopeResolution {
   if (explicit !== undefined) {
-    if (slugify(explicit) !== explicit || !getProjectBySlug(db, explicit)) {
+		const project = getProjectByAlias(db, explicit);
+		if (slugify(explicit) !== explicit || !project) {
       return { kind: "invalid_explicit", slug: explicit };
     }
-    return { kind: "resolved", slug: explicit, source: "explicit" };
+		return { kind: "resolved", slug: project.currentSlug, source: "explicit" };
   }
 
   const pathResolutions = paths.flatMap((candidate) => {
@@ -87,21 +152,33 @@ export function resolveProjectScope(
     return { kind: "unresolved" };
   }
   const resolutions = pathResolutions.filter(
-    (result): result is Extract<ProjectScopeResolution, { kind: "resolved" }> => result.kind === "resolved",
+		(result): result is Extract<ProjectScopeResolution, { kind: "resolved" }> =>
+			result.kind === "resolved",
   );
   if (resolutions.length === 0) return { kind: "unresolved" };
 
   const slugs = [...new Set(resolutions.map((result) => result.slug))].sort();
   if (slugs.length > 1) return { kind: "ambiguous", slugs };
 
-  const priority = { member_path: 0, git_remote: 1, derived: 2, explicit: 3 } as const;
-  const best = resolutions.sort((a, b) => priority[a.source] - priority[b.source])[0]!;
+	const priority = {
+		member_path: 0,
+		git_remote: 1,
+		derived: 2,
+		explicit: 3,
+	} as const;
+	const best = resolutions.sort(
+		(a, b) => priority[a.source] - priority[b.source],
+	)[0]!;
   if (best.source !== "derived") return best;
 
   return {
     ...best,
-    memberPaths: [...new Set(resolutions.flatMap((result) => result.memberPaths ?? []))],
-    memberRepos: [...new Set(resolutions.flatMap((result) => result.memberRepos ?? []))],
+		memberPaths: [
+			...new Set(resolutions.flatMap((result) => result.memberPaths ?? [])),
+		],
+		memberRepos: [
+			...new Set(resolutions.flatMap((result) => result.memberRepos ?? [])),
+		],
   };
 }
 
@@ -110,8 +187,9 @@ export function upsertProvisionalProject(
   db: Database.Database,
   resolution: Extract<ProjectScopeResolution, { kind: "resolved" }>,
 ): void {
-  if (resolution.source !== "derived" || getProjectBySlug(db, resolution.slug)) return;
-  upsertProject(db, {
+	if (resolution.source !== "derived" || getProjectByAlias(db, resolution.slug))
+		return;
+	createLocalOnlyProject(db, {
     slug: resolution.slug,
     displayName: resolution.slug,
     memberRepos: resolution.memberRepos ?? [],
@@ -121,7 +199,10 @@ export function upsertProvisionalProject(
 }
 
 /** Backward-compatible single-directory write resolution. */
-export function resolveProjectIdentifier(db: Database.Database, cwd: string): string | null {
+export function resolveProjectIdentifier(
+	db: Database.Database,
+	cwd: string,
+): string | null {
   const result = resolveProjectScope(db, [cwd]);
   if (result.kind !== "resolved") return null;
   upsertProvisionalProject(db, result);
@@ -129,7 +210,10 @@ export function resolveProjectIdentifier(db: Database.Database, cwd: string): st
 }
 
 /** Backward-compatible single-directory read resolution. */
-export function currentProjectSlug(db: Database.Database, cwd: string): string | null {
+export function currentProjectSlug(
+	db: Database.Database,
+	cwd: string,
+): string | null {
   const result = resolveProjectScope(db, [cwd]);
   return result.kind === "resolved" ? result.slug : null;
 }

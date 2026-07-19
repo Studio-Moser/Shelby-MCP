@@ -37,6 +37,7 @@ import { storeEmbedding } from "../db/vectors.js";
 
 // Keep in sync with package.json version.
 const VERSION = "0.3.0";
+const projectIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).describe("Immutable canonical project UUID");
 
 // Logging levels in order of severity (syslog-style)
 const LOG_LEVELS: LoggingLevel[] = [
@@ -164,6 +165,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         source_agent: z.string().describe("Originating AI agent identifier (e.g. claude-code, cursor, windsurf)").optional(),
         trust_level: z.enum(["trusted", "unverified", "external"]).describe("Trust level for memory poisoning defense: trusted (default), unverified, or external").optional(),
         project: z.string().describe("Project association").optional(),
+        project_id: z.string().describe("Immutable project UUID").optional(),
         project_identifier: z.string().describe("Project registry slug (auto-resolved from cwd if omitted)").optional(),
         visibility: z.enum(["personal", "shared"]).describe("Visibility: personal (default) or shared across projects").optional(),
         topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("Topic tags").optional(),
@@ -180,6 +182,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
               source_agent: z.string().optional(),
               trust_level: z.enum(["trusted", "unverified", "external"]).optional(),
               project: z.string().optional(),
+              project_id: z.string().optional(),
               project_identifier: z.string().optional(),
               visibility: z.enum(["personal", "shared"]).optional(),
               topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).optional(),
@@ -263,6 +266,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         offset: z.number().describe("Pagination offset").optional(),
         type: z.string().describe("Filter by thought type").optional(),
         project: z.string().describe("Filter by project").optional(),
+        project_id: projectIdSchema.optional(),
         project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
         include_shared: z.boolean().describe("When project_identifier is set, also include shared thoughts (default true when auto-scoped from cwd)").optional(),
         shared_only: z.boolean().describe("Return only thoughts with visibility=shared").optional(),
@@ -294,6 +298,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       inputSchema: {
         type: z.string().describe("Filter by thought type").optional(),
         project: z.string().describe("Filter by project").optional(),
+        project_id: projectIdSchema.optional(),
         project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
         include_shared: z.boolean().describe("When project_identifier is set, also include shared thoughts (default true when auto-scoped from cwd)").optional(),
         shared_only: z.boolean().describe("Return only thoughts with visibility=shared").optional(),
@@ -359,6 +364,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         type: z.string().describe("New type").optional(),
         source: z.string().describe("New source").optional(),
         project: z.string().describe("New project").optional(),
+        project_id: projectIdSchema.optional(),
         project_identifier: z.string().describe("New project registry slug").optional(),
         topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("New topics").optional(),
         people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("New people").optional(),
@@ -487,6 +493,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
           .enum(["essentials", "recent", "full"])
           .describe("What to include. Default: full")
           .optional(),
+        project_id: projectIdSchema.optional(),
         project_identifier: z
           .string()
           .describe("Project slug to scope the brief to (auto-defaulted from cwd when omitted)")
@@ -527,6 +534,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         topics: z.array(z.string()).describe("Topic filters (first topic is applied to the list query)").optional(),
         people: z.array(z.string()).describe("People filters (first person is applied to the list query)").optional(),
         since: z.string().describe("ISO 8601 date — only include thoughts created after this date").optional(),
+        project_id: projectIdSchema.optional(),
         project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
         include_shared: z.boolean().describe("When project_identifier is set, also include shared thoughts (default true when auto-scoped from cwd)").optional(),
         all_projects: z.boolean().describe("Set true to compose context across all projects regardless of cwd (disables auto-scoping)").optional(),

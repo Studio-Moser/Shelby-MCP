@@ -1,5 +1,6 @@
 import type { ThoughtDatabase } from "../db/database.js";
 import { updateThought, getThought } from "../db/thoughts.js";
+import { resolveProjectReference } from "../db/resolve-project.js";
 import {
   toolSuccess,
   toolError,
@@ -20,6 +21,7 @@ interface UpdateArgs {
   type?: string;
   source?: string;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   topics?: string[];
   people?: string[];
@@ -106,6 +108,14 @@ export function handleUpdateThought(
     }
   }
 
+  const hasProjectReference = a.project_id !== undefined || a.project_identifier !== undefined;
+  const projectReference = hasProjectReference
+    ? resolveProjectReference(db.db, { projectId: a.project_id, projectIdentifier: a.project_identifier })
+    : null;
+  if (projectReference && projectReference.kind !== "resolved") {
+    return toolError("project_scope_invalid", projectReference.kind);
+  }
+
   // Build updates object (exclude id/ids)
   const updates: Record<string, unknown> = {};
   if (a.content !== undefined) updates.content = a.content;
@@ -113,7 +123,10 @@ export function handleUpdateThought(
   if (a.type !== undefined) updates.type = a.type;
   if (a.source !== undefined) updates.source = a.source;
   if (a.project !== undefined) updates.project = a.project;
-  if (a.project_identifier !== undefined) updates.project_identifier = a.project_identifier;
+  if (projectReference?.kind === "resolved") {
+    updates.project_id = projectReference.projectId;
+    updates.project_identifier = projectReference.currentSlug;
+  }
   if (a.topics !== undefined) updates.topics = a.topics;
   if (a.people !== undefined) updates.people = a.people;
   if (a.metadata !== undefined) updates.metadata = a.metadata;

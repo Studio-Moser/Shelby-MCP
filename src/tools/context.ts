@@ -3,6 +3,7 @@ import { listThoughts, getThought, type ThoughtSummary } from "../db/thoughts.js
 import { countThoughts } from "../db/thoughts.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
 import { handleGetBrief } from "./brief.js";
+import { resolveReadProjectScope } from "./project-scope.js";
 
 // ---------------------------------------------------------------------------
 // select_context
@@ -26,6 +27,7 @@ export interface SelectContextArgs {
   topics?: string[];
   people?: string[];
   since?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   include_brief?: boolean;
@@ -55,12 +57,16 @@ export function handleSelectContext(
     return toolError("invalid_input", "since must be an ISO 8601 string");
   }
 
+  const projectScope = resolveReadProjectScope(db.db, a);
+  if (projectScope.kind === "error") return projectScope.result;
+
   const limit = clampLimit(a.limit);
-  // When shared_only is set (and no explicit project_identifier), all reads are
+  // When shared_only is set (and no explicit project reference), all reads are
   // restricted to visibility='shared' thoughts — the fail-safe that prevents
   // cross-project contamination when no project slug can be resolved.
   // Mirrors the pattern in brief.ts:59.
-  const sharedOnly = a.shared_only === true && a.project_identifier === undefined;
+  const scopedProjectId = a.all_projects === true ? undefined : projectScope.projectId;
+  const sharedOnly = a.shared_only === true && scopedProjectId === undefined;
   const sections: string[] = [];
 
   // Optional brief header. We reuse get_brief to avoid forking the essentials
@@ -69,7 +75,8 @@ export function handleSelectContext(
   if (a.include_brief === true) {
     const briefResult = handleGetBrief(db, {
       scope: "essentials",
-      project_identifier: a.project_identifier,
+      project_id: scopedProjectId,
+      project_identifier: projectScope.currentSlug,
       include_shared: a.include_shared,
       shared_only: sharedOnly,
       all_projects: a.all_projects,
@@ -96,7 +103,7 @@ export function handleSelectContext(
     topicFilter: a.topics?.[0],
     personFilter: a.people?.[0],
     since: a.since,
-    project_identifier: a.project_identifier,
+    project_id: scopedProjectId,
     include_shared: a.include_shared,
     shared_only: sharedOnly,
     limit,
@@ -122,7 +129,8 @@ export function handleSelectContext(
   const document = sections.join("\n\n");
   return toolSuccess({
     matched_count: thoughts.length,
-    project_identifier: a.project_identifier ?? null,
+    project_id: a.all_projects === true ? null : projectScope.projectId ?? null,
+    project_identifier: a.all_projects === true ? null : projectScope.currentSlug ?? null,
     document,
   });
 }
@@ -140,7 +148,7 @@ interface CollectArgs {
   topicFilter: string | undefined;
   personFilter: string | undefined;
   since: string | undefined;
-  project_identifier: string | undefined;
+  project_id: string | undefined;
   include_shared: boolean | undefined;
   shared_only: boolean;
   limit: number;
@@ -160,7 +168,7 @@ function collectThoughts(
         topic: args.topicFilter,
         person: args.personFilter,
         since: args.since,
-        project_identifier: args.project_identifier,
+        project_id: args.project_id,
         include_shared: args.include_shared ?? true,
         shared_only: args.shared_only,
         limit: args.limit,
@@ -172,7 +180,7 @@ function collectThoughts(
       topic: args.topicFilter,
       person: args.personFilter,
       since: args.since,
-      project_identifier: args.project_identifier,
+      project_id: args.project_id,
       include_shared: args.include_shared ?? true,
       shared_only: args.shared_only,
       limit: args.limit,

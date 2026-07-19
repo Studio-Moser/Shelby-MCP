@@ -90,7 +90,14 @@ describe("loadProjectSeed", () => {
 
   it("rejects the whole file to EMPTY when a member field is mistyped", () => {
     const p = tmpPath();
-    writeFileSync(p, JSON.stringify({ projects: [{ slug: "x", displayName: "X", memberPaths: "not-an-array" }] }));
+		writeFileSync(
+			p,
+			JSON.stringify({
+				projects: [
+					{ slug: "x", displayName: "X", memberPaths: "not-an-array" },
+				],
+			}),
+		);
     try {
       expect(loadProjectSeed(p)).toEqual(EMPTY_SEED);
     } finally {
@@ -100,7 +107,10 @@ describe("loadProjectSeed", () => {
 
   it("defaults optional project fields when omitted", () => {
     const p = tmpPath();
-    writeFileSync(p, JSON.stringify({ projects: [{ slug: "x", displayName: "X" }] }));
+		writeFileSync(
+			p,
+			JSON.stringify({ projects: [{ slug: "x", displayName: "X" }] }),
+		);
     try {
       const projects = toProjects(loadProjectSeed(p));
       expect(projects[0]?.memberRepos).toEqual([]);

@@ -3,11 +3,13 @@ import { loadBriefCandidates } from "../db/brief-candidates.js";
 import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
 import { selectBriefItems, type BriefScope } from "./brief-policy.js";
 import { renderTokenBoundBrief } from "./brief-renderer.js";
+import { resolveReadProjectScope } from "./project-scope.js";
 
 export type { BriefScope } from "./brief-policy.js";
 
 export interface BriefArgs {
   scope?: BriefScope;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
@@ -26,10 +28,13 @@ export function handleGetBrief(
     return toolError("invalid_input", 'scope must be one of: "essentials", "recent", "full"');
   }
 
+  const projectScope = resolveReadProjectScope(db.db, a);
+  if (projectScope.kind === "error") return projectScope.result;
+
   const now = a.now ?? new Date().toISOString();
   const policyInput = {
     scope,
-    project_identifier: a.project_identifier,
+    project_id: a.all_projects === true ? undefined : projectScope.projectId,
     include_shared: a.include_shared ?? true,
     shared_only: a.shared_only,
     all_projects: a.all_projects,
@@ -45,7 +50,8 @@ export function handleGetBrief(
   );
 
   return toolSuccess({
-    project_identifier: a.all_projects === true ? null : a.project_identifier ?? null,
+    project_id: a.all_projects === true ? null : projectScope.projectId ?? null,
+    project_identifier: a.all_projects === true ? null : projectScope.currentSlug ?? null,
     scope,
     thought_count: rendered.items.length,
     last_activity: lastActivity,

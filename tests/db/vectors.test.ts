@@ -148,4 +148,12 @@ describe("searchByEmbedding", () => {
     const t3 = results.find((r) => r.id === "t3");
     expect(t3?.topics).toEqual(["a", "b"]);
   });
+
+  it("treats malformed topics as empty", () => {
+    insertThought(tdb, "bad-topics", "Malformed topics", { topics: "{" });
+    storeEmbedding(tdb.db, "bad-topics", [1, 0, 0]);
+    expect(
+      searchByEmbedding(tdb.db, [1, 0, 0]).find((row) => row.id === "bad-topics")?.topics,
+    ).toEqual([]);
+  });
 });

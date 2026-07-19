@@ -80,7 +80,7 @@ describe("searchThoughts", () => {
     const result = searchThoughts(tdb.db, { query: "CloudKit" });
     expect(result.results[0].summary).toBe("Short summary");
     // No content field exposed
-    expect((result.results[0] as Record<string, unknown>).content).toBeUndefined();
+    expect((result.results[0] as unknown as Record<string, unknown>).content).toBeUndefined();
   });
 
   it("ranks results by relevance", () => {
@@ -190,22 +190,23 @@ describe("searchThoughts", () => {
   });
 });
 
-describe("searchThoughts slug scoping", () => {
+describe("searchThoughts UUID scoping", () => {
+  const shelbyId = "c51d5ec3-6e12-50d9-bd02-a43e170a71c6";
   function seed(db: Database.Database) {
-    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "shelby" });
-    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "kuow-games" });
-    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "shelby", visibility: "shared" });
+    insertThoughtRecord(db, { content: "alpha apple", project_id: shelbyId, project_identifier: "shelby" });
+    insertThoughtRecord(db, { content: "alpha apple", project_id: "11111111-1111-4111-8111-111111111111", project_identifier: "kuow-games" });
+    insertThoughtRecord(db, { content: "alpha apple", project_id: shelbyId, project_identifier: "shelby", visibility: "shared" });
     insertThoughtRecord(db, { content: "alpha apple", visibility: "shared" });
   }
   it("scopes FTS to slug OR shared", () => {
     const db = new Database(":memory:"); runMigrations(db); seed(db);
-    const r = searchThoughts(db, { query: "alpha", project_identifier: "shelby", include_shared: true });
+    const r = searchThoughts(db, { query: "alpha", project_id: shelbyId, include_shared: true });
     expect(r.total_count).toBe(3);
     db.close();
   });
   it("scopes FTS to slug only when include_shared is false", () => {
     const db = new Database(":memory:"); runMigrations(db); seed(db);
-    const r = searchThoughts(db, { query: "alpha", project_identifier: "shelby", include_shared: false });
+    const r = searchThoughts(db, { query: "alpha", project_id: shelbyId, include_shared: false });
     expect(r.total_count).toBe(2);
     db.close();
   });
@@ -213,6 +214,16 @@ describe("searchThoughts slug scoping", () => {
     const db = new Database(":memory:"); runMigrations(db); seed(db);
     const r = searchThoughts(db, { query: "alpha", shared_only: true });
     expect(r.total_count).toBe(2);
+    db.close();
+  });
+
+  it("uses project_id rather than the compatibility slug", () => {
+    const db = new Database(":memory:"); runMigrations(db);
+    const id = insertThoughtRecord(db, { content: "alpha renamed", project_identifier: "retired-slug" });
+    const projectId = "c51d5ec3-6e12-50d9-bd02-a43e170a71c6";
+    db.prepare("UPDATE thoughts SET project_id = ? WHERE id = ?").run(projectId, id);
+    const result = searchThoughts(db, { query: "alpha", project_id: projectId, include_shared: false });
+    expect(result.results).toEqual([expect.objectContaining({ id, project_id: projectId })]);
     db.close();
   });
 });

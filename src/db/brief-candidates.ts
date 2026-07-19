@@ -5,6 +5,7 @@ export const BRIEF_CANDIDATE_LIMIT = 250;
 
 export interface BriefCandidate {
   id: string;
+  project_id: string | null;
   project_identifier: string | null;
   visibility: string;
   trust_level: TrustLevel;
@@ -37,7 +38,7 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
 }
 
 export interface BriefCandidateScope {
-  project_identifier?: string;
+  project_id?: string;
   include_shared?: boolean;
   shared_only?: boolean;
   all_projects?: boolean;
@@ -90,13 +91,13 @@ function scopePriority(scope: BriefCandidateScope): string {
   if (scope.all_projects === true) {
     return `(visibility != 'shared' OR (${ELIGIBLE_SHARED}))`;
   }
-  if (scope.shared_only === true || scope.project_identifier === undefined) {
+  if (scope.shared_only === true || scope.project_id === undefined) {
     return `(${ELIGIBLE_SHARED})`;
   }
   if (scope.include_shared === false) {
-    return `(visibility != 'shared' AND project_identifier = @project_identifier)`;
+    return `(visibility != 'shared' AND project_id = @project_id)`;
   }
-  return `((visibility != 'shared' AND project_identifier = @project_identifier) OR (${ELIGIBLE_SHARED}))`;
+  return `((visibility != 'shared' AND project_id = @project_id) OR (${ELIGIBLE_SHARED}))`;
 }
 
 /** Load bounded candidates with potentially eligible requested-scope rows before diagnostics. */
@@ -108,7 +109,9 @@ export function loadBriefCandidates(
   const requestedScope = scopePriority(scope);
   const rows = db.prepare(`
     SELECT
-      t.id, t.project_identifier, t.visibility, t.trust_level, t.type,
+      t.id, t.project_id,
+      COALESCE((SELECT current_slug FROM projects WHERE projects.project_id = t.project_id), t.project_identifier) AS project_identifier,
+      t.visibility, t.trust_level, t.type,
       t.summary, t.source, t.reinforcement_count, t.consolidated_into,
       t.metadata, t.created_at, t.updated_at,
       EXISTS (
@@ -133,7 +136,7 @@ export function loadBriefCandidates(
   `).all({
     now,
     limit: BRIEF_CANDIDATE_LIMIT,
-    project_identifier: scope.project_identifier ?? null,
+    project_id: scope.project_id ?? null,
   }) as CandidateRow[];
 
   return rows.map((row) => ({

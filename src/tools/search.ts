@@ -3,6 +3,7 @@ import { fetchGraphRelated } from "../db/edges.js";
 import { searchThoughts } from "../db/fts.js";
 import { searchByEmbedding } from "../db/vectors.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
+import { resolveReadProjectScope } from "./project-scope.js";
 
 interface SearchArgs {
   query?: string;
@@ -11,10 +12,83 @@ interface SearchArgs {
   offset?: number;
   type?: string;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
+  all_projects?: boolean;
   graph_depth?: number;
+}
+
+interface SearchMetadata {
+  id: string;
+  project: string | null;
+  project_id: string | null;
+  project_identifier: string | null;
+  visibility: string;
+}
+
+function loadSearchMetadata(
+  db: ThoughtDatabase,
+  ids: string[],
+): Map<string, SearchMetadata> {
+  if (ids.length === 0) return new Map();
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = db.db.prepare(`
+    SELECT t.id, t.project, t.project_id,
+      COALESCE(p.current_slug, t.project_identifier) AS project_identifier,
+      t.visibility
+    FROM thoughts t
+    LEFT JOIN projects p ON p.project_id = t.project_id
+    WHERE t.id IN (${placeholders})
+  `).all(...ids) as SearchMetadata[];
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+function eligibleVectorThoughtIds(
+  db: ThoughtDatabase,
+  args: SearchArgs,
+  projectId: string | undefined,
+): ReadonlySet<string> | undefined {
+  const whereClauses = ["embedding IS NOT NULL"];
+  const params: string[] = [];
+  if (args.type) {
+    whereClauses.push("type = ?");
+    params.push(args.type);
+  }
+  if (args.project) {
+    whereClauses.push("project = ?");
+    params.push(args.project);
+  }
+  if (args.shared_only) whereClauses.push("visibility = 'shared'");
+  if (projectId !== undefined) {
+    whereClauses.push(args.include_shared
+      ? "(project_id = ? OR visibility = 'shared')"
+      : "project_id = ?");
+    params.push(projectId);
+  }
+  if (whereClauses.length === 1) return undefined;
+  const rows = db.db.prepare(
+    `SELECT id FROM thoughts WHERE ${whereClauses.join(" AND ")}`,
+  ).all(...params) as Array<{ id: string }>;
+  return new Set(rows.map((row) => row.id));
+}
+
+function matchesFilters(
+  item: { id: string; type: string },
+  metadata: Map<string, SearchMetadata>,
+  args: SearchArgs,
+  projectId: string | undefined,
+): boolean {
+  if (args.type && item.type !== args.type) return false;
+  const meta = metadata.get(item.id);
+  if (!meta) return false;
+  if (args.project && meta.project !== args.project) return false;
+  if (args.shared_only && meta.visibility !== "shared") return false;
+  if (projectId !== undefined && meta.project_id !== projectId) {
+    if (!(args.include_shared && meta.visibility === "shared")) return false;
+  }
+  return true;
 }
 
 export function handleSearchThoughts(
@@ -29,29 +103,45 @@ export function handleSearchThoughts(
       "Either query (for full-text search) or embedding (for vector search) is required.",
     );
   }
+  if (a.embedding && (!Array.isArray(a.embedding) || a.embedding.length === 0)) {
+    return toolError("invalid_input", "embedding must be a non-empty number array");
+  }
 
+  const scope = resolveReadProjectScope(db.db, a);
+  if (scope.kind === "error") return scope.result;
+  const projectId = a.all_projects === true ? undefined : scope.projectId;
   const limit = clampLimit(a.limit);
   const offset = a.offset ?? 0;
   const graphDepth = Math.min(Math.max(a.graph_depth ?? 0, 0), 5);
+  const eligibleThoughtIds = a.embedding
+    ? eligibleVectorThoughtIds(db, a, projectId)
+    : undefined;
 
-  // Vector-only search
   if (a.embedding && !a.query) {
-    if (!Array.isArray(a.embedding) || a.embedding.length === 0) {
-      return toolError("invalid_input", "embedding must be a non-empty number array");
-    }
-    const results = searchByEmbedding(db.db, a.embedding, limit);
+    const poolSize = projectId !== undefined || a.type || a.project || a.shared_only ? 100 : limit;
+    const candidates = searchByEmbedding(
+      db.db,
+      a.embedding,
+      poolSize,
+      undefined,
+      eligibleThoughtIds,
+    );
+    const metadata = loadSearchMetadata(db, candidates.map((item) => item.id));
+    const filtered = candidates
+      .filter((item) => matchesFilters(item, metadata, a, projectId))
+      .map((item) => ({ ...item, ...metadata.get(item.id)! }));
+    const results = filtered.slice(0, limit);
     const graph_related = fetchGraphRelated(db, results.map((r) => r.id), graphDepth);
     return toolSuccess({
       mode: "vector",
       results,
-      total_count: results.length,
-      has_more: false,
+      total_count: filtered.length,
+      has_more: filtered.length > results.length,
       offset: 0,
       ...(graphDepth > 0 ? { graph_related } : {}),
     });
   }
 
-  // FTS search
   if (a.query && !a.embedding) {
     const ftsResult = searchThoughts(db.db, {
       query: a.query,
@@ -59,7 +149,7 @@ export function handleSearchThoughts(
       offset,
       type: a.type,
       project: a.project,
-      project_identifier: a.project_identifier,
+      project_id: projectId,
       include_shared: a.include_shared,
       shared_only: a.shared_only,
     });
@@ -71,113 +161,57 @@ export function handleSearchThoughts(
     });
   }
 
-  // Hybrid: RRF (Reciprocal Rank Fusion) — run FTS and vector independently, fuse by rank
   if (a.query && a.embedding) {
-    if (!Array.isArray(a.embedding) || a.embedding.length === 0) {
-      return toolError("invalid_input", "embedding must be a non-empty number array");
-    }
-
     const poolSize = Math.min(limit * 3, 100);
-
     const ftsResult = searchThoughts(db.db, {
       query: a.query,
       limit: poolSize,
       offset: 0,
       type: a.type,
       project: a.project,
-      project_identifier: a.project_identifier,
+      project_id: projectId,
       include_shared: a.include_shared,
       shared_only: a.shared_only,
     });
-
-    const vectorResult = searchByEmbedding(db.db, a.embedding, poolSize);
-
-    const ftsRanks = new Map<string, number>();
-    ftsResult.results.forEach((r, i) => ftsRanks.set(r.id, i + 1));
-
-    const vectorRanks = new Map<string, number>();
-    vectorResult.forEach((r, i) => vectorRanks.set(r.id, i + 1));
-
-    const metadataMap = new Map<string, { summary: string | null; type: string; topics: string[]; created_at: string; project: string | null; project_identifier: string | null; visibility: string }>();
-    for (const r of ftsResult.results) {
-      // FTS results are already filtered by project/project_identifier (if specified),
-      // so those fields are not returned in SearchResult — mark as null/personal;
-      // they will be overwritten by the DB lookup below if needed.
-      metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null, project_identifier: null, visibility: "personal" });
-    }
-    for (const r of vectorResult) {
-      if (!metadataMap.has(r.id)) {
-        metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null, project_identifier: null, visibility: "personal" });
-      }
-    }
-
-    // If project/project_identifier/shared filter is in play, fetch those fields
-    // for all candidates from the DB. This is required because vector results
-    // are not pre-filtered by project scope.
-    if (a.project || a.project_identifier !== undefined || a.shared_only) {
-      const allIds = Array.from(metadataMap.keys());
-      if (allIds.length > 0) {
-        const placeholders = allIds.map(() => "?").join(", ");
-        const rows = db.db
-          .prepare(`SELECT id, project, project_identifier, visibility FROM thoughts WHERE id IN (${placeholders})`)
-          .all(...allIds) as Array<{ id: string; project: string | null; project_identifier: string | null; visibility: string }>;
-        for (const row of rows) {
-          const existing = metadataMap.get(row.id);
-          if (existing) {
-            existing.project = row.project;
-            existing.project_identifier = row.project_identifier;
-            existing.visibility = row.visibility;
-          }
-        }
-      }
-    }
-
+    const vectorResult = searchByEmbedding(
+      db.db,
+      a.embedding,
+      poolSize,
+      undefined,
+      eligibleThoughtIds,
+    );
+    const ftsRanks = new Map(ftsResult.results.map((item, index) => [item.id, index + 1]));
+    const vectorRanks = new Map(vectorResult.map((item, index) => [item.id, index + 1]));
+    const resultById = new Map<string, (typeof ftsResult.results)[number] | (typeof vectorResult)[number]>();
+    for (const item of ftsResult.results) resultById.set(item.id, item);
+    for (const item of vectorResult) if (!resultById.has(item.id)) resultById.set(item.id, item);
+    const metadata = loadSearchMetadata(db, [...resultById.keys()]);
     const K = 60;
-    const scored: Array<{ id: string; summary: string | null; type: string; topics: string[]; created_at: string; rrf_score: number }> = [];
-
-    for (const [id, meta] of metadataMap) {
-      const ftsRank = ftsRanks.get(id);
-      const vecRank = vectorRanks.get(id);
-      const rrf_score =
+    const scored = [...resultById.values()]
+      .filter((item) => matchesFilters(item, metadata, a, projectId))
+      .map((item) => {
+        const ftsRank = ftsRanks.get(item.id);
+        const vectorRank = vectorRanks.get(item.id);
+        const meta = metadata.get(item.id)!;
+        return {
+          id: item.id,
+          summary: item.summary,
+          type: item.type,
+          topics: item.topics,
+          created_at: item.created_at,
+          project_id: meta.project_id,
+          project_identifier: meta.project_identifier,
+          visibility: meta.visibility,
+          rrf_score:
         (ftsRank ? 1 / (K + ftsRank) : 0) +
-        (vecRank ? 1 / (K + vecRank) : 0);
-      const { project: _project, ...rest } = meta;
-      scored.push({ id, ...rest, rrf_score });
-    }
+            (vectorRank ? 1 / (K + vectorRank) : 0),
+        };
+      })
+      .sort((left, right) => right.rrf_score - left.rrf_score);
 
-    scored.sort((a, b) => b.rrf_score - a.rrf_score);
-
-    // Post-fusion filter: enforce type and project constraints that were applied
-    // to the FTS pool but bypassed by the vector pool.
-    // Mirrors the canonical project-scope semantics in src/db/thoughts.ts listThoughts — keep in sync.
-    let filtered = scored as Array<{ id: string; summary: string | null; type: string; topics: string[]; created_at: string; rrf_score: number }>;
-    if (a.type || a.project || a.project_identifier !== undefined || a.shared_only) {
-      // Rebuild a project lookup from the metadata map for filtering.
-      filtered = scored.filter((item) => {
-        if (a.type && item.type !== a.type) return false;
-        if (a.project) {
-          const meta = metadataMap.get(item.id);
-          if (!meta || meta.project !== a.project) return false;
-        }
-        if (a.shared_only) {
-          const meta = metadataMap.get(item.id);
-          if (!meta || meta.visibility !== "shared") return false;
-        }
-        if (a.project_identifier !== undefined) {
-          const meta = metadataMap.get(item.id);
-          if (!meta) return false;
-          if (meta.project_identifier !== a.project_identifier) {
-            if (!(a.include_shared && meta.visibility === "shared")) return false;
-          }
-        }
-        return true;
-      });
-    }
-
-    const total_count = filtered.length;
-    const sliced = filtered.slice(offset, offset + limit);
+    const total_count = scored.length;
+    const sliced = scored.slice(offset, offset + limit);
     const graph_related = fetchGraphRelated(db, sliced.map((r) => r.id), graphDepth);
-
     return toolSuccess({
       mode: "hybrid",
       results: sliced,

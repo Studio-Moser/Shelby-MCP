@@ -28,13 +28,15 @@ describe("ThoughtDatabase", () => {
 
   it("runs migrations to latest version", () => {
     db = new ThoughtDatabase(":memory:");
-    expect(db.getSchemaVersion()).toBe(7);
+		expect(db.getSchemaVersion()).toBe(8);
   });
 
   it("creates thoughts table", () => {
     db = new ThoughtDatabase(":memory:");
     const tables = db.db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='thoughts'")
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name='thoughts'",
+			)
       .all();
     expect(tables).toHaveLength(1);
   });
@@ -42,7 +44,9 @@ describe("ThoughtDatabase", () => {
   it("creates edges table", () => {
     db = new ThoughtDatabase(":memory:");
     const tables = db.db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='edges'")
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name='edges'",
+			)
       .all();
     expect(tables).toHaveLength(1);
   });
@@ -50,7 +54,9 @@ describe("ThoughtDatabase", () => {
   it("creates FTS5 virtual table", () => {
     db = new ThoughtDatabase(":memory:");
     const tables = db.db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='thoughts_fts'")
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name='thoughts_fts'",
+			)
       .all();
     expect(tables).toHaveLength(1);
   });
@@ -59,13 +65,15 @@ describe("ThoughtDatabase", () => {
     db = new ThoughtDatabase(":memory:");
     // Simulate re-running migrations on same version
     const version = db.getSchemaVersion();
-    expect(version).toBe(7);
+		expect(version).toBe(8);
   });
 
   it("creates oauth_clients table after migration", () => {
     db = new ThoughtDatabase(":memory:");
     const tables = db.db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_clients'`)
+			.prepare(
+				`SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_clients'`,
+			)
       .all() as { name: string }[];
     expect(tables).toHaveLength(1);
   });

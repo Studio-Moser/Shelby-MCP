@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { deriveExistingProjectId } from "./project-identity.js";
 
 export interface Migration {
   version: number;
@@ -128,7 +129,8 @@ const migrations: Migration[] = [
   },
   {
     version: 6,
-    description: "Project identity — project_identifier column + projects registry",
+		description:
+			"Project identity — project_identifier column + projects registry",
     up: (db) => {
       db.exec(`
         ALTER TABLE thoughts ADD COLUMN project_identifier TEXT;
@@ -149,7 +151,8 @@ const migrations: Migration[] = [
   },
   {
     version: 7,
-    description: "Normalize legacy display-name project_identifiers to registry slugs",
+		description:
+			"Normalize legacy display-name project_identifiers to registry slugs",
     up: (db) => {
       const map: Array<[string, string]> = [
         ["Shelby", "shelby"],
@@ -157,10 +160,106 @@ const migrations: Migration[] = [
         ["KUOW Games", "kuow-games"],
         ["Ausra Photos", "ausra-photos"],
       ];
-      const upd = db.prepare("UPDATE thoughts SET project_identifier = ? WHERE project_identifier = ?");
+			const upd = db.prepare(
+				"UPDATE thoughts SET project_identifier = ? WHERE project_identifier = ?",
+			);
       for (const [from, to] of map) upd.run(to, from);
       // Empty-string scope is meaningless — treat as orphan (NULL), repaired later.
-      db.prepare("UPDATE thoughts SET project_identifier = NULL WHERE project_identifier = ''").run();
+			db.prepare(
+				"UPDATE thoughts SET project_identifier = NULL WHERE project_identifier = ''",
+			).run();
+		},
+	},
+	{
+		version: 8,
+		description: "Canonical project identity and slug aliases",
+		up: (db) => {
+			const projects = db
+				.prepare("SELECT slug FROM projects ORDER BY slug")
+				.all() as Array<{
+				slug: string;
+			}>;
+			const identities = projects.map(({ slug }) => ({
+				slug,
+				projectId: deriveExistingProjectId(slug),
+			}));
+
+			db.exec(`
+        ALTER TABLE projects ADD COLUMN project_id TEXT;
+        ALTER TABLE projects ADD COLUMN current_slug TEXT;
+        ALTER TABLE projects ADD COLUMN identity_state TEXT;
+        ALTER TABLE thoughts ADD COLUMN project_id TEXT;
+
+        CREATE TABLE project_slug_aliases (
+          slug        TEXT PRIMARY KEY,
+          project_id  TEXT NOT NULL,
+          status      TEXT NOT NULL CHECK(status IN ('tentative', 'current', 'retired')),
+          claimed_at  TEXT NOT NULL,
+          retired_at  TEXT,
+          UNIQUE(project_id, slug)
+        );
+        CREATE UNIQUE INDEX one_current_slug_per_project
+          ON project_slug_aliases(project_id) WHERE status = 'current';
+        CREATE INDEX idx_thoughts_project_id ON thoughts(project_id);
+      `);
+
+			const updateProject = db.prepare(
+				`UPDATE projects
+         SET project_id = ?, current_slug = slug, identity_state = 'local_only'
+         WHERE slug = ?`,
+			);
+			const insertAlias = db.prepare(
+				`INSERT INTO project_slug_aliases (slug, project_id, status, claimed_at)
+         SELECT slug, ?, 'tentative', created_at FROM projects WHERE slug = ?`,
+			);
+			for (const { slug, projectId } of identities) {
+				updateProject.run(projectId, slug);
+				insertAlias.run(projectId, slug);
+			}
+
+			const thoughtBackfill = db
+				.prepare(
+					`UPDATE thoughts
+         SET project_id = (
+           SELECT projects.project_id
+           FROM projects
+           WHERE projects.slug = thoughts.project_identifier
+         )
+         WHERE EXISTS (
+           SELECT 1 FROM projects WHERE projects.slug = thoughts.project_identifier
+         )`,
+				)
+				.run();
+
+			db.exec(`
+        ALTER TABLE projects RENAME TO projects_v7;
+        CREATE TABLE projects (
+          slug            TEXT PRIMARY KEY,
+          display_name    TEXT NOT NULL,
+          member_repos    TEXT NOT NULL DEFAULT '[]',
+          member_paths    TEXT NOT NULL DEFAULT '[]',
+          provisional     INTEGER NOT NULL DEFAULT 0,
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL,
+          project_id      TEXT NOT NULL UNIQUE,
+          current_slug    TEXT NOT NULL UNIQUE,
+          identity_state  TEXT NOT NULL CHECK(identity_state IN ('local_only', 'pending', 'active', 'collision'))
+        );
+        INSERT INTO projects (
+          slug, display_name, member_repos, member_paths, provisional,
+          created_at, updated_at, project_id, current_slug, identity_state
+        )
+        SELECT
+          slug, display_name, member_repos, member_paths, provisional,
+          created_at, updated_at, project_id, current_slug, identity_state
+        FROM projects_v7;
+        DROP TABLE projects_v7;
+        CREATE INDEX idx_projects_provisional ON projects(provisional);
+      `);
+
+			console.error(
+				`[INFO] Migration v8 backfilled ${identities.length} projects, ${identities.length} aliases, and ${thoughtBackfill.changes} thoughts`,
+			);
     },
   },
 ];
@@ -182,7 +281,9 @@ export function runMigrations(db: Database.Database): void {
     .sort((a, b) => a.version - b.version);
 
   for (const migration of pending) {
-    console.error(`[INFO] Running migration v${migration.version}: ${migration.description}`);
+		console.error(
+			`[INFO] Running migration v${migration.version}: ${migration.description}`,
+		);
 
     const runInTransaction = db.transaction(() => {
       migration.up(db);

@@ -1,0 +1,319 @@
+{
+  "fixture_version": 1,
+  "identity_contract_version": 2,
+  "uuid_v5": {
+    "namespace": "cbe30437-5f4b-55bd-af13-8a1029beeffe",
+    "name_prefix": "shelby-project-v1:",
+    "vectors": [
+      {
+        "legacy_slug": "shelby",
+        "project_id": "4abbc729-70e8-5120-9cfc-bd34739c024e"
+      },
+      {
+        "legacy_slug": "shelby-macos",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6"
+      },
+      {
+        "legacy_slug": "shelby-mcp",
+        "project_id": "bcad038c-9fb2-5f94-b57c-e7f49618b0bb"
+      },
+      {
+        "legacy_slug": "infrastructure-admin",
+        "project_id": "8f56fa11-6b20-512d-8523-89e8458fbe9d"
+      }
+    ]
+  },
+  "uuid_validation": {
+    "cases": [
+      {
+        "value": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "expected": true
+      },
+      {
+        "value": "11111111-1111-4111-8111-111111111111",
+        "expected": true
+      },
+      {
+        "value": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "expected": true
+      },
+      {
+        "value": "C51D5EC3-6E12-50D9-BD02-A43E170A71C6",
+        "expected": false
+      },
+      {
+        "value": "c51d5ec36e1250d9bd02a43e170a71c6",
+        "expected": false
+      },
+      {
+        "value": "bad",
+        "expected": false
+      },
+      {
+        "value": " c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "expected": false
+      }
+    ]
+  },
+  "slug_rules": {
+    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    "min_utf8_bytes": 1,
+    "max_utf8_bytes": 128,
+    "validation_cases": [
+      {
+        "value": "a",
+        "expected": true
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected": true
+      },
+      {
+        "value": "",
+        "expected": false
+      },
+      {
+        "value": "Shelby",
+        "expected": false
+      },
+      {
+        "value": "shelby macos",
+        "expected": false
+      },
+      {
+        "value": "shelby_macos",
+        "expected": false
+      },
+      {
+        "value": "café",
+        "expected": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected": false
+      }
+    ]
+  },
+  "claim_record_names": {
+    "prefix": "psc-",
+    "hash": "sha256",
+    "encoding": "utf8",
+    "vectors": [
+      {
+        "slug": "shelby",
+        "record_name": "psc-379224b71a3cf4a8298f97090802a32132b92440b1f229d34d82ac2f66a6e80b"
+      },
+      {
+        "slug": "shelby-macos",
+        "record_name": "psc-4f50c45d05d6043fe70c04d44994e50f917251fe78c2653effb791f28a6bf693"
+      },
+      {
+        "slug": "a",
+        "record_name": "psc-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+      }
+    ]
+  },
+  "registry": {
+    "projects": [
+      {
+        "slug": "shelby-macos",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug",
+        "identity_state": "active",
+        "display_name": "Current Project",
+        "member_repos": [
+          "github.com/example/current-project"
+        ],
+        "member_paths": [
+          "/fixture/current-project"
+        ],
+        "provisional": false,
+        "created_at": "2026-07-18T00:00:00Z",
+        "updated_at": "2026-07-18T00:00:00Z"
+      },
+      {
+        "slug": "11111111-1111-4111-8111-111111111111",
+        "project_id": "11111111-1111-4111-8111-111111111111",
+        "current_slug": "other-project",
+        "identity_state": "local_only",
+        "display_name": "Other Project",
+        "member_repos": [],
+        "member_paths": [],
+        "provisional": true,
+        "created_at": "2026-07-18T00:00:00Z",
+        "updated_at": "2026-07-18T00:00:00Z"
+      }
+    ],
+    "aliases": [
+      {
+        "slug": "current-slug",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "status": "current",
+        "claimed_at": "2026-07-18T00:00:00Z",
+        "retired_at": null
+      },
+      {
+        "slug": "retired-slug",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "status": "retired",
+        "claimed_at": "2026-07-17T00:00:00Z",
+        "retired_at": "2026-07-18T00:00:00Z"
+      },
+      {
+        "slug": "other-project",
+        "project_id": "11111111-1111-4111-8111-111111111111",
+        "status": "tentative",
+        "claimed_at": "2026-07-18T00:00:00Z",
+        "retired_at": null
+      }
+    ]
+  },
+  "resolution_context_enum": [
+    "owning_local_database",
+    "other_local_database",
+    "global_claims_only"
+  ],
+  "resolution_cases": [
+    {
+      "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+      "project_identifier": null,
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug"
+      }
+    },
+    {
+      "project_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "project_identifier": null,
+      "context": "owning_local_database",
+      "expected": {
+        "kind": "unknown_project_id"
+      }
+    },
+    {
+      "project_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "project_identifier": null,
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "unknown_project_id"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": "current-slug",
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": "retired-slug",
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": "other-project",
+      "context": "owning_local_database",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "11111111-1111-4111-8111-111111111111",
+        "current_slug": "other-project"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": "other-project",
+      "context": "other_local_database",
+      "expected": {
+        "kind": "unknown_alias"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": "other-project",
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "unknown_alias"
+      }
+    },
+    {
+      "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+      "project_identifier": "retired-slug",
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug"
+      }
+    },
+    {
+      "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+      "project_identifier": "other-project",
+      "context": "owning_local_database",
+      "expected": {
+        "kind": "conflicting_project_scope"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": "missing",
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "unknown_alias"
+      }
+    },
+    {
+      "project_id": "bad",
+      "project_identifier": null,
+      "context": "global_claims_only",
+      "expected": {
+        "kind": "invalid_project_id"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": null,
+      "working_directory": "/fixture/current-project/repository",
+      "git_remote": null,
+      "context": "owning_local_database",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": null,
+      "working_directory": null,
+      "git_remote": "https://github.com/example/current-project.git",
+      "context": "owning_local_database",
+      "expected": {
+        "kind": "resolved",
+        "project_id": "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
+        "current_slug": "current-slug"
+      }
+    },
+    {
+      "project_id": null,
+      "project_identifier": null,
+      "working_directory": null,
+      "git_remote": null,
+      "context": "owning_local_database",
+      "expected": {
+        "kind": "unresolved",
+        "read_scope": "shared_only"
+      }
+    }
+  ]
+}

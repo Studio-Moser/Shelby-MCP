@@ -1,6 +1,12 @@
 import type Database from "better-sqlite3";
 import { getThought, updateThought } from "../db/thoughts.js";
-import { upsertProject, getProjectBySlug, listProjects, type Project } from "../db/projects.js";
+import {
+	getProjectByAlias,
+	listProjects,
+	type Project,
+	type ProjectSeed,
+} from "../db/projects.js";
+import { ensureSeedProjects } from "../db/seed.js";
 import { DEFAULT_KNOWN_PROJECTS, DEFAULT_TOPIC_CLUSTERS } from "./seed-data.js";
 
 const REPAIRED_BY = "integrity-project-v1";
@@ -19,34 +25,30 @@ export interface RepairReport {
   applied: number;
 }
 
-export function seedKnownProjects(db: Database.Database, projects: Project[] = DEFAULT_KNOWN_PROJECTS): void {
-  for (const p of projects) {
-    const existing = getProjectBySlug(db, p.slug);
-    // Don't clobber a human-confirmed project that's been edited; only seed if
-    // missing or still provisional.
-    if (
-      existing &&
-      existing.provisional === false &&
-      (existing.memberRepos.length > 0 || existing.memberPaths.length > 0)
-    ) {
-      continue;
-    }
-    upsertProject(db, p);
-  }
+export function seedKnownProjects(
+	db: Database.Database,
+	projects: ProjectSeed[] = DEFAULT_KNOWN_PROJECTS,
+): void {
+	ensureSeedProjects(db, projects);
 }
 
-
-function inferByPath(project: string | null, projects: Project[]): string | null {
+function inferByPath(
+	project: string | null,
+	projects: Project[],
+): string | null {
   if (!project) return null;
   for (const p of projects) {
     for (const mp of p.memberPaths) {
-      if (project === mp || project.startsWith(mp + "/")) return p.slug;
+			if (project === mp || project.startsWith(mp + "/")) return p.currentSlug;
     }
   }
   return null;
 }
 
-function inferByTopics(topics: string[], topicClusters: Record<string, string>): { slug: string | null; ambiguous: boolean } {
+function inferByTopics(
+	topics: string[],
+	topicClusters: Record<string, string>,
+): { slug: string | null; ambiguous: boolean } {
   const hits = new Set<string>();
   for (const t of topics) {
     const slug = topicClusters[t.toLowerCase()];
@@ -68,12 +70,17 @@ function inferByTopics(topics: string[], topicClusters: Record<string, string>):
  * source-based assignment. Match order is deterministic: longest alias first
  * (more specific wins), then lexicographic.
  */
-function inferBySource(source: string | null, aliases: Record<string, string>): string | null {
+function inferBySource(
+	source: string | null,
+	aliases: Record<string, string>,
+): string | null {
   if (!source) return null;
   const keys = Object.keys(aliases);
   if (keys.length === 0) return null;
   const s = source.toLowerCase();
-  keys.sort((a, b) => (a.length !== b.length ? b.length - a.length : a < b ? -1 : 1));
+	keys.sort((a, b) =>
+		a.length !== b.length ? b.length - a.length : a < b ? -1 : 1,
+	);
   for (const alias of keys) {
     if (s.includes(alias)) return aliases[alias] ?? null;
   }
@@ -81,7 +88,12 @@ function inferBySource(source: string | null, aliases: Record<string, string>): 
 }
 
 function classify(
-  t: { id: string; project: string | null; topics: string[]; source: string | null },
+	t: {
+		id: string;
+		project: string | null;
+		topics: string[];
+		source: string | null;
+	},
   projects: Project[],
   topicClusters: Record<string, string>,
   sourceAliases: Record<string, string>,
@@ -117,7 +129,9 @@ function classify(
     id: t.id,
     suggestedSlug: null,
     confidence: "low",
-    reason: byTopic.ambiguous ? "topics map to multiple projects" : "no distinctive signal",
+		reason: byTopic.ambiguous
+			? "topics map to multiple projects"
+			: "no distinctive signal",
   };
 }
 
@@ -137,9 +151,15 @@ interface RepairCandidate {
 function repairCandidates(db: Database.Database): RepairCandidate[] {
   const rows = db
     .prepare(
-      "SELECT id, project, project_identifier, topics, source FROM thoughts WHERE project_identifier IS NULL OR project_identifier = ''",
+      "SELECT id, project, project_identifier, topics, source FROM thoughts WHERE project_id IS NULL AND (project_identifier IS NULL OR project_identifier = '')",
     )
-    .all() as Array<{ id: string; project: string | null; project_identifier: string | null; topics: string | null; source: string | null }>;
+		.all() as Array<{
+		id: string;
+		project: string | null;
+		project_identifier: string | null;
+		topics: string | null;
+		source: string | null;
+	}>;
   return rows.map((r) => ({
     id: r.id,
     project: r.project,
@@ -181,7 +201,7 @@ export function repairProjects(
   db: Database.Database,
   opts: {
     apply: boolean;
-    projects?: Project[];
+		projects?: ProjectSeed[];
     topicClusters?: Record<string, string>;
     sourceAliases?: Record<string, string>;
   },
@@ -198,7 +218,10 @@ export function repairProjects(
   let applied = 0;
   for (const item of report.highConfidence) {
     const t = getThought(db, item.id);
-    if (!t) continue;
+		const project = item.suggestedSlug
+			? getProjectByAlias(db, item.suggestedSlug)
+			: null;
+		if (!t || !project) continue;
     // Spread existing metadata first so prior keys survive; updateThought replaces
     // the entire metadata column, so we must carry them forward manually.
     const meta: Record<string, unknown> = {
@@ -207,10 +230,16 @@ export function repairProjects(
       repaired_reason: item.reason,
       repaired_from: t.project_identifier === null ? "null" : "empty",
     };
+		db.transaction(() => {
     updateThought(db, item.id, {
       project_identifier: item.suggestedSlug ?? undefined,
       metadata: meta,
     });
+			db.prepare("UPDATE thoughts SET project_id = ? WHERE id = ?").run(
+				project.projectId,
+				item.id,
+			);
+		})();
     applied++;
   }
   for (const item of report.flagged) {
