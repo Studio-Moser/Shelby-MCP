@@ -3,11 +3,11 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { detectProject } from "./project-detector.js";
 import {
+	createLocalOnlyProject,
 	findProjectByRepo,
 	findProjectByPath,
 	getProjectByAlias,
 	getProjectById,
-	upsertProject,
 	normalizeGitRemote,
 } from "./projects.js";
 import {
@@ -189,7 +189,7 @@ export function upsertProvisionalProject(
 ): void {
 	if (resolution.source !== "derived" || getProjectByAlias(db, resolution.slug))
 		return;
-	upsertProject(db, {
+	createLocalOnlyProject(db, {
 		slug: resolution.slug,
 		displayName: resolution.slug,
 		memberRepos: resolution.memberRepos ?? [],

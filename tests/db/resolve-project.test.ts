@@ -9,6 +9,7 @@ import { applyDefaultScope } from "../../src/mcp/scope-defaults.js";
 import {
 	createLocalOnlyProject,
 	upsertProject,
+	getProjectByAlias,
 	getProjectBySlug,
 	listProjects,
 } from "../../src/db/projects.js";
@@ -403,7 +404,7 @@ describe("resolveProjectIdentifier", () => {
 		const root = repo("https://github.com/acme/Cool-Repo.git");
 		const slug = resolveProjectIdentifier(db, root);
 		expect(slug).toBe("cool-repo");
-		const p = getProjectBySlug(db, "cool-repo");
+		const p = getProjectByAlias(db, "cool-repo");
 		expect(p?.provisional).toBe(true);
 		expect(p?.memberRepos).toEqual(["github.com/acme/Cool-Repo"]);
 	});
@@ -426,7 +427,7 @@ describe("resolveProjectIdentifier", () => {
 		const slug = resolveProjectIdentifier(db, dir);
 		expect(typeof slug).toBe("string");
 		expect(slug!.length).toBeGreaterThan(0);
-		const p = getProjectBySlug(db, slug!);
+		const p = getProjectByAlias(db, slug!);
 		expect(p?.provisional).toBe(true);
 		expect(p?.memberRepos).toEqual([]);
 	});

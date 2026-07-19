@@ -78,13 +78,24 @@ describe("capture project scope", () => {
     expect(count()).toBe(1);
   });
 
-  it("upserts a provisional project before inserting a derived personal capture", () => {
+  it("creates one UUIDv4 local-only project for a derived personal capture", () => {
     const root = repo("https://github.com/acme/new-project.git");
     const scope = resolveProjectScope(db.db, [root]);
     const result = handleCaptureThought(db, { content: "Personal" }, scope);
     expect(result.isError).toBeUndefined();
-    expect(getProjectBySlug(db.db, "new-project")).toMatchObject({ provisional: true, memberRepos: ["github.com/acme/new-project"] });
     const project = getProjectByAlias(db.db, "new-project")!;
+    expect(project.projectId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(project).toMatchObject({
+      slug: project.projectId,
+      currentSlug: "new-project",
+      identityState: "local_only",
+      provisional: true,
+      memberRepos: ["github.com/acme/new-project"],
+    });
+    expect(db.db.prepare("SELECT slug, project_id, status FROM project_slug_aliases").all()).toEqual([
+      { slug: "new-project", project_id: project.projectId, status: "tentative" },
+    ]);
+    expect(db.db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({ count: 1 });
     expect(db.db.prepare("SELECT project_id, project_identifier FROM thoughts").get()).toEqual({
       project_id: project.projectId,
       project_identifier: "new-project",
@@ -109,6 +120,8 @@ describe("capture project scope", () => {
 
     expect(() => handleCaptureThought(db, { content: "Personal" }, scope)).toThrow("blocked");
     expect(getProjectBySlug(db.db, "atomic-project")).toBeNull();
+    expect(db.db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({ count: 0 });
+    expect(db.db.prepare("SELECT COUNT(*) AS count FROM project_slug_aliases").get()).toEqual({ count: 0 });
     expect(count()).toBe(0);
   });
 });

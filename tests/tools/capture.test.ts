@@ -6,7 +6,7 @@ import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
 import { getEdgesBetween } from "../../src/db/edges.js";
-import { getProjectBySlug, listProjects, upsertProject } from "../../src/db/projects.js";
+import { getProjectByAlias, listProjects, upsertProject } from "../../src/db/projects.js";
 import { resolveProjectScope } from "../../src/db/resolve-project.js";
 
 function makeGitRepo(remote: string): string {
@@ -193,7 +193,7 @@ describe("handleCaptureThought", () => {
       const thought = getThought(db.db, data.id);
       expect(thought!.project_identifier).toBe("my-project");
       expect(db.db.prepare("SELECT project_id FROM thoughts WHERE id = ?").get(data.id)).toEqual({
-        project_id: getProjectBySlug(db.db, "my-project")?.projectId,
+        project_id: getProjectByAlias(db.db, "my-project")?.projectId,
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
