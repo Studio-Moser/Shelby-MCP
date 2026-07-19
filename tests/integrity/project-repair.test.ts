@@ -160,6 +160,34 @@ describe("apply", () => {
     repairProjects(db, opts(false));
     expect(getThought(db, id)?.project_identifier).toBeNull();
   });
+  it("never selects or re-homes thoughts with an authoritative project_id", () => {
+    const authoritativeProjectId = getProjectByAlias(db, "shelby")!.projectId;
+    const ids = [null, ""].map((projectIdentifier) => {
+      const id = insertThought(db, {
+        content: "authoritatively scoped",
+        project_id: authoritativeProjectId,
+        topics: ["polymarket"],
+      });
+      db.prepare("UPDATE thoughts SET project_identifier = ? WHERE id = ?").run(
+        projectIdentifier,
+        id,
+      );
+      return id;
+    });
+
+    const report = repairProjects(db, opts(true));
+
+    expect(report.scanned).toBe(0);
+    for (const id of ids) {
+      expect(
+        db.prepare("SELECT project_id, project_identifier, metadata FROM thoughts WHERE id = ?").get(id),
+      ).toEqual({
+        project_id: authoritativeProjectId,
+        project_identifier: ids.indexOf(id) === 0 ? null : "",
+        metadata: null,
+      });
+    }
+  });
 	it("apply writes the resolved project ID and preserves compatibility audit fields", () => {
     const hi = insertThought(db, { content: "x", topics: ["polymarket"] });
 		const amb = insertThought(db, {

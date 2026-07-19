@@ -151,7 +151,7 @@ interface RepairCandidate {
 function repairCandidates(db: Database.Database): RepairCandidate[] {
   const rows = db
     .prepare(
-      "SELECT id, project, project_identifier, topics, source FROM thoughts WHERE project_identifier IS NULL OR project_identifier = ''",
+      "SELECT id, project, project_identifier, topics, source FROM thoughts WHERE project_id IS NULL AND (project_identifier IS NULL OR project_identifier = '')",
     )
 		.all() as Array<{
 		id: string;
