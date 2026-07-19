@@ -123,6 +123,23 @@ describe("MCP Integration", () => {
     expect(allProjects.brief).toContain("Shared eligible preference");
   });
 
+  it("advertises canonical optional project_id on every scoped read/update schema", async () => {
+    const scopedTools = ["search_thoughts", "list_thoughts", "update_thought", "get_brief", "select_context"];
+    const { tools } = await client.listTools();
+    for (const name of scopedTools) {
+      const schema = tools.find((tool) => tool.name === name)?.inputSchema as {
+        required?: string[];
+        properties?: Record<string, { pattern?: string; format?: string }>;
+      };
+      expect(schema.properties?.project_id).toBeDefined();
+      expect(schema.required ?? []).not.toContain("project_id");
+      expect(schema.properties?.project_id?.pattern ?? schema.properties?.project_id?.format).toBeTruthy();
+    }
+
+    const malformed = await client.callTool({ name: "list_thoughts", arguments: { project_id: "bad" } });
+    expect(malformed.isError).toBe(true);
+  });
+
   // ---- 2. Capture and retrieve ----
   it("captures a thought and retrieves it by ID", async () => {
     const captureResult = await client.callTool({

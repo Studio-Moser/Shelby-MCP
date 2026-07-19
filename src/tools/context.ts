@@ -26,6 +26,7 @@ export interface SelectContextArgs {
   topics?: string[];
   people?: string[];
   since?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   include_brief?: boolean;
@@ -60,7 +61,7 @@ export function handleSelectContext(
   // restricted to visibility='shared' thoughts — the fail-safe that prevents
   // cross-project contamination when no project slug can be resolved.
   // Mirrors the pattern in brief.ts:59.
-  const sharedOnly = a.shared_only === true && a.project_identifier === undefined;
+  const sharedOnly = a.shared_only === true && a.project_id === undefined;
   const sections: string[] = [];
 
   // Optional brief header. We reuse get_brief to avoid forking the essentials
@@ -69,6 +70,7 @@ export function handleSelectContext(
   if (a.include_brief === true) {
     const briefResult = handleGetBrief(db, {
       scope: "essentials",
+      project_id: a.project_id,
       project_identifier: a.project_identifier,
       include_shared: a.include_shared,
       shared_only: sharedOnly,
@@ -96,6 +98,7 @@ export function handleSelectContext(
     topicFilter: a.topics?.[0],
     personFilter: a.people?.[0],
     since: a.since,
+    project_id: a.project_id,
     project_identifier: a.project_identifier,
     include_shared: a.include_shared,
     shared_only: sharedOnly,
@@ -122,7 +125,8 @@ export function handleSelectContext(
   const document = sections.join("\n\n");
   return toolSuccess({
     matched_count: thoughts.length,
-    project_identifier: a.project_identifier ?? null,
+    project_id: a.all_projects === true ? null : a.project_id ?? null,
+    project_identifier: a.all_projects === true ? null : a.project_identifier ?? null,
     document,
   });
 }
@@ -140,6 +144,7 @@ interface CollectArgs {
   topicFilter: string | undefined;
   personFilter: string | undefined;
   since: string | undefined;
+  project_id: string | undefined;
   project_identifier: string | undefined;
   include_shared: boolean | undefined;
   shared_only: boolean;
@@ -160,6 +165,7 @@ function collectThoughts(
         topic: args.topicFilter,
         person: args.personFilter,
         since: args.since,
+        project_id: args.project_id,
         project_identifier: args.project_identifier,
         include_shared: args.include_shared ?? true,
         shared_only: args.shared_only,
@@ -172,6 +178,7 @@ function collectThoughts(
       topic: args.topicFilter,
       person: args.personFilter,
       since: args.since,
+      project_id: args.project_id,
       project_identifier: args.project_identifier,
       include_shared: args.include_shared ?? true,
       shared_only: args.shared_only,

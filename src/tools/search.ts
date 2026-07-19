@@ -11,6 +11,7 @@ interface SearchArgs {
   offset?: number;
   type?: string;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
@@ -59,6 +60,7 @@ export function handleSearchThoughts(
       offset,
       type: a.type,
       project: a.project,
+      project_id: a.project_id,
       project_identifier: a.project_identifier,
       include_shared: a.include_shared,
       shared_only: a.shared_only,
@@ -85,6 +87,7 @@ export function handleSearchThoughts(
       offset: 0,
       type: a.type,
       project: a.project,
+      project_id: a.project_id,
       project_identifier: a.project_identifier,
       include_shared: a.include_shared,
       shared_only: a.shared_only,
@@ -98,33 +101,34 @@ export function handleSearchThoughts(
     const vectorRanks = new Map<string, number>();
     vectorResult.forEach((r, i) => vectorRanks.set(r.id, i + 1));
 
-    const metadataMap = new Map<string, { summary: string | null; type: string; topics: string[]; created_at: string; project: string | null; project_identifier: string | null; visibility: string }>();
+    const metadataMap = new Map<string, { summary: string | null; type: string; topics: string[]; created_at: string; project: string | null; project_id: string | null; project_identifier: string | null; visibility: string }>();
     for (const r of ftsResult.results) {
       // FTS results are already filtered by project/project_identifier (if specified),
       // so those fields are not returned in SearchResult — mark as null/personal;
       // they will be overwritten by the DB lookup below if needed.
-      metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null, project_identifier: null, visibility: "personal" });
+      metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null, project_id: null, project_identifier: null, visibility: "personal" });
     }
     for (const r of vectorResult) {
       if (!metadataMap.has(r.id)) {
-        metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null, project_identifier: null, visibility: "personal" });
+        metadataMap.set(r.id, { summary: r.summary, type: r.type, topics: r.topics, created_at: r.created_at, project: null, project_id: null, project_identifier: null, visibility: "personal" });
       }
     }
 
     // If project/project_identifier/shared filter is in play, fetch those fields
     // for all candidates from the DB. This is required because vector results
     // are not pre-filtered by project scope.
-    if (a.project || a.project_identifier !== undefined || a.shared_only) {
+    if (a.project || a.project_id !== undefined || a.shared_only) {
       const allIds = Array.from(metadataMap.keys());
       if (allIds.length > 0) {
         const placeholders = allIds.map(() => "?").join(", ");
         const rows = db.db
-          .prepare(`SELECT id, project, project_identifier, visibility FROM thoughts WHERE id IN (${placeholders})`)
-          .all(...allIds) as Array<{ id: string; project: string | null; project_identifier: string | null; visibility: string }>;
+          .prepare(`SELECT id, project, project_id, project_identifier, visibility FROM thoughts WHERE id IN (${placeholders})`)
+          .all(...allIds) as Array<{ id: string; project: string | null; project_id: string | null; project_identifier: string | null; visibility: string }>;
         for (const row of rows) {
           const existing = metadataMap.get(row.id);
           if (existing) {
             existing.project = row.project;
+            existing.project_id = row.project_id;
             existing.project_identifier = row.project_identifier;
             existing.visibility = row.visibility;
           }
@@ -151,7 +155,7 @@ export function handleSearchThoughts(
     // to the FTS pool but bypassed by the vector pool.
     // Mirrors the canonical project-scope semantics in src/db/thoughts.ts listThoughts — keep in sync.
     let filtered = scored as Array<{ id: string; summary: string | null; type: string; topics: string[]; created_at: string; rrf_score: number }>;
-    if (a.type || a.project || a.project_identifier !== undefined || a.shared_only) {
+    if (a.type || a.project || a.project_id !== undefined || a.shared_only) {
       // Rebuild a project lookup from the metadata map for filtering.
       filtered = scored.filter((item) => {
         if (a.type && item.type !== a.type) return false;
@@ -163,10 +167,10 @@ export function handleSearchThoughts(
           const meta = metadataMap.get(item.id);
           if (!meta || meta.visibility !== "shared") return false;
         }
-        if (a.project_identifier !== undefined) {
+        if (a.project_id !== undefined) {
           const meta = metadataMap.get(item.id);
           if (!meta) return false;
-          if (meta.project_identifier !== a.project_identifier) {
+          if (meta.project_id !== a.project_id) {
             if (!(a.include_shared && meta.visibility === "shared")) return false;
           }
         }

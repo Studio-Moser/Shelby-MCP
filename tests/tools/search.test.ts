@@ -4,7 +4,7 @@ import { handleSearchThoughts } from "../../src/tools/search.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { handleManageEdges } from "../../src/tools/graph.js";
 import { storeEmbedding } from "../../src/db/vectors.js";
-import { upsertProject } from "../../src/db/projects.js";
+import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
 
@@ -308,6 +308,20 @@ describe("handleSearchThoughts", () => {
     expect(data.mode).toBe("hybrid");
     expect(data.total_count).toBe(0);
     expect(data.results).toEqual([]);
+  });
+
+  it("hybrid post-filtering uses project_id", () => {
+    const id = captureId("immutable scope alpha", { project_identifier: "retired-slug" });
+    const other = captureId("immutable scope alpha", { project_identifier: "other-project" });
+    const projectId = getProjectByAlias(db.db, "retired-slug")!.projectId;
+    storeEmbedding(db.db, id, [1, 0, 0]);
+    storeEmbedding(db.db, other, [1, 0, 0]);
+
+    const data = parseResult(handleSearchThoughts(db, {
+      query: "immutable scope", embedding: [1, 0, 0], project_id: projectId,
+      project_identifier: "current-slug", include_shared: false,
+    }));
+    expect(data.results.map((item: { id: string }) => item.id)).toEqual([id]);
   });
 
   it("graph_related does not duplicate results already in the main result set", () => {

@@ -11,6 +11,7 @@ export interface ThoughtInput {
   source_agent?: string;
   trust_level?: TrustLevel;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   topics?: string[];
   people?: string[];
@@ -27,6 +28,7 @@ export interface ThoughtRecord {
   source_agent: string | null;
   trust_level: TrustLevel;
   project: string | null;
+  project_id: string | null;
   project_identifier: string | null;
   topics: string[];
   people: string[];
@@ -43,6 +45,8 @@ export interface ThoughtSummary {
   id: string;
   summary: string | null;
   type: string;
+  project_id: string | null;
+  project_identifier: string | null;
   topics: string[];
   created_at: string;
 }
@@ -50,6 +54,7 @@ export interface ThoughtSummary {
 export interface ListOptions {
   type?: string;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
@@ -81,6 +86,7 @@ interface RawThoughtRow {
   source_agent: string | null;
   trust_level: TrustLevel;
   project: string | null;
+  project_id: string | null;
   project_identifier: string | null;
   topics: string | null;
   people: string | null;
@@ -97,6 +103,8 @@ interface RawSummaryRow {
   id: string;
   summary: string | null;
   type: string;
+  project_id: string | null;
+  project_identifier: string | null;
   topics: string | null;
   created_at: string;
 }
@@ -133,6 +141,7 @@ function rowToRecord(row: RawThoughtRow): ThoughtRecord {
     source_agent: row.source_agent,
     trust_level: row.trust_level ?? "trusted",
     project: row.project,
+    project_id: row.project_id,
     project_identifier: row.project_identifier,
     topics: parseJsonArray(row.topics),
     people: parseJsonArray(row.people),
@@ -151,6 +160,8 @@ function rowToSummary(row: RawSummaryRow): ThoughtSummary {
     id: row.id,
     summary: row.summary,
     type: row.type,
+    project_id: row.project_id,
+    project_identifier: row.project_identifier,
     topics: parseJsonArray(row.topics),
     created_at: row.created_at,
   };
@@ -159,10 +170,15 @@ function rowToSummary(row: RawSummaryRow): ThoughtSummary {
 export function insertThought(db: Database.Database, input: ThoughtInput): string {
   const id = uuidv4();
   const now = new Date().toISOString();
+  const project = input.project_id === undefined && input.project_identifier
+    ? db.prepare(`SELECT projects.project_id, projects.current_slug
+        FROM project_slug_aliases JOIN projects USING (project_id)
+        WHERE project_slug_aliases.slug = ?`).get(input.project_identifier) as { project_id: string; current_slug: string } | undefined
+    : undefined;
 
   const stmt = db.prepare(`
-    INSERT INTO thoughts (id, content, summary, type, source, source_agent, trust_level, project, project_identifier, topics, people, visibility, metadata, created_at, updated_at)
-    VALUES (@id, @content, @summary, @type, @source, @source_agent, @trust_level, @project, @project_identifier, @topics, @people, @visibility, @metadata, @created_at, @updated_at)
+    INSERT INTO thoughts (id, content, summary, type, source, source_agent, trust_level, project, project_id, project_identifier, topics, people, visibility, metadata, created_at, updated_at)
+    VALUES (@id, @content, @summary, @type, @source, @source_agent, @trust_level, @project, @project_id, @project_identifier, @topics, @people, @visibility, @metadata, @created_at, @updated_at)
   `);
 
   stmt.run({
@@ -174,7 +190,8 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
     source_agent: input.source_agent ?? null,
     trust_level: input.trust_level ?? "trusted",
     project: input.project ?? null,
-    project_identifier: input.project_identifier ?? null,
+    project_id: input.project_id ?? project?.project_id ?? null,
+    project_identifier: project?.current_slug ?? input.project_identifier ?? null,
     topics: input.topics ? JSON.stringify(input.topics) : null,
     people: input.people ? JSON.stringify(input.people) : null,
     visibility: input.visibility ?? "personal",
@@ -187,7 +204,11 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
 }
 
 export function getThought(db: Database.Database, id: string): ThoughtRecord | null {
-  const row = db.prepare("SELECT * FROM thoughts WHERE id = ?").get(id) as RawThoughtRow | undefined;
+  const row = db.prepare(`
+    SELECT thoughts.*,
+      COALESCE((SELECT current_slug FROM projects WHERE projects.project_id = thoughts.project_id), thoughts.project_identifier) AS project_identifier
+    FROM thoughts WHERE id = ?
+  `).get(id) as RawThoughtRow | undefined;
   if (!row) return null;
   return rowToRecord(row);
 }
@@ -219,6 +240,10 @@ export function updateThought(
   if (updates.project !== undefined) {
     setClauses.push("project = @project");
     params.project = updates.project;
+  }
+  if (updates.project_id !== undefined) {
+    setClauses.push("project_id = @project_id");
+    params.project_id = updates.project_id;
   }
   if (updates.project_identifier !== undefined) {
     setClauses.push("project_identifier = @project_identifier");
@@ -279,10 +304,14 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   if (options.shared_only) {
     whereClauses.push("visibility = 'shared'");
   }
-  // CANONICAL project-scope semantics: rows whose project_identifier matches the caller's slug,
-  // plus visibility='shared' when include_shared. Mirrored in src/db/fts.ts (searchThoughts)
-  // and the hybrid post-fusion filter in src/tools/search.ts — keep all three in sync.
-  if (options.project_identifier !== undefined) {
+  if (options.project_id !== undefined) {
+    if (options.include_shared) {
+      whereClauses.push("(project_id = @project_id OR visibility = 'shared')");
+    } else {
+      whereClauses.push("project_id = @project_id");
+    }
+    params.project_id = options.project_id;
+  } else if (options.project_identifier !== undefined) {
     if (options.include_shared) {
       whereClauses.push("(project_identifier = @project_identifier OR visibility = 'shared')");
     } else {
@@ -342,7 +371,9 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   // Data query
   const rows = db
     .prepare(
-      `SELECT id, summary, type, topics, created_at FROM thoughts ${whereStr} ORDER BY created_at DESC LIMIT @limit OFFSET @offset`,
+      `SELECT id, summary, type, project_id,
+        COALESCE((SELECT current_slug FROM projects WHERE projects.project_id = thoughts.project_id), project_identifier) AS project_identifier,
+        topics, created_at FROM thoughts ${whereStr} ORDER BY created_at DESC LIMIT @limit OFFSET @offset`,
     )
     .all({ ...params, limit, offset }) as RawSummaryRow[];
 

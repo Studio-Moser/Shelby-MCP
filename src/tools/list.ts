@@ -5,6 +5,7 @@ import { toolSuccess, clampLimit, type ToolResult } from "./helpers.js";
 interface ListArgs {
   type?: string;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
@@ -29,6 +30,7 @@ export function handleListThoughts(
   const result = listThoughts(db.db, {
     type: a.type,
     project: a.project,
+    project_id: a.project_id,
     project_identifier: a.project_identifier,
     include_shared: a.include_shared,
     shared_only: a.shared_only,

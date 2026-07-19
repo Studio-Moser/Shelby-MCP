@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { insertThought } from "../../src/db/thoughts.js";
 import { handleGetBrief } from "../../src/tools/brief.js";
+import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
 beforeEach(() => { db = new ThoughtDatabase(":memory:"); });
@@ -110,5 +111,16 @@ describe("handleGetBrief curated response", () => {
     add("Included decision.");
     const data = parseResult(handleGetBrief(db, { project_identifier: "shelby" }));
     expect(new Date(String(data.last_activity)).toString()).not.toBe("Invalid Date");
+  });
+
+  it("scopes candidates and output by immutable project_id", () => {
+    upsertProject(db.db, { slug: "retired-slug", displayName: "Renamed", memberRepos: [], memberPaths: [], provisional: false });
+    const projectId = getProjectByAlias(db.db, "retired-slug")!.projectId;
+    add("Renamed decision.", { project_identifier: "retired-slug" });
+    db.db.prepare("UPDATE thoughts SET project_id = ? WHERE summary = 'Renamed decision.'").run(projectId);
+
+    const data = parseResult(handleGetBrief(db, { project_id: projectId, project_identifier: "current-slug", include_shared: false }));
+    expect(data).toMatchObject({ project_id: projectId, project_identifier: "current-slug", thought_count: 1 });
+    expect(data.brief).toContain("Renamed decision.");
   });
 });

@@ -105,7 +105,7 @@ describe("canonical brief-policy fixture", () => {
     if (!text) throw new Error("Missing get_brief result text");
     const data = parseJson<Record<string, unknown>>(text);
     expect(Object.keys(data)).toEqual([
-      "project_identifier", "scope", "thought_count", "last_activity", "policy_version",
+      "project_id", "project_identifier", "scope", "thought_count", "last_activity", "policy_version",
       "estimated_tokens", "omitted_counts", "items", "brief",
     ]);
     expect(data.policy_version).toBe(fixture.policy_version);

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleSelectContext } from "../../src/tools/context.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
-import { upsertProject } from "../../src/db/projects.js";
+import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
 
@@ -250,6 +250,14 @@ describe("handleSelectContext", () => {
 
     expect(data.document).not.toContain("Project A critical decision");
     expect(data.document).toContain("Shared critical decision");
+  });
+
+  it("scopes and reports context by immutable project_id", () => {
+    capture("Renamed context", { project_identifier: "retired-slug", summary: "Renamed context" });
+    const projectId = getProjectByAlias(db.db, "retired-slug")!.projectId;
+    const result = handleSelectContext(db, { project_id: projectId, project_identifier: "current-slug", include_shared: false });
+    const data = parseResult(result);
+    expect(data).toMatchObject({ matched_count: 1, project_id: projectId, project_identifier: "current-slug" });
   });
 
   it("rejects non-string-array types", () => {

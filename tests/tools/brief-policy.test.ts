@@ -15,6 +15,7 @@ afterEach(() => db.close());
 function candidate(overrides: Partial<BriefCandidate> = {}): BriefCandidate {
   return {
     id: "00000000-0000-4000-8000-000000000001",
+    project_id: "c51d5ec3-6e12-50d9-bd02-a43e170a71c6",
     project_identifier: "shelby",
     visibility: "personal",
     trust_level: "trusted",
@@ -57,6 +58,15 @@ describe("brief policy eligibility", () => {
     ], { scope: "essentials", project_identifier: "shelby", now });
     expect(result.items.map((item) => item.id)).toEqual(["lower", "upper"]);
     expect(result.omitted_counts.duplicate).toBe(0);
+  });
+
+  it("uses immutable project identity for policy filtering", () => {
+    const result = selectBriefItems([
+      candidate({ id: "same-id", project_identifier: "retired-slug" }),
+      candidate({ id: "wrong-id", project_id: "11111111-1111-4111-8111-111111111111", project_identifier: "current-slug" }),
+    ], { scope: "essentials", project_id: "c51d5ec3-6e12-50d9-bd02-a43e170a71c6", project_identifier: "current-slug", now });
+    expect(result.items.map((item) => item.id)).toEqual(["same-id"]);
+    expect(result.omitted_counts.wrong_project).toBe(1);
   });
 
   it("keeps explicit old blockers essential and fully filters all-project recall", () => {

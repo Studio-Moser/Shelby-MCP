@@ -8,6 +8,7 @@ export type { BriefScope } from "./brief-policy.js";
 
 export interface BriefArgs {
   scope?: BriefScope;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
@@ -29,6 +30,7 @@ export function handleGetBrief(
   const now = a.now ?? new Date().toISOString();
   const policyInput = {
     scope,
+    project_id: a.project_id,
     project_identifier: a.project_identifier,
     include_shared: a.include_shared ?? true,
     shared_only: a.shared_only,
@@ -45,6 +47,7 @@ export function handleGetBrief(
   );
 
   return toolSuccess({
+    project_id: a.all_projects === true ? null : a.project_id ?? null,
     project_identifier: a.all_projects === true ? null : a.project_identifier ?? null,
     scope,
     thought_count: rendered.items.length,

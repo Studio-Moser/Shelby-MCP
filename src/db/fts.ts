@@ -4,6 +4,8 @@ export interface SearchResult {
   id: string;
   summary: string | null;
   type: string;
+  project_id: string | null;
+  project_identifier: string | null;
   topics: string[];
   created_at: string;
   rank: number;
@@ -15,6 +17,7 @@ export interface SearchOptions {
   offset?: number;
   type?: string;
   project?: string;
+  project_id?: string;
   project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
@@ -65,8 +68,14 @@ export function searchThoughts(
   if (options.shared_only) {
     whereClauses.push("t.visibility = 'shared'");
   }
-  // Mirrors the canonical project-scope semantics in src/db/thoughts.ts listThoughts — keep in sync.
-  if (options.project_identifier !== undefined) {
+  if (options.project_id !== undefined) {
+    if (options.include_shared) {
+      whereClauses.push("(t.project_id = ? OR t.visibility = 'shared')");
+    } else {
+      whereClauses.push("t.project_id = ?");
+    }
+    params.push(options.project_id);
+  } else if (options.project_identifier !== undefined) {
     if (options.include_shared) {
       whereClauses.push("(t.project_identifier = ? OR t.visibility = 'shared')");
     } else {
@@ -83,13 +92,15 @@ export function searchThoughts(
   const total_count = countRow.cnt;
 
   // Fetch results with BM25 ranking
-  const selectSQL = `SELECT t.id, t.summary, t.type, t.topics, t.created_at, rank FROM thoughts_fts JOIN thoughts t ON thoughts_fts.rowid = t.rowid WHERE ${whereSQL} ORDER BY rank LIMIT ? OFFSET ?`;
+  const selectSQL = `SELECT t.id, t.summary, t.type, t.project_id, COALESCE((SELECT current_slug FROM projects WHERE projects.project_id = t.project_id), t.project_identifier) AS project_identifier, t.topics, t.created_at, rank FROM thoughts_fts JOIN thoughts t ON thoughts_fts.rowid = t.rowid WHERE ${whereSQL} ORDER BY rank LIMIT ? OFFSET ?`;
   const rows = db
     .prepare(selectSQL)
     .all(...params, limit, offset) as Array<{
     id: string;
     summary: string | null;
     type: string;
+    project_id: string | null;
+    project_identifier: string | null;
     topics: string | null;
     created_at: string;
     rank: number;
@@ -99,7 +110,16 @@ export function searchThoughts(
     id: row.id,
     summary: row.summary,
     type: row.type,
-    topics: row.topics ? JSON.parse(row.topics) : [],
+    project_id: row.project_id,
+    project_identifier: row.project_identifier,
+    topics: (() => {
+      try {
+        const topics: unknown = row.topics ? JSON.parse(row.topics) : [];
+        return Array.isArray(topics) ? topics : [];
+      } catch {
+        return [];
+      }
+    })(),
     created_at: row.created_at,
     rank: -row.rank, // Negate so higher = more relevant
   }));

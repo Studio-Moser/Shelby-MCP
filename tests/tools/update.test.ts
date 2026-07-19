@@ -3,6 +3,7 @@ import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleUpdateThought } from "../../src/tools/update.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
+import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
 
@@ -15,8 +16,13 @@ afterEach(() => {
 });
 
 function parseResult(result: object): any {
-  const r = result as any;
-  return JSON.parse(r.content[0].text);
+  const text = (result as { content?: Array<{ text?: string }> }).content?.[0]?.text;
+  if (!text) throw new Error("Expected tool result text");
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Expected JSON tool result: ${text}`, { cause: error });
+  }
 }
 
 function captureId(content: string): string {
@@ -81,22 +87,43 @@ describe("handleUpdateThought", () => {
     const result = handleUpdateThought(db, { id });
     const r = result as any;
     expect(r.isError).toBe(true);
-    const data = JSON.parse(r.content[0].text);
-    expect(data.error).toBe("invalid_input");
+    expect(parseResult(result).error).toBe("invalid_input");
   });
 
-  it("forwards project_identifier to updateThought", () => {
-    const id = captureId("No project yet");
+  it("resolves UUID/current/retired project references before re-homing", () => {
+    upsertProject(db.db, { slug: "retired-slug", displayName: "Renamed", memberRepos: [], memberPaths: [], provisional: false });
+    const projectId = getProjectByAlias(db.db, "retired-slug")!.projectId;
+    db.db.prepare("UPDATE projects SET current_slug = 'current-slug' WHERE project_id = ?").run(projectId);
+    db.db.prepare("UPDATE project_slug_aliases SET status = 'retired' WHERE slug = 'retired-slug'").run();
+    db.db.prepare("INSERT INTO project_slug_aliases (slug, project_id, status, claimed_at) VALUES ('current-slug', ?, 'current', ?)").run(projectId, new Date().toISOString());
 
-    const result = handleUpdateThought(db, {
-      id,
-      project_identifier: "shelby",
-    });
-    const data = parseResult(result);
-    expect(data.updated).toBe(1);
+    for (const reference of [
+      { project_id: projectId },
+      { project_identifier: "current-slug" },
+      { project_identifier: "retired-slug" },
+      { project_id: projectId, project_identifier: "retired-slug" },
+    ]) {
+      const id = captureId("re-home target");
+      expect(parseResult(handleUpdateThought(db, { id, ...reference })).updated).toBe(1);
+      expect(getThought(db.db, id)).toMatchObject({ project_id: projectId, project_identifier: "current-slug" });
+    }
+  });
 
-    const thought = getThought(db.db, id);
-    expect(thought!.project_identifier).toBe("shelby");
+  it("rejects unknown, conflicting, and arbitrary project references before thought SQL", () => {
+    upsertProject(db.db, { slug: "one", displayName: "One", memberRepos: [], memberPaths: [], provisional: false });
+    upsertProject(db.db, { slug: "two", displayName: "Two", memberRepos: [], memberPaths: [], provisional: false });
+    const projectId = getProjectByAlias(db.db, "one")!.projectId;
+    const id = captureId("must stay put");
+    const original = getThought(db.db, id);
+    for (const reference of [
+      { project_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      { project_id: projectId, project_identifier: "two" },
+      { project_identifier: "arbitrary-new-slug" },
+    ]) {
+      const result = handleUpdateThought(db, { id, ...reference });
+      expect(result.isError).toBe(true);
+      expect(getThought(db.db, id)).toMatchObject({ project_id: original?.project_id, project_identifier: original?.project_identifier });
+    }
   });
 
   it("forwards visibility to updateThought", () => {

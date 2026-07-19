@@ -80,7 +80,7 @@ describe("searchThoughts", () => {
     const result = searchThoughts(tdb.db, { query: "CloudKit" });
     expect(result.results[0].summary).toBe("Short summary");
     // No content field exposed
-    expect((result.results[0] as Record<string, unknown>).content).toBeUndefined();
+    expect((result.results[0] as unknown as Record<string, unknown>).content).toBeUndefined();
   });
 
   it("ranks results by relevance", () => {
@@ -213,6 +213,16 @@ describe("searchThoughts slug scoping", () => {
     const db = new Database(":memory:"); runMigrations(db); seed(db);
     const r = searchThoughts(db, { query: "alpha", shared_only: true });
     expect(r.total_count).toBe(2);
+    db.close();
+  });
+
+  it("uses project_id rather than the compatibility slug", () => {
+    const db = new Database(":memory:"); runMigrations(db);
+    const id = insertThoughtRecord(db, { content: "alpha renamed", project_identifier: "retired-slug" });
+    const projectId = "c51d5ec3-6e12-50d9-bd02-a43e170a71c6";
+    db.prepare("UPDATE thoughts SET project_id = ? WHERE id = ?").run(projectId, id);
+    const result = searchThoughts(db, { query: "alpha", project_id: projectId, include_shared: false });
+    expect(result.results).toEqual([expect.objectContaining({ id, project_id: projectId })]);
     db.close();
   });
 });
