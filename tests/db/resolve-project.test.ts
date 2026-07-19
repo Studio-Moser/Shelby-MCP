@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrations } from "../../src/db/migrations.js";
+import { applyDefaultScope } from "../../src/mcp/scope-defaults.js";
 import {
 	createLocalOnlyProject,
 	upsertProject,
@@ -343,6 +344,28 @@ describe("resolveProjectReference canonical fixture", () => {
 			if (!testCase.project_id && !projectIdentifier && testCase.git_remote) {
 				const scope = resolveProjectScope(db, [repo(testCase.git_remote)]);
 				projectIdentifier = scope.kind === "resolved" ? scope.slug : undefined;
+			}
+
+			if (testCase.expected.kind === "unresolved") {
+				const scoped = applyDefaultScope({}, db, []);
+				expect(scoped.kind).toBe("applied");
+				if (scoped.kind !== "applied") throw new Error(scoped.message);
+				expect({
+					kind: "unresolved",
+					read_scope: testCase.expected.read_scope,
+					sharedOnly: scoped.args.shared_only === true,
+					allProjects: scoped.args.all_projects === true,
+					projectId: scoped.args.project_id,
+					currentSlug: scoped.args.project_identifier,
+				}).toEqual({
+					kind: "unresolved",
+					read_scope: "shared_only",
+					sharedOnly: true,
+					allProjects: false,
+					projectId: undefined,
+					currentSlug: undefined,
+				});
+				return;
 			}
 
 			const actual = resolveProjectReference(db, {

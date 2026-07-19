@@ -23,6 +23,26 @@ function argsOf(result: ReturnType<typeof applyDefaultScope>) {
   return result.args;
 }
 
+function countingDatabase(database: Database.Database): {
+  database: Database.Database;
+  preparedSql: string[];
+} {
+  const preparedSql: string[] = [];
+  const proxy = new Proxy(database, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (sql: string) => {
+          preparedSql.push(sql);
+          return target.prepare(sql);
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { database: proxy, preparedSql };
+}
+
 describe("applyDefaultScope", () => {
   it("injects resolved project and shared records", () => {
     upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: ["github.com/Studio-Moser/Shelby-MCP"], memberPaths: [], provisional: false });
@@ -50,6 +70,34 @@ describe("applyDefaultScope", () => {
       { all_projects: true, project_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
     ]) {
       expect(applyDefaultScope(input, db, [])).toMatchObject({ kind: "error", category: "project_scope_invalid" });
+    }
+  });
+
+  it("returns explicit scope errors before downstream thought/search/list SQL", () => {
+    upsertProject(db, { slug: "shelby", displayName: "Shelby", memberRepos: [], memberPaths: [], provisional: false });
+    upsertProject(db, { slug: "other", displayName: "Other", memberRepos: [], memberPaths: [], provisional: false });
+    const projectId = getProjectByAlias(db, "shelby")!.projectId;
+    const { database, preparedSql } = countingDatabase(db);
+    const downstreamSql = [
+      "SELECT id FROM thoughts",
+      "SELECT rowid FROM thoughts_fts",
+      "SELECT id FROM thoughts ORDER BY created_at",
+    ];
+
+    for (const { input, registryLookup } of [
+      { input: { project_id: "bad" }, registryLookup: false },
+      { input: { project_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, registryLookup: true },
+      { input: { project_id: projectId, project_identifier: "other" }, registryLookup: true },
+    ]) {
+      preparedSql.length = 0;
+      const scoped = applyDefaultScope(input, database, []);
+      if (scoped.kind === "applied") {
+        for (const sql of downstreamSql) database.prepare(sql).all();
+      }
+
+      expect(scoped).toMatchObject({ kind: "error", category: "project_scope_invalid" });
+      expect(preparedSql).not.toEqual(expect.arrayContaining(downstreamSql));
+      expect(preparedSql.some((sql) => /projects|project_slug_aliases/.test(sql))).toBe(registryLookup);
     }
   });
 
