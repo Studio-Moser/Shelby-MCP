@@ -3,7 +3,10 @@ import Database from "better-sqlite3";
 import { runMigrations } from "../../src/db/migrations.js";
 import { deriveExistingProjectId } from "../../src/db/project-identity.js";
 import {
+	createLocalOnlyProject,
 	upsertProject,
+	getProjectByAlias,
+	getProjectById,
 	getProjectBySlug,
 	findProjectByRepo,
 	findProjectByPath,
@@ -29,6 +32,101 @@ describe("normalizeGitRemote", () => {
 });
 
 describe("projects registry", () => {
+	it("looks up immutable IDs and tentative, current, and retired aliases while freezing the legacy key", () => {
+		upsertProject(db, {
+			slug: "legacy-project",
+			displayName: "Legacy Project",
+			memberRepos: [],
+			memberPaths: [],
+			provisional: false,
+		});
+		const projectId = deriveExistingProjectId("legacy-project");
+		db.prepare(
+			"UPDATE project_slug_aliases SET status = 'current' WHERE slug = ?",
+		).run("legacy-project");
+		db.prepare(
+			`INSERT INTO project_slug_aliases (slug, project_id, status, claimed_at, retired_at)
+			 VALUES ('old-project', ?, 'retired', ?, ?)`,
+		).run(projectId, new Date().toISOString(), new Date().toISOString());
+		db.prepare(
+			`INSERT INTO project_slug_aliases (slug, project_id, status, claimed_at)
+			 VALUES ('next-project', ?, 'tentative', ?)`,
+		).run(projectId, new Date().toISOString());
+		db.prepare("UPDATE projects SET current_slug = ? WHERE project_id = ?").run(
+			"legacy-project",
+			projectId,
+		);
+
+		expect(getProjectById(db, projectId)).toMatchObject({
+			slug: "legacy-project",
+			projectId,
+			currentSlug: "legacy-project",
+			identityState: "local_only",
+		});
+		expect(getProjectByAlias(db, "legacy-project")?.projectId).toBe(projectId);
+		expect(getProjectByAlias(db, "next-project")?.projectId).toBe(projectId);
+		expect(getProjectByAlias(db, "old-project")?.projectId).toBe(projectId);
+		expect(
+			getProjectById(db, "00000000-0000-4000-8000-000000000000"),
+		).toBeNull();
+		expect(getProjectByAlias(db, "unknown-project")).toBeNull();
+	});
+
+	it("creates UUIDv4 local-only projects with one tentative alias", () => {
+		const created = createLocalOnlyProject(db, {
+			slug: "requested-project",
+			displayName: "Requested Project",
+			memberRepos: ["github.com/example/requested"],
+			memberPaths: ["/p/requested"],
+			provisional: true,
+		});
+
+		expect(created.projectId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+		);
+		expect(created).toMatchObject({
+			slug: created.projectId,
+			currentSlug: "requested-project",
+			identityState: "local_only",
+		});
+		expect(getProjectById(db, created.projectId)).toEqual(created);
+		expect(
+			db
+				.prepare("SELECT slug, project_id, status FROM project_slug_aliases")
+				.all(),
+		).toEqual([
+			{
+				slug: "requested-project",
+				project_id: created.projectId,
+				status: "tentative",
+			},
+		]);
+	});
+
+	it("rolls back local-only project creation when alias insertion fails", () => {
+		db.exec(`
+			CREATE TRIGGER reject_local_alias
+			BEFORE INSERT ON project_slug_aliases
+			WHEN NEW.slug = 'rollback-local'
+			BEGIN
+				SELECT RAISE(ABORT, 'reject local alias');
+			END;
+		`);
+
+		expect(() =>
+			createLocalOnlyProject(db, {
+				slug: "rollback-local",
+				displayName: "Rollback",
+				memberRepos: [],
+				memberPaths: [],
+				provisional: false,
+			}),
+		).toThrow("reject local alias");
+		expect(db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({
+			count: 0,
+		});
+	});
+
 	it("keeps legacy upserts compatible and identity writes atomic after v8", () => {
 		const project = {
 			slug: "shelby",
