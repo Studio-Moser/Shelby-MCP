@@ -39,7 +39,6 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
 
 export interface BriefCandidateScope {
   project_id?: string;
-  project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
   all_projects?: boolean;
@@ -92,16 +91,13 @@ function scopePriority(scope: BriefCandidateScope): string {
   if (scope.all_projects === true) {
     return `(visibility != 'shared' OR (${ELIGIBLE_SHARED}))`;
   }
-  if (scope.shared_only === true || (scope.project_id === undefined && scope.project_identifier === undefined)) {
+  if (scope.shared_only === true || scope.project_id === undefined) {
     return `(${ELIGIBLE_SHARED})`;
   }
-  const predicate = scope.project_id !== undefined
-    ? "project_id = @project_id"
-    : "project_identifier = @project_identifier";
   if (scope.include_shared === false) {
-    return `(visibility != 'shared' AND ${predicate})`;
+    return `(visibility != 'shared' AND project_id = @project_id)`;
   }
-  return `((visibility != 'shared' AND ${predicate}) OR (${ELIGIBLE_SHARED}))`;
+  return `((visibility != 'shared' AND project_id = @project_id) OR (${ELIGIBLE_SHARED}))`;
 }
 
 /** Load bounded candidates with potentially eligible requested-scope rows before diagnostics. */
@@ -141,7 +137,6 @@ export function loadBriefCandidates(
     now,
     limit: BRIEF_CANDIDATE_LIMIT,
     project_id: scope.project_id ?? null,
-    project_identifier: scope.project_identifier ?? null,
   }) as CandidateRow[];
 
   return rows.map((row) => ({

@@ -255,9 +255,9 @@ describe("handleSelectContext", () => {
   it("scopes and reports context by immutable project_id", () => {
     capture("Renamed context", { project_identifier: "retired-slug", summary: "Renamed context" });
     const projectId = getProjectByAlias(db.db, "retired-slug")!.projectId;
-    const result = handleSelectContext(db, { project_id: projectId, project_identifier: "current-slug", include_shared: false });
+    const result = handleSelectContext(db, { project_id: projectId, include_shared: false });
     const data = parseResult(result);
-    expect(data).toMatchObject({ matched_count: 1, project_id: projectId, project_identifier: "current-slug" });
+    expect(data).toMatchObject({ matched_count: 1, project_id: projectId, project_identifier: "retired-slug" });
   });
 
   it("rejects non-string-array types", () => {

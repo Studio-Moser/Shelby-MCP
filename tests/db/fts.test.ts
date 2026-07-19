@@ -190,22 +190,23 @@ describe("searchThoughts", () => {
   });
 });
 
-describe("searchThoughts slug scoping", () => {
+describe("searchThoughts UUID scoping", () => {
+  const shelbyId = "c51d5ec3-6e12-50d9-bd02-a43e170a71c6";
   function seed(db: Database.Database) {
-    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "shelby" });
-    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "kuow-games" });
-    insertThoughtRecord(db, { content: "alpha apple", project_identifier: "shelby", visibility: "shared" });
+    insertThoughtRecord(db, { content: "alpha apple", project_id: shelbyId, project_identifier: "shelby" });
+    insertThoughtRecord(db, { content: "alpha apple", project_id: "11111111-1111-4111-8111-111111111111", project_identifier: "kuow-games" });
+    insertThoughtRecord(db, { content: "alpha apple", project_id: shelbyId, project_identifier: "shelby", visibility: "shared" });
     insertThoughtRecord(db, { content: "alpha apple", visibility: "shared" });
   }
   it("scopes FTS to slug OR shared", () => {
     const db = new Database(":memory:"); runMigrations(db); seed(db);
-    const r = searchThoughts(db, { query: "alpha", project_identifier: "shelby", include_shared: true });
+    const r = searchThoughts(db, { query: "alpha", project_id: shelbyId, include_shared: true });
     expect(r.total_count).toBe(3);
     db.close();
   });
   it("scopes FTS to slug only when include_shared is false", () => {
     const db = new Database(":memory:"); runMigrations(db); seed(db);
-    const r = searchThoughts(db, { query: "alpha", project_identifier: "shelby", include_shared: false });
+    const r = searchThoughts(db, { query: "alpha", project_id: shelbyId, include_shared: false });
     expect(r.total_count).toBe(2);
     db.close();
   });

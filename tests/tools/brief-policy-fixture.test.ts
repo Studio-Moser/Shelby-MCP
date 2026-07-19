@@ -7,6 +7,8 @@ import { loadBriefCandidates } from "../../src/db/brief-candidates.js";
 import { normalizeBriefSummary, selectBriefItems, type BriefScope } from "../../src/tools/brief-policy.js";
 import { estimateBriefTokens, renderTokenBoundBrief } from "../../src/tools/brief-renderer.js";
 import { handleGetBrief } from "../../src/tools/brief.js";
+import { deriveExistingProjectId } from "../../src/db/project-identity.js";
+import { upsertProject } from "../../src/db/projects.js";
 
 interface Fixture {
   policy_version: number;
@@ -30,22 +32,30 @@ function parseJson<T>(text: string): T {
 }
 
 const fixture = parseJson<Fixture>(readFileSync(fixturePath, "utf8"));
+const shelbyProjectId = deriveExistingProjectId("shelby");
+const otherProjectId = deriveExistingProjectId("other-project");
 let db: ThoughtDatabase;
 
 beforeEach(() => {
   db = new ThoughtDatabase(":memory:");
+  for (const slug of ["shelby", "other-project"]) {
+    upsertProject(db.db, { slug, displayName: slug, memberRepos: [], memberPaths: [], provisional: false });
+  }
   const insert = db.db.prepare(`
     INSERT INTO thoughts
-      (id, content, summary, type, source, trust_level, project_identifier, visibility,
+      (id, content, summary, type, source, trust_level, project_id, project_identifier, visibility,
        metadata, created_at, updated_at, consolidated_into, reinforcement_count)
     VALUES
-      (@id, @content, @summary, @type, @source, @trust_level, @project_identifier, @visibility,
+      (@id, @content, @summary, @type, @source, @trust_level, @project_id, @project_identifier, @visibility,
        @metadata, @created_at, @updated_at, @consolidated_into, @reinforcement_count)
   `);
   for (const thought of fixture.thoughts) {
     insert.run({
       ...thought,
       content: thought.summary ?? "fixture content",
+      project_id: thought.project_identifier === "shelby"
+        ? shelbyProjectId
+        : thought.project_identifier === "other-project" ? otherProjectId : null,
       metadata: JSON.stringify(thought.metadata),
     });
   }
@@ -77,7 +87,7 @@ describe("canonical brief-policy fixture", () => {
   });
 
   it.each(["essentials", "recent", "full"] as BriefScope[])("matches %s ordering", (scope) => {
-    const request = { ...fixture.request, scope };
+    const request = { ...fixture.request, project_id: shelbyProjectId, scope };
     const result = selectBriefItems(
       loadBriefCandidates(db.db, fixture.request.now, request),
       request,
@@ -87,8 +97,8 @@ describe("canonical brief-policy fixture", () => {
 
   it("matches roles, omissions, markdown, and UTF-8 token estimate", () => {
     const selected = selectBriefItems(
-      loadBriefCandidates(db.db, fixture.request.now, fixture.request),
-      fixture.request,
+      loadBriefCandidates(db.db, fixture.request.now, { ...fixture.request, project_id: shelbyProjectId }),
+      { ...fixture.request, project_id: shelbyProjectId },
     );
     const rendered = renderTokenBoundBrief(selected.items, selected.omitted_counts, 800);
     expect(rendered.items.map((item) => item.id)).toEqual(fixture.expected.ordered_item_ids);

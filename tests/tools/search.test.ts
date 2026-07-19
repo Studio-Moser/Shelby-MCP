@@ -298,6 +298,7 @@ describe("handleSearchThoughts", () => {
   it("hybrid search with project_identifier on empty DB returns empty result, not an error", () => {
     // Guard: when FTS + vector both return nothing (empty DB), allIds is []
     // and the former `WHERE id IN ()` would crash SQLite. Should return empty results.
+    upsertProject(db.db, { slug: "shelby", displayName: "shelby", memberRepos: [], memberPaths: [], provisional: false });
     const result = handleSearchThoughts(db, {
       query: "anything",
       embedding: [1.0, 0.0, 0.0],
@@ -319,7 +320,7 @@ describe("handleSearchThoughts", () => {
 
     const data = parseResult(handleSearchThoughts(db, {
       query: "immutable scope", embedding: [1, 0, 0], project_id: projectId,
-      project_identifier: "current-slug", include_shared: false,
+      project_identifier: "retired-slug", include_shared: false,
     }));
     expect(data.results.map((item: { id: string }) => item.id)).toEqual([id]);
   });

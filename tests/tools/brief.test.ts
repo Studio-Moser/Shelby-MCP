@@ -5,7 +5,12 @@ import { handleGetBrief } from "../../src/tools/brief.js";
 import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
 
 let db: ThoughtDatabase;
-beforeEach(() => { db = new ThoughtDatabase(":memory:"); });
+beforeEach(() => {
+  db = new ThoughtDatabase(":memory:");
+  for (const slug of ["shelby", "other-project"]) {
+    upsertProject(db.db, { slug, displayName: slug, memberRepos: [], memberPaths: [], provisional: false });
+  }
+});
 afterEach(() => db.close());
 
 function parseResult(result: ReturnType<typeof handleGetBrief>): Record<string, unknown> {
@@ -119,8 +124,8 @@ describe("handleGetBrief curated response", () => {
     add("Renamed decision.", { project_identifier: "retired-slug" });
     db.db.prepare("UPDATE thoughts SET project_id = ? WHERE summary = 'Renamed decision.'").run(projectId);
 
-    const data = parseResult(handleGetBrief(db, { project_id: projectId, project_identifier: "current-slug", include_shared: false }));
-    expect(data).toMatchObject({ project_id: projectId, project_identifier: "current-slug", thought_count: 1 });
+    const data = parseResult(handleGetBrief(db, { project_id: projectId, include_shared: false }));
+    expect(data).toMatchObject({ project_id: projectId, project_identifier: "retired-slug", thought_count: 1 });
     expect(data.brief).toContain("Renamed decision.");
   });
 });

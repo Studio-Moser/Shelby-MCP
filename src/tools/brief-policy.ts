@@ -26,7 +26,6 @@ export interface BriefPolicyResult {
 export interface BriefPolicyInput {
   scope: BriefScope;
   project_id?: string;
-  project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
   all_projects?: boolean;
@@ -132,9 +131,7 @@ export function selectBriefItems(
       ? !isShared
       : isShared
         ? input.include_shared === false
-        : input.all_projects !== true && (input.project_id !== undefined
-          ? candidate.project_id !== input.project_id
-          : candidate.project_identifier !== input.project_identifier);
+        : input.all_projects !== true && candidate.project_id !== input.project_id;
     if (wrongProject) { omitted.wrong_project++; continue; }
     if (candidate.trust_level !== "trusted") { omitted.untrusted++; continue; }
     if (candidate.consolidated_into !== null) { omitted.consolidated++; continue; }

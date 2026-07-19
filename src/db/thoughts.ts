@@ -55,7 +55,6 @@ export interface ListOptions {
   type?: string;
   project?: string;
   project_id?: string;
-  project_identifier?: string;
   include_shared?: boolean;
   shared_only?: boolean;
   topic?: string;
@@ -311,13 +310,6 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
       whereClauses.push("project_id = @project_id");
     }
     params.project_id = options.project_id;
-  } else if (options.project_identifier !== undefined) {
-    if (options.include_shared) {
-      whereClauses.push("(project_identifier = @project_identifier OR visibility = 'shared')");
-    } else {
-      whereClauses.push("project_identifier = @project_identifier");
-    }
-    params.project_identifier = options.project_identifier;
   }
   if (options.topic) {
     whereClauses.push("topics LIKE @topic");

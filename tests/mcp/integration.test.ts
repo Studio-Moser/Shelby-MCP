@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "../../src/mcp/server.js";
 import type { ThoughtDatabase } from "../../src/db/database.js";
-import { upsertProject } from "../../src/db/projects.js";
+import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
 import { insertThought } from "../../src/db/thoughts.js";
 
 /** Parse the JSON text from an MCP tool result. */
@@ -123,21 +123,62 @@ describe("MCP Integration", () => {
     expect(allProjects.brief).toContain("Shared eligible preference");
   });
 
-  it("advertises canonical optional project_id on every scoped read/update schema", async () => {
-    const scopedTools = ["search_thoughts", "list_thoughts", "update_thought", "get_brief", "select_context"];
+  it("advertises and enforces canonical project references on every structured tool", async () => {
+    upsertProject(db.db, { slug: "schema-project", displayName: "Schema", memberRepos: [], memberPaths: [], provisional: false });
+    upsertProject(db.db, { slug: "other-project", displayName: "Other", memberRepos: [], memberPaths: [], provisional: false });
+    const projectId = getProjectByAlias(db.db, "schema-project")!.projectId;
+    const thoughtId = insertThought(db.db, {
+      content: "schema identity",
+      summary: "Schema identity",
+      project_id: projectId,
+      project_identifier: "schema-project",
+    });
+    const calls = [
+      { name: "search_thoughts", arguments: { query: "schema" } },
+      { name: "list_thoughts", arguments: {} },
+      { name: "update_thought", arguments: { id: thoughtId, summary: "Schema identity" } },
+      { name: "get_brief", arguments: {} },
+      { name: "select_context", arguments: {} },
+    ];
     const { tools } = await client.listTools();
-    for (const name of scopedTools) {
-      const schema = tools.find((tool) => tool.name === name)?.inputSchema as {
+    for (const call of calls) {
+      const schema = tools.find((tool) => tool.name === call.name)?.inputSchema as {
         required?: string[];
         properties?: Record<string, { pattern?: string; format?: string }>;
       };
       expect(schema.properties?.project_id).toBeDefined();
       expect(schema.required ?? []).not.toContain("project_id");
       expect(schema.properties?.project_id?.pattern ?? schema.properties?.project_id?.format).toBeTruthy();
-    }
 
-    const malformed = await client.callTool({ name: "list_thoughts", arguments: { project_id: "bad" } });
-    expect(malformed.isError).toBe(true);
+      for (const scope of [
+        { project_id: projectId },
+        { project_id: projectId, project_identifier: "schema-project" },
+      ]) {
+        const accepted = await client.callTool({
+          name: call.name,
+          arguments: { ...call.arguments, ...scope },
+        });
+        expect(accepted.isError, `${call.name} should accept ${JSON.stringify(scope)}`).not.toBe(true);
+      }
+
+      const malformed = await client.callTool({
+        name: call.name,
+        arguments: { ...call.arguments, project_id: "bad" },
+      });
+      expect(malformed.isError).toBe(true);
+
+      for (const scope of [
+        { project_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+        { project_id: projectId, project_identifier: "other-project" },
+      ]) {
+        const rejected = await client.callTool({
+          name: call.name,
+          arguments: { ...call.arguments, ...scope },
+        });
+        expect(rejected.isError, `${call.name} should reject ${JSON.stringify(scope)}`).toBe(true);
+        expect(parseResult(rejected)).toMatchObject({ error: "project_scope_invalid" });
+      }
+    }
   });
 
   // ---- 2. Capture and retrieve ----

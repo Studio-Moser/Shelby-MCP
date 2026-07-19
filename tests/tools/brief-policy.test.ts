@@ -8,8 +8,21 @@ import { renderTokenBoundBrief } from "../../src/tools/brief-renderer.js";
 
 let db: ThoughtDatabase;
 const now = "2026-07-17T12:00:00Z";
+const projectId = "c51d5ec3-6e12-50d9-bd02-a43e170a71c6";
 
-beforeEach(() => { db = new ThoughtDatabase(":memory:"); });
+beforeEach(() => {
+  db = new ThoughtDatabase(":memory:");
+  db.db.exec(`
+    CREATE TRIGGER test_brief_project_id AFTER INSERT ON thoughts
+    WHEN NEW.project_identifier IS NOT NULL
+    BEGIN
+      UPDATE thoughts SET project_id = CASE NEW.project_identifier
+        WHEN 'shelby' THEN 'c51d5ec3-6e12-50d9-bd02-a43e170a71c6'
+        WHEN 'other-project' THEN '11111111-1111-4111-8111-111111111111'
+      END WHERE id = NEW.id;
+    END;
+  `);
+});
 afterEach(() => db.close());
 
 function candidate(overrides: Partial<BriefCandidate> = {}): BriefCandidate {
@@ -40,7 +53,7 @@ describe("brief policy eligibility", () => {
       candidate({ id: "c", metadata: { extra: { briefRole: "command" } } }),
       candidate({ id: "d", metadata: { extra: { sensitivity: "unknown" } } }),
     ];
-    const result = selectBriefItems(candidates, { scope: "full", project_identifier: "shelby", now });
+    const result = selectBriefItems(candidates, { scope: "full", project_id: projectId, now });
     expect(result.items).toEqual([]);
     expect(result.omitted_counts.ineligible).toBe(3);
     expect(result.omitted_counts.sensitive).toBe(1);
@@ -55,7 +68,7 @@ describe("brief policy eligibility", () => {
     const result = selectBriefItems([
       candidate({ id: "upper", summary: "Case-sensitive decision." }),
       candidate({ id: "lower", summary: "case-sensitive decision." }),
-    ], { scope: "essentials", project_identifier: "shelby", now });
+    ], { scope: "essentials", project_id: projectId, now });
     expect(result.items.map((item) => item.id)).toEqual(["lower", "upper"]);
     expect(result.omitted_counts.duplicate).toBe(0);
   });
@@ -64,7 +77,7 @@ describe("brief policy eligibility", () => {
     const result = selectBriefItems([
       candidate({ id: "same-id", project_identifier: "retired-slug" }),
       candidate({ id: "wrong-id", project_id: "11111111-1111-4111-8111-111111111111", project_identifier: "current-slug" }),
-    ], { scope: "essentials", project_id: "c51d5ec3-6e12-50d9-bd02-a43e170a71c6", project_identifier: "current-slug", now });
+    ], { scope: "essentials", project_id: projectId, now });
     expect(result.items.map((item) => item.id)).toEqual(["same-id"]);
     expect(result.omitted_counts.wrong_project).toBe(1);
   });
@@ -104,7 +117,7 @@ describe("brief candidate query", () => {
     db.db.prepare("UPDATE thoughts SET metadata = '{bad json', reinforcement_count = 99 WHERE id = 'noise-000'").run();
 
     const loaded = loadBriefCandidates(db.db, now, {
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
     });
     expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
@@ -144,14 +157,14 @@ describe("brief candidate query", () => {
     });
 
     const loaded = loadBriefCandidates(db.db, now, {
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
     });
     expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
     expect(loaded[0]?.id).toBe("older-legacy-decision");
     const selected = selectBriefItems(loaded, {
       scope: "essentials",
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
       now,
     });
@@ -190,14 +203,14 @@ describe("brief candidate query", () => {
     });
 
     const loaded = loadBriefCandidates(db.db, now, {
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
     });
     expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
     expect(loaded[0]?.id).toBe("requested-legacy");
     const selected = selectBriefItems(loaded, {
       scope: "essentials",
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
       now,
     });
@@ -236,14 +249,14 @@ describe("brief candidate query", () => {
     });
 
     const loaded = loadBriefCandidates(db.db, now, {
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
     });
     expect(loaded).toHaveLength(BRIEF_CANDIDATE_LIMIT);
     expect(loaded[0]?.id).toBe("valid-project-decision");
     const selected = selectBriefItems(loaded, {
       scope: "essentials",
-      project_identifier: "shelby",
+      project_id: projectId,
       include_shared: true,
       now,
     });
