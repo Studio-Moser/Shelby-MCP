@@ -4,7 +4,7 @@ import { BRIEF_CANDIDATE_LIMIT, loadBriefCandidates, type BriefCandidate } from 
 import { linkThoughts } from "../../src/db/edges.js";
 import { insertThought } from "../../src/db/thoughts.js";
 import { emptyOmissionCounts, normalizeBriefSummary, selectBriefItems, type BriefItem } from "../../src/tools/brief-policy.js";
-import { renderTokenBoundBrief } from "../../src/tools/brief-renderer.js";
+import { renderBriefItems, renderTokenBoundBrief } from "../../src/tools/brief-renderer.js";
 
 let db: ThoughtDatabase;
 const now = "2026-07-17T12:00:00Z";
@@ -41,6 +41,7 @@ function candidate(overrides: Partial<BriefCandidate> = {}): BriefCandidate {
     created_at: now,
     updated_at: now,
     actively_refuted: false,
+    refuted_claims: [],
     ...overrides,
   };
 }
@@ -278,13 +279,54 @@ describe("brief candidate query", () => {
     expect(byId.get(expired)?.actively_refuted).toBe(false);
     expect(byId.get(future)?.actively_refuted).toBe(false);
   });
+
+  it("scopes a refutation to its claim instead of killing the whole thought", () => {
+    const decision = { type: "decision", project_identifier: "shelby" } as const;
+    const target = insertThought(db.db, { content: "target", summary: "Target", ...decision });
+    const scoped = insertThought(db.db, { content: "scoped", summary: "Scoped", ...decision });
+    const whole = insertThought(db.db, { content: "whole", summary: "Whole", ...decision });
+    const blank = insertThought(db.db, { content: "blank", summary: "Blank", ...decision });
+    const unsafe = insertThought(db.db, { content: "unsafe", summary: "Unsafe", ...decision });
+    linkThoughts(db, {
+      source_id: scoped, target_id: target, edge_type: "refuted_by",
+      metadata: { claim: "  one claim only  " },
+    });
+    linkThoughts(db, { source_id: whole, target_id: target, edge_type: "refuted_by" });
+    // A blank or non-string claim is not a scope — it falls back to whole-thought refutation.
+    linkThoughts(db, { source_id: blank, target_id: target, edge_type: "refuted_by", metadata: { claim: "   " } });
+    linkThoughts(db, {
+      source_id: unsafe, target_id: target, edge_type: "refuted_by",
+      metadata: { claim: "reach me at nobody@example.com" },
+    });
+
+    const byId = new Map(loadBriefCandidates(db.db, now).map((item) => [item.id, item]));
+    expect(byId.get(scoped)?.actively_refuted).toBe(false);
+    expect(byId.get(scoped)?.refuted_claims).toEqual(["one claim only"]);
+    expect(byId.get(whole)?.actively_refuted).toBe(true);
+    expect(byId.get(blank)?.actively_refuted).toBe(true);
+    expect(byId.get(unsafe)?.actively_refuted).toBe(false);
+
+    const selected = selectBriefItems(loadBriefCandidates(db.db, now), {
+      scope: "full", project_id: projectId, include_shared: true, now,
+    });
+    const items = new Map(selected.items.map((item) => [item.id, item]));
+    // Scoped: kept, caveat carried through to the rendered line.
+    expect(items.get(scoped)?.refuted_claims).toEqual(["one claim only"]);
+    expect(renderBriefItems(selected.items)).toContain("Scoped (superseded: one claim only)");
+    // Whole-thought: still omitted, exactly as before.
+    expect(items.has(whole)).toBe(false);
+    expect(items.has(blank)).toBe(false);
+    // Unsafe claim text never reaches the brief, but the thought survives.
+    expect(items.get(unsafe)?.refuted_claims).toEqual([]);
+    expect(renderBriefItems(selected.items)).not.toContain("nobody@example.com");
+  });
 });
 
 describe("brief rendering budget", () => {
   it("drops whole lowest-priority items without splitting summaries", () => {
     const items: BriefItem[] = [
-      { id: "a", summary: "Primary decision remains intact.", role: "decision", source: "test", trust_level: "trusted", updated_at: now },
-      { id: "b", summary: "Secondary recent item remains intact.", role: "recent", source: "test", trust_level: "trusted", updated_at: now },
+      { id: "a", summary: "Primary decision remains intact.", role: "decision", source: "test", trust_level: "trusted", updated_at: now, refuted_claims: [] },
+      { id: "b", summary: "Secondary recent item remains intact.", role: "recent", source: "test", trust_level: "trusted", updated_at: now, refuted_claims: [] },
     ];
     const omitted = emptyOmissionCounts();
     const rendered = renderTokenBoundBrief(items, omitted, 55);

@@ -17,12 +17,26 @@ export interface BriefCandidate {
   metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+  /** A whole-thought refutation is live: every claim in this thought is superseded. */
   actively_refuted: boolean;
+  /** Claims superseded by claim-scoped refutations. The rest of the thought still stands. */
+  refuted_claims: string[];
 }
 
-interface CandidateRow extends Omit<BriefCandidate, "metadata" | "actively_refuted"> {
+interface CandidateRow extends Omit<BriefCandidate, "metadata" | "actively_refuted" | "refuted_claims"> {
   metadata: string | null;
   actively_refuted: number;
+  refuted_claims: string | null;
+}
+
+function parseRefutedClaims(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value.filter((claim): claim is string => typeof claim === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function parseMetadata(raw: string | null): Record<string, unknown> | null {
@@ -43,6 +57,19 @@ export interface BriefCandidateScope {
   shared_only?: boolean;
   all_projects?: boolean;
 }
+
+/**
+ * A `refuted_by` edge whose metadata carries a non-empty string `claim` refutes only
+ * that claim; the rest of the source thought stands (ADR-0001 §Claim-scoped refutation).
+ * Any other `refuted_by` edge — no `claim`, a blank one, or a non-string — refutes the
+ * whole thought. Evaluates to the claim text, or NULL for a whole-thought refutation.
+ */
+const SCOPED_CLAIM = `(CASE
+    WHEN json_valid(e.metadata)
+      AND json_type(e.metadata, '$.claim') = 'text'
+      AND trim(json_extract(e.metadata, '$.claim')) != ''
+    THEN trim(json_extract(e.metadata, '$.claim'))
+  END)`;
 
 const ELIGIBLE_SHARED = `visibility = 'shared' AND json_valid(metadata)
   AND json_type(metadata, '$.extra.briefEligible') = 'true'`;
@@ -118,9 +145,19 @@ export function loadBriefCandidates(
         SELECT 1 FROM edges e
         WHERE e.source_id = t.id
           AND e.edge_type = 'refuted_by'
+          AND ${SCOPED_CLAIM} IS NULL
           AND (e.valid_from IS NULL OR e.valid_from <= @now)
           AND (e.valid_until IS NULL OR e.valid_until > @now)
-      ) AS actively_refuted
+      ) AS actively_refuted,
+      (
+        SELECT json_group_array(${SCOPED_CLAIM})
+        FROM edges e
+        WHERE e.source_id = t.id
+          AND e.edge_type = 'refuted_by'
+          AND ${SCOPED_CLAIM} IS NOT NULL
+          AND (e.valid_from IS NULL OR e.valid_from <= @now)
+          AND (e.valid_until IS NULL OR e.valid_until > @now)
+      ) AS refuted_claims
     FROM thoughts t
     ORDER BY
       CASE WHEN ${requestedScope} THEN 1 ELSE 0 END DESC,
@@ -143,5 +180,6 @@ export function loadBriefCandidates(
     ...row,
     metadata: parseMetadata(row.metadata),
     actively_refuted: row.actively_refuted !== 0,
+    refuted_claims: parseRefutedClaims(row.refuted_claims),
   }));
 }

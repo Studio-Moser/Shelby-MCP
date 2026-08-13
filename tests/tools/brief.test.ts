@@ -42,7 +42,7 @@ describe("handleGetBrief curated response", () => {
       scope: "full",
       thought_count: 0,
       last_activity: null,
-      policy_version: 1,
+      policy_version: 2,
       estimated_tokens: 33,
       items: [],
     });

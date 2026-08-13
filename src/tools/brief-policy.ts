@@ -1,7 +1,7 @@
 import type { BriefCandidate } from "../db/brief-candidates.js";
 import type { TrustLevel } from "../db/thoughts.js";
 
-export const BRIEF_POLICY_VERSION = 1;
+export const BRIEF_POLICY_VERSION = 2;
 export type BriefScope = "essentials" | "recent" | "full";
 export type BriefRole = "constraint" | "decision" | "milestone" | "blocker" | "preference" | "recent";
 export type BriefOmissionReason =
@@ -15,6 +15,11 @@ export interface BriefItem {
   source: string;
   trust_level: TrustLevel;
   updated_at: string;
+  /**
+   * Claims inside this thought that a claim-scoped `refuted_by` edge has superseded.
+   * The thought itself still stands — only these claims are dead. Empty for most items.
+   */
+  refuted_claims: string[];
 }
 
 export interface BriefPolicyResult {
@@ -92,6 +97,20 @@ export function normalizeBriefSummary(summary: string): string | null {
   ).join("");
 }
 
+/**
+ * Claim text is free-form and reaches the brief, so it runs the same injection/PII gate
+ * as summaries. A claim that fails the gate is dropped, never rendered unsanitized —
+ * the thought keeps its remaining caveats and stays eligible either way.
+ */
+function sanitizeRefutedClaims(claims: string[]): string[] {
+  const seen = new Set<string>();
+  for (const claim of claims) {
+    const safe = normalizeBriefSummary(claim);
+    if (safe !== null) seen.add(safe);
+  }
+  return [...seen];
+}
+
 function classify(candidate: BriefCandidate): { role: BriefRole; explicitEligible: boolean; summary: string } | null {
   const extra = extraMetadata(candidate);
   if (extra === null) return null;
@@ -163,6 +182,7 @@ export function selectBriefItems(
       source: candidate.source,
       trust_level: candidate.trust_level,
       updated_at: candidate.updated_at,
+      refuted_claims: sanitizeRefutedClaims(candidate.refuted_claims),
       explicitEligible: classified.explicitEligible,
       reinforcementCount: candidate.reinforcement_count,
     });

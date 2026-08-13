@@ -14,7 +14,7 @@ interface Fixture {
   policy_version: number;
   request: { scope: BriefScope; project_identifier: string; include_shared: boolean; all_projects: boolean; now: string };
   thoughts: Array<Record<string, unknown>>;
-  active_refutations: Array<{ source_id: string; target_id: string }>;
+  active_refutations: Array<{ source_id: string; target_id: string; claim?: string }>;
   summary_safety_cases: Array<{ input: string; decision: "accept" | "reject"; reason?: string; normalized?: string }>;
   expected_by_scope: Record<BriefScope, string[]>;
   legacy_default_roles: Record<string, string>;
@@ -60,12 +60,13 @@ beforeEach(() => {
     });
   }
   const edge = db.db.prepare(`
-    INSERT INTO edges (id, source_id, target_id, edge_type, created_at)
-    VALUES (@id, @source_id, @target_id, 'refuted_by', @created_at)
+    INSERT INTO edges (id, source_id, target_id, edge_type, metadata, created_at)
+    VALUES (@id, @source_id, @target_id, 'refuted_by', @metadata, @created_at)
   `);
-  fixture.active_refutations.forEach((item, index) => edge.run({
-    id: `refutation-${index}`,
+  fixture.active_refutations.forEach(({ claim, ...item }, index) => edge.run({
     ...item,
+    id: `refutation-${index}`,
+    metadata: claim === undefined ? null : JSON.stringify({ claim }),
     created_at: fixture.request.now,
   }));
 });
@@ -75,7 +76,7 @@ afterEach(() => db.close());
 describe("canonical brief-policy fixture", () => {
   it("keeps the copied fixture byte-identical to the canonical Docs fixture", () => {
     const digest = createHash("sha256").update(readFileSync(fixturePath)).digest("hex");
-    expect(digest).toBe("683d5d8f4e0fca374d56aeab2b36bf3ce9de02b709dfda6e98ded4d25b39de49");
+    expect(digest).toBe("bbd6a5647eb256f51fd4847ba71387c8482dd8520f288be69e4a27273c63d956");
   });
 
   it("matches every summary safety case exactly", () => {
