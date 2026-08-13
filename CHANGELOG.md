@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Canonical immutable project UUIDs, alias-aware project resolution, and additive `project_id` inputs and outputs for project-scoped MCP tools.
 - Curated `get_brief` policy with trusted exact-project/shared eligibility, sensitivity and prompt-injection filtering, consolidation/refutation handling, deterministic role lanes, summary deduplication, an 800-token default budget, structured items, and omission diagnostics. The MCP schema now exposes `include_shared`; `select_context` reuses the same curated essentials policy.
+- Claim-scoped refutation. A `refuted_by` edge whose `metadata` carries a non-empty string `claim` now supersedes **only that claim**: the source thought stays brief-eligible and renders as `- <summary> (superseded: <claim>)`. `get_brief` items gain a `refuted_claims` array. Previously refutation was all-or-nothing, so correcting one claim in a multi-claim thought dropped every still-valid claim it carried out of every brief. See [ADR 0001 §5a](https://github.com/Studio-Moser/Shelby-Docs/blob/main/docs/adr/0001-memory-server-architecture-contract.md).
 
 ### Changed
+
+- **Breaking (output shape):** `get_brief` items now always include a `refuted_claims` array, and a thought carrying a scoped refutation renders with a `(superseded: …)` caveat appended to its line. Consumers that parse brief markdown or item objects should tolerate both. `policy_version` bumped 1 → 2 to signal the change; the canonical cross-codebase fixture is at `fixture_version` 2.
+- A `refuted_by` edge with no `claim`, a blank `claim`, or a non-string `claim` continues to refute the whole thought. Existing edges carry no `metadata`, so stored data and current behaviour are unaffected.
+- Claim text passes the same normalization, prompt-injection and PII gate as summaries before reaching a brief; a claim that fails the gate is dropped without affecting its thought's eligibility.
 
 - Project-scoped reads and updates now use UUID identity while retaining current slugs as compatibility fields.
 - Schema version stamp bumped from 4 → 5 to align with Shelby-MacOS's Swift memory implementation, per [ADR 0001 §8](https://github.com/Studio-Moser/Shelby-Docs/blob/main/docs/adr/0001-memory-server-architecture-contract.md). No actual schema change — the v5 migration is a no-op version stamp. Both codebases now advance through the same migration sequence so cross-codebase tooling and conformance tests can rely on a single number.
