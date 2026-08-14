@@ -262,6 +262,33 @@ const migrations: Migration[] = [
 			);
     },
   },
+	{
+		version: 9,
+		description: "Track thought re-confirmation timestamps",
+		up: (db) => {
+			db.exec("ALTER TABLE thoughts ADD COLUMN last_confirmed_at TEXT");
+		},
+	},
+	{
+		version: 10,
+		description: "Local search telemetry and rediscovery tracking",
+		up: (db) => {
+			// Local-only diagnostic data: this table is not part of any sync path.
+			db.exec(`
+				CREATE TABLE search_telemetry (
+					id                 TEXT PRIMARY KEY,
+					created_at         TEXT NOT NULL,
+					query_hash         TEXT NOT NULL,
+					mode               TEXT NOT NULL,
+					result_count       INTEGER NOT NULL,
+					top_ids            TEXT NOT NULL,
+					rediscovery        INTEGER NOT NULL,
+					project_identifier TEXT
+				);
+				CREATE INDEX idx_search_telemetry_created_at ON search_telemetry(created_at);
+			`);
+		},
+	},
 ];
 
 export function getSchemaVersion(db: Database.Database): number {

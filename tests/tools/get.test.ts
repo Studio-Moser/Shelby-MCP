@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleGetThought } from "../../src/tools/get.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
+import { getThought } from "../../src/db/thoughts.js";
 
 let db: ThoughtDatabase;
 
@@ -55,4 +56,25 @@ describe("handleGetThought", () => {
     const data = JSON.parse(r.content[0].text);
     expect(data.error).toBe("not_found");
   });
+
+	it("reinforces a retrieved thought without confirming it", () => {
+		const id = parseResult(handleCaptureThought(db, { content: "Frequently useful" })).id;
+
+		handleGetThought(db, { id });
+
+		const thought = getThought(db.db, id)!;
+		expect(thought.reinforcement_count).toBe(1);
+		expect(thought.last_confirmed_at).toBeNull();
+	});
+
+	it("still returns the thought when reinforcement fails", () => {
+		const id = parseResult(handleCaptureThought(db, { content: "Readable regardless" })).id;
+		db.db.exec(`CREATE TRIGGER reject_reinforcement BEFORE UPDATE OF reinforcement_count ON thoughts
+			BEGIN SELECT RAISE(ABORT, 'blocked'); END`);
+
+		const data = parseResult(handleGetThought(db, { id }));
+
+		expect(data.id).toBe(id);
+		expect(data.content).toBe("Readable regardless");
+	});
 });

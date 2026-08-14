@@ -4,6 +4,11 @@ import { searchThoughts } from "../db/fts.js";
 import { searchByEmbedding } from "../db/vectors.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
 import { resolveReadProjectScope } from "./project-scope.js";
+import { canonicalizeTopic } from "../db/topic-canonicalization.js";
+import {
+	recordSearchTelemetry,
+	type SearchMode,
+} from "../db/search-telemetry.js";
 
 interface SearchArgs {
   query?: string;
@@ -18,6 +23,7 @@ interface SearchArgs {
   shared_only?: boolean;
   all_projects?: boolean;
   graph_depth?: number;
+	topic?: string;
 }
 
 interface SearchMetadata {
@@ -60,6 +66,10 @@ function eligibleVectorThoughtIds(
     whereClauses.push("project = ?");
     params.push(args.project);
   }
+	if (args.topic) {
+		whereClauses.push("topics LIKE ?");
+		params.push(`%"${canonicalizeTopic(args.topic)}"%`);
+	}
   if (args.shared_only) whereClauses.push("visibility = 'shared'");
   if (projectId !== undefined) {
     whereClauses.push(args.include_shared
@@ -75,12 +85,13 @@ function eligibleVectorThoughtIds(
 }
 
 function matchesFilters(
-  item: { id: string; type: string },
+  item: { id: string; type: string; topics: string[] },
   metadata: Map<string, SearchMetadata>,
   args: SearchArgs,
   projectId: string | undefined,
 ): boolean {
   if (args.type && item.type !== args.type) return false;
+	if (args.topic && !item.topics.includes(canonicalizeTopic(args.topic))) return false;
   const meta = metadata.get(item.id);
   if (!meta) return false;
   if (args.project && meta.project !== args.project) return false;
@@ -116,6 +127,23 @@ export function handleSearchThoughts(
   const eligibleThoughtIds = a.embedding
     ? eligibleVectorThoughtIds(db, a, projectId)
     : undefined;
+	const recordTelemetry = (
+		mode: SearchMode,
+		results: Array<{ id: string }>,
+		resultCount: number,
+	): void => {
+		try {
+			recordSearchTelemetry(db.db, {
+				query: a.query ?? "",
+				mode,
+				resultCount,
+				topIds: results.map(({ id }) => id),
+				projectIdentifier: a.all_projects === true ? null : scope.currentSlug ?? null,
+			});
+		} catch {
+			// Telemetry is best-effort and must not affect search availability.
+		}
+	};
 
   if (a.embedding && !a.query) {
     const poolSize = projectId !== undefined || a.type || a.project || a.shared_only ? 100 : limit;
@@ -132,6 +160,7 @@ export function handleSearchThoughts(
       .map((item) => ({ ...item, ...metadata.get(item.id)! }));
     const results = filtered.slice(0, limit);
     const graph_related = fetchGraphRelated(db, results.map((r) => r.id), graphDepth);
+		recordTelemetry("vector", results, filtered.length);
     return toolSuccess({
       mode: "vector",
       results,
@@ -152,8 +181,10 @@ export function handleSearchThoughts(
       project_id: projectId,
       include_shared: a.include_shared,
       shared_only: a.shared_only,
+			topic: a.topic,
     });
     const graph_related = fetchGraphRelated(db, ftsResult.results.map((r) => r.id), graphDepth);
+		recordTelemetry("fts", ftsResult.results, ftsResult.total_count);
     return toolSuccess({
       mode: "fts",
       ...ftsResult,
@@ -172,6 +203,7 @@ export function handleSearchThoughts(
       project_id: projectId,
       include_shared: a.include_shared,
       shared_only: a.shared_only,
+			topic: a.topic,
     });
     const vectorResult = searchByEmbedding(
       db.db,
@@ -212,6 +244,7 @@ export function handleSearchThoughts(
     const total_count = scored.length;
     const sliced = scored.slice(offset, offset + limit);
     const graph_related = fetchGraphRelated(db, sliced.map((r) => r.id), graphDepth);
+		recordTelemetry("hybrid", sliced, total_count);
     return toolSuccess({
       mode: "hybrid",
       results: sliced,

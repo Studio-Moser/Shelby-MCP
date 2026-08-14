@@ -66,6 +66,22 @@ describe("MCP Integration", () => {
     expect(tools).toHaveLength(12);
   });
 
+  it("accepts preference captures and stores the canonical decision type", async () => {
+    const result = parseResult(await client.callTool({
+      name: "capture_thought",
+      arguments: {
+        content: "Prefer focused diffs over broad refactors",
+        summary: "Prefer focused diffs",
+        type: "preference",
+      },
+    })) as { id: string };
+
+    const stored = db.db
+      .prepare("SELECT type, visibility FROM thoughts WHERE id = ?")
+      .get(result.id) as { type: string; visibility: string };
+    expect(stored).toEqual({ type: "decision", visibility: "shared" });
+  });
+
   it("exposes include_shared and applies shared/all-project brief scope", async () => {
     upsertProject(db.db, {
       slug: "shelby",

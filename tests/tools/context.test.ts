@@ -85,6 +85,15 @@ describe("handleSelectContext", () => {
     expect(data.document).toContain("Auth");
   });
 
+	it("canonicalizes its first topic filter", () => {
+		capture("Graph context", { topics: ["Knowledge Graph"], summary: "Graph" });
+
+		const data = parseResult(handleSelectContext(db, { topics: ["knowledge_graph"] }));
+
+		expect(data.matched_count).toBe(1);
+		expect(data.document).toContain("Graph context");
+	});
+
   it("filters by person", () => {
     capture("Tim said...", { people: ["Tim"], summary: "Tim quote" });
     capture("Sarah said...", { people: ["Sarah"], summary: "Sarah quote" });

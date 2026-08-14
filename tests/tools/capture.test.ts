@@ -75,6 +75,15 @@ describe("handleCaptureThought", () => {
     expect(thought!.metadata).toEqual({ key: "value" });
   });
 
+	it("canonicalizes and deduplicates topics before insert", () => {
+		const data = parseResult(handleCaptureThought(db, {
+			content: "Canonical topics",
+			topics: [" Knowledge Graph ", "knowledge_graph", "API  Design"],
+		}));
+
+		expect(getThought(db.db, data.id)?.topics).toEqual(["knowledge-graph", "api-design"]);
+	});
+
   it("creates related edges for existing thoughts", () => {
     // Create a target thought first
     const target = handleCaptureThought(db, { content: "Target thought" });
@@ -185,6 +194,92 @@ describe("handleCaptureThought", () => {
     expect(selfSuggestion).toBeUndefined();
   });
 
+	it("NOOPs an exact same-type unscoped duplicate and merges confirmation metadata", () => {
+		const target = parseResult(handleCaptureThought(db, {
+			content: "unrelated target memory words",
+			visibility: "shared",
+		})).id;
+		const existing = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			type: "insight",
+			visibility: "shared",
+			topics: ["Original Topic"],
+			people: ["Alice"],
+		})).id;
+
+		const data = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			type: "insight",
+			visibility: "shared",
+			topics: ["New Topic"],
+			people: ["Bob"],
+			related_to: [target],
+		}));
+
+		expect(data).toMatchObject({ id: existing, action: "noop", linked: [target] });
+		expect(db.db.prepare("SELECT COUNT(*) AS count FROM thoughts").get()).toEqual({ count: 2 });
+		expect(getThought(db.db, existing)).toMatchObject({
+			topics: ["original-topic", "new-topic"],
+			people: ["Alice", "Bob"],
+			reinforcement_count: 1,
+		});
+		expect(getThought(db.db, existing)?.last_confirmed_at).toBeTruthy();
+		expect(getEdgesBetween(db, existing, target)).toHaveLength(1);
+	});
+
+	it("auto-links at 0.8 and suggests matches from 0.3", () => {
+		const autoTarget = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta",
+			visibility: "shared",
+		})).id;
+		const auto = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			visibility: "shared",
+		}));
+		expect(auto.action).toBe("add");
+		expect(auto.linked).toContain(autoTarget);
+		expect(getEdgesBetween(db, auto.id, autoTarget)).toHaveLength(1);
+
+		const suggestionTarget = parseResult(handleCaptureThought(db, {
+			content: "kilo lima mike november",
+			visibility: "shared",
+		})).id;
+		const suggested = parseResult(handleCaptureThought(db, {
+			content: "kilo lima oscar papa",
+			visibility: "shared",
+		}));
+		expect(suggested.action).toBe("add");
+		expect(getEdgesBetween(db, suggested.id, suggestionTarget)).toHaveLength(0);
+		expect(suggested.suggested_connections).toEqual([
+			expect.objectContaining({ id: suggestionTarget }),
+		]);
+	});
+
+	it("never reconciles across thought type or project slug", () => {
+		upsertProject(db.db, { slug: "alpha-project", displayName: "Alpha", memberRepos: [], memberPaths: [], provisional: false });
+		upsertProject(db.db, { slug: "beta-project", displayName: "Beta", memberRepos: [], memberPaths: [], provisional: false });
+		const content = "same exact content across strict scopes";
+		const first = parseResult(handleCaptureThought(db, {
+			content,
+			type: "note",
+			project_identifier: "alpha-project",
+		})).id;
+		const differentType = parseResult(handleCaptureThought(db, {
+			content,
+			type: "decision",
+			project_identifier: "alpha-project",
+		}));
+		const differentProject = parseResult(handleCaptureThought(db, {
+			content,
+			type: "note",
+			project_identifier: "beta-project",
+		}));
+
+		expect(differentType).toMatchObject({ action: "add" });
+		expect(differentProject).toMatchObject({ action: "add" });
+		expect(new Set([first, differentType.id, differentProject.id]).size).toBe(3);
+	});
+
   it("stamps project_identifier from cwd when not provided explicitly", () => {
     const root = makeGitRepo("git@github.com:acme/My-Project.git");
     try {
@@ -208,6 +303,7 @@ describe("handleCaptureThought", () => {
     const data = parseResult(result);
     const thought = getThought(db.db, data.id);
     expect(thought!.visibility).toBe("shared");
+		expect(thought!.type).toBe("decision");
   });
 
   it("defaults visibility to 'personal' for note type when not specified", () => {

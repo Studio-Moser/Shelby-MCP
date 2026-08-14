@@ -71,6 +71,16 @@ describe("handleListThoughts", () => {
     expect(data.results.length).toBe(1);
   });
 
+	it("canonicalizes topic filters", () => {
+		captureId("Graph memory", { topics: ["Knowledge Graph"] });
+		captureId("Other memory", { topics: ["database"] });
+
+		const data = parseResult(handleListThoughts(db, { topic: "knowledge_graph" }));
+
+		expect(data.total_count).toBe(1);
+		expect(data.results[0].topics).toEqual(["knowledge-graph"]);
+	});
+
   it("filters by has_summary = false (missing summaries)", () => {
     captureId("Has summary", { summary: "A summary" });
     captureId("No summary");

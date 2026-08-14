@@ -23,8 +23,8 @@ describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
     db?.close();
   });
 
-	it("schema version is 8 after all migrations", () => {
-		expect(getSchemaVersion(db.db)).toBe(8);
+	it("schema version is 10 after all migrations", () => {
+		expect(getSchemaVersion(db.db)).toBe(10);
   });
 
   it("thoughts table has source_agent column", () => {
@@ -126,7 +126,7 @@ describe("migration v6 — project identity", () => {
     const db = new Database(":memory:");
     runMigrations(db);
 
-		expect(getSchemaVersion(db)).toBe(8);
+		expect(getSchemaVersion(db)).toBe(10);
 
 		const thoughtCols = db
 			.prepare("PRAGMA table_info(thoughts)")
@@ -149,6 +149,29 @@ describe("migration v6 — project identity", () => {
     );
     db.close();
   });
+});
+
+describe("migration v9 — thought confirmation timestamp", () => {
+	it("adds nullable last_confirmed_at without backfilling existing thoughts", () => {
+		const db = new Database(":memory:");
+		for (const migration of getMigrations().filter(({ version }) => version <= 8)) {
+			migration.up(db);
+		}
+		setSchemaVersion(db, 8);
+		db.prepare(
+			`INSERT INTO thoughts (id, content, type, source, created_at, updated_at)
+			 VALUES ('legacy', 'content', 'note', 'test', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z')`,
+		).run();
+
+		getMigrations().find(({ version }) => version === 9)!.up(db);
+		setSchemaVersion(db, 9);
+
+		expect(getSchemaVersion(db)).toBe(9);
+		expect(
+			db.prepare("SELECT last_confirmed_at FROM thoughts WHERE id = 'legacy'").get(),
+		).toEqual({ last_confirmed_at: null });
+		db.close();
+	});
 });
 
 describe("migration v7 — normalize legacy display-name project_identifiers", () => {
@@ -372,10 +395,31 @@ describe("migration v8 — canonical project identity", () => {
 				)
 				.get();
 			expect(after).toEqual(before);
-			expect(reopened.getSchemaVersion()).toBe(8);
+			expect(reopened.getSchemaVersion()).toBe(10);
 			reopened.close();
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}
   });
+});
+
+describe("migration v10 — local search telemetry", () => {
+	it("creates the search_telemetry table with the parity columns", () => {
+		const db = new Database(":memory:");
+		runMigrations(db);
+
+		const columns = db.prepare("PRAGMA table_info(search_telemetry)").all() as Array<{ name: string }>;
+		expect(columns.map(({ name }) => name)).toEqual([
+			"id",
+			"created_at",
+			"query_hash",
+			"mode",
+			"result_count",
+			"top_ids",
+			"rediscovery",
+			"project_identifier",
+		]);
+		expect(getSchemaVersion(db)).toBe(10);
+		db.close();
+	});
 });

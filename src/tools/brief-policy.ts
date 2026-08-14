@@ -38,7 +38,8 @@ export interface BriefPolicyInput {
 }
 
 const ROLES = new Set<BriefRole>(["constraint", "decision", "milestone", "blocker", "preference", "recent"]);
-const LEGACY_TYPES = new Set(["decision", "reference", "insight"]);
+// `preference` remains readable as a legacy alias; new captures store `decision`.
+const LEGACY_TYPES = new Set(["decision", "reference", "insight", "preference"]);
 const ESSENTIAL_ROLES = new Set<BriefRole>(["constraint", "decision", "milestone", "blocker", "preference"]);
 const LANE: Record<BriefRole, number> = { constraint: 0, decision: 1, milestone: 2, blocker: 3, preference: 4, recent: 5 };
 

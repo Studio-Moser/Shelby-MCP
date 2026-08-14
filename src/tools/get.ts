@@ -1,5 +1,5 @@
 import type { ThoughtDatabase } from "../db/database.js";
-import { getThought } from "../db/thoughts.js";
+import { getThought, incrementReinforcement } from "../db/thoughts.js";
 import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
 
 export function handleGetThought(
@@ -16,6 +16,12 @@ export function handleGetThought(
   if (!thought) {
     return toolError("not_found", `Thought "${id}" not found`);
   }
+
+	try {
+		incrementReinforcement(db.db, id, 1, false);
+	} catch {
+		// Reinforcement is best-effort and must never prevent a successful read.
+	}
 
   // Strip embedding buffer from response (binary data isn't useful in JSON)
   const { embedding, ...rest } = thought;

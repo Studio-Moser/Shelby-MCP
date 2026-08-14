@@ -90,7 +90,9 @@ const VALID_EXPLICIT_METADATA = `json_valid(t.metadata)
       json_extract(t.metadata, '$.extra.sensitivity') = 'normal')
   )`;
 
-const LEGACY_SAFE = `t.type IN ('decision', 'reference', 'insight')
+// `preference` is retained as a legacy alias for rows captured before preferences
+// were folded into the canonical `decision` type.
+const LEGACY_SAFE = `t.type IN ('decision', 'reference', 'insight', 'preference')
   AND json_valid(t.metadata)
   AND json_type(t.metadata) = 'object'
   AND (

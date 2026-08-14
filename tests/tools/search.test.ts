@@ -53,6 +53,29 @@ describe("handleSearchThoughts", () => {
     expect(data.results[0].id).toBeDefined();
   });
 
+	it("records hashed search telemetry and rediscovery without raw query text", () => {
+		captureId("Telemetry alpha result");
+		captureId("Telemetry alpha second result");
+
+		handleSearchThoughts(db, { query: "telemetry alpha", all_projects: true });
+		handleSearchThoughts(db, { query: "telemetry alpha", all_projects: true });
+
+		const rows = db.db.prepare(
+			"SELECT query_hash, mode, result_count, top_ids, rediscovery, project_identifier FROM search_telemetry ORDER BY created_at, rowid",
+		).all() as Array<Record<string, unknown>>;
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toMatchObject({
+			mode: "fts",
+			result_count: 2,
+			rediscovery: 0,
+			project_identifier: null,
+		});
+		expect(rows[0].query_hash).toMatch(/^[a-f0-9]{64}$/);
+		expect(rows[0].query_hash).not.toBe("telemetry alpha");
+		expect(JSON.parse(rows[0].top_ids as string)).toHaveLength(2);
+		expect(rows[1].rediscovery).toBe(1);
+	});
+
   it("returns empty results for no FTS matches", () => {
     captureId("Hello world");
 
@@ -61,6 +84,18 @@ describe("handleSearchThoughts", () => {
     expect(data.results).toEqual([]);
     expect(data.total_count).toBe(0);
   });
+
+	it("canonicalizes topic filters for FTS search", () => {
+		const matching = captureId("Graph alpha memory", { topics: ["Knowledge Graph"] });
+		captureId("Graph beta memory", { topics: ["database"] });
+
+		const data = parseResult(handleSearchThoughts(db, {
+			query: "graph memory",
+			topic: "knowledge_graph",
+		}));
+
+		expect(data.results.map((result: { id: string }) => result.id)).toEqual([matching]);
+	});
 
   it("performs vector search when embedding is provided", () => {
     const id = captureId("Vector test thought");
@@ -255,9 +290,9 @@ describe("handleSearchThoughts", () => {
   });
 
   it("hybrid RRF type+project filter applies both constraints simultaneously", () => {
-    const idMatch = captureId("Database schema migration plan", { type: "decision", project: "proj-x" });
-    const idWrongType = captureId("Database schema migration plan", { type: "note", project: "proj-x" });
-    const idWrongProject = captureId("Database schema migration plan", { type: "decision", project: "proj-y" });
+    const idMatch = captureId("Database schema migration plan approved", { type: "decision", project: "proj-x" });
+    const idWrongType = captureId("Database schema migration plan approved", { type: "note", project: "proj-x" });
+    const idWrongProject = captureId("Database schema migration plan rejected", { type: "decision", project: "proj-y" });
 
     storeEmbedding(db.db, idMatch, [1.0, 0.0, 0.0]);
     storeEmbedding(db.db, idWrongType, [1.0, 0.0, 0.0]);

@@ -7,6 +7,7 @@ import {
   deleteThought,
   listThoughts,
   countThoughts,
+	incrementReinforcement,
 } from "../../src/db/thoughts.js";
 import { runMigrations } from "../../src/db/migrations.js";
 import BetterSqlite3 from "better-sqlite3";
@@ -46,6 +47,7 @@ describe("thoughts CRUD", () => {
       expect(thought!.embedding).toBeNull();
       expect(thought!.consolidated_into).toBeNull();
       expect(thought!.reinforcement_count).toBe(0);
+		expect(thought!.last_confirmed_at).toBeNull();
       expect(thought!.created_at).toBeTruthy();
       expect(thought!.updated_at).toBeTruthy();
     });
@@ -81,6 +83,28 @@ describe("thoughts CRUD", () => {
       expect(result).toBeNull();
     });
   });
+
+	describe("incrementReinforcement", () => {
+		it("increments use count without confirming by default", () => {
+			const id = insertThought(db, { content: "Useful thought" });
+
+			expect(incrementReinforcement(db, id, 2)).toBe(true);
+
+			const thought = getThought(db, id)!;
+			expect(thought.reinforcement_count).toBe(2);
+			expect(thought.last_confirmed_at).toBeNull();
+		});
+
+		it("sets last_confirmed_at when explicitly confirming", () => {
+			const id = insertThought(db, { content: "Confirmed thought" });
+
+			expect(incrementReinforcement(db, id, 1, true)).toBe(true);
+
+			const thought = getThought(db, id)!;
+			expect(thought.reinforcement_count).toBe(1);
+			expect(thought.last_confirmed_at).toBeTruthy();
+		});
+	});
 
   describe("updateThought", () => {
     it("updates content", () => {

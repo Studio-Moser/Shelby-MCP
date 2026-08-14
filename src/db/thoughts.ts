@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import { canonicalizeTopic } from "./topic-canonicalization.js";
 
 export type TrustLevel = "trusted" | "unverified" | "external";
 
@@ -39,6 +40,7 @@ export interface ThoughtRecord {
   updated_at: string;
   consolidated_into: string | null;
   reinforcement_count: number;
+	last_confirmed_at: string | null;
 }
 
 export interface ThoughtSummary {
@@ -96,6 +98,7 @@ interface RawThoughtRow {
   updated_at: string;
   consolidated_into: string | null;
   reinforcement_count: number;
+	last_confirmed_at: string | null;
 }
 
 interface RawSummaryRow {
@@ -151,6 +154,7 @@ function rowToRecord(row: RawThoughtRow): ThoughtRecord {
     updated_at: row.updated_at,
     consolidated_into: row.consolidated_into,
     reinforcement_count: row.reinforcement_count,
+		last_confirmed_at: row.last_confirmed_at,
   };
 }
 
@@ -210,6 +214,21 @@ export function getThought(db: Database.Database, id: string): ThoughtRecord | n
   `).get(id) as RawThoughtRow | undefined;
   if (!row) return null;
   return rowToRecord(row);
+}
+
+export function incrementReinforcement(
+	db: Database.Database,
+	id: string,
+	amount = 1,
+	confirm = false,
+): boolean {
+	const result = db.prepare(
+		`UPDATE thoughts
+		 SET reinforcement_count = reinforcement_count + @amount,
+		     last_confirmed_at = CASE WHEN @confirm = 1 THEN @now ELSE last_confirmed_at END
+		 WHERE id = @id`,
+	).run({ id, amount, confirm: confirm ? 1 : 0, now: new Date().toISOString() });
+	return result.changes > 0;
 }
 
 export function updateThought(
@@ -313,7 +332,7 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   }
   if (options.topic) {
     whereClauses.push("topics LIKE @topic");
-    params.topic = `%"${options.topic}"%`;
+		params.topic = `%"${canonicalizeTopic(options.topic)}"%`;
   }
   if (options.person) {
     whereClauses.push("people LIKE @person");

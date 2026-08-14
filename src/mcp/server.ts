@@ -162,7 +162,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         content: z.string().max(MAX_CONTENT_LENGTH).describe("The thought content").optional(),
         summary: z.string().max(MAX_SUMMARY_LENGTH).describe("One-line summary for search results").optional(),
         type: z
-          .enum(["note", "decision", "task", "question", "reference", "insight"])
+          .enum(["note", "decision", "task", "question", "reference", "insight", "preference"])
           .describe("Thought type")
           .optional(),
         source: z.string().describe("Source tool or context").optional(),
@@ -269,6 +269,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         limit: z.number().describe("Max results (default 20, max 100)").optional(),
         offset: z.number().describe("Pagination offset").optional(),
         type: z.string().describe("Filter by thought type").optional(),
+		topic: z.string().describe("Filter by topic").optional(),
         project: z.string().describe("Filter by project").optional(),
         project_id: projectIdSchema.optional(),
         project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
