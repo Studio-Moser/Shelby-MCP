@@ -44,14 +44,15 @@ describe("MCP Integration", () => {
     db?.close();
   });
 
-  // ---- 1. Lists all 11 tools ----
-  // (9 original memory tools + get_brief + select_context ported from the Mac app)
-  it("lists all 11 tools", async () => {
+  // ---- 1. Lists all 12 tools ----
+  // (9 original memory tools + get_brief + select_context + expand_neighbors ported from the Mac app)
+  it("lists all 12 tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "capture_thought",
       "delete_thought",
+      "expand_neighbors",
       "explore_graph",
       "get_brief",
       "get_thought",
@@ -62,7 +63,7 @@ describe("MCP Integration", () => {
       "thought_stats",
       "update_thought",
     ]);
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(12);
   });
 
   it("exposes include_shared and applies shared/all-project brief scope", async () => {
