@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
-import { canonicalizeTopic } from "./topic-canonicalization.js";
+import {
+	canonicalizeTopics,
+	topicLikePattern,
+} from "./topic-canonicalization.js";
 
 export type TrustLevel = "trusted" | "unverified" | "external";
 
@@ -111,11 +114,13 @@ interface RawSummaryRow {
   created_at: string;
 }
 
-function parseJsonArray(raw: string | null): string[] {
+export function parseJsonArray(raw: string | null): string[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+		const parsed: unknown = JSON.parse(raw);
+		return Array.isArray(parsed)
+			? parsed.filter((item): item is string => typeof item === "string")
+			: [];
   } catch {
     return [];
   }
@@ -195,7 +200,7 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
     project: input.project ?? null,
     project_id: input.project_id ?? project?.project_id ?? null,
     project_identifier: project?.current_slug ?? input.project_identifier ?? null,
-    topics: input.topics ? JSON.stringify(input.topics) : null,
+    topics: input.topics ? JSON.stringify(canonicalizeTopics(input.topics)) : null,
     people: input.people ? JSON.stringify(input.people) : null,
     visibility: input.visibility ?? "personal",
     metadata: input.metadata ? JSON.stringify(input.metadata) : null,
@@ -225,6 +230,7 @@ export function incrementReinforcement(
 	const result = db.prepare(
 		`UPDATE thoughts
 		 SET reinforcement_count = reinforcement_count + @amount,
+		     updated_at = @now,
 		     last_confirmed_at = CASE WHEN @confirm = 1 THEN @now ELSE last_confirmed_at END
 		 WHERE id = @id`,
 	).run({ id, amount, confirm: confirm ? 1 : 0, now: new Date().toISOString() });
@@ -269,7 +275,7 @@ export function updateThought(
   }
   if (updates.topics !== undefined) {
     setClauses.push("topics = @topics");
-    params.topics = JSON.stringify(updates.topics);
+		params.topics = JSON.stringify(canonicalizeTopics(updates.topics));
   }
   if (updates.people !== undefined) {
     setClauses.push("people = @people");
@@ -332,7 +338,7 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   }
   if (options.topic) {
     whereClauses.push("topics LIKE @topic");
-		params.topic = `%"${canonicalizeTopic(options.topic)}"%`;
+		params.topic = topicLikePattern(options.topic);
   }
   if (options.person) {
     whereClauses.push("people LIKE @person");

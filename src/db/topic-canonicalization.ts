@@ -13,3 +13,7 @@ export function canonicalizeTopics(topics: string[]): string[] {
 	}
 	return canonical;
 }
+
+export function topicLikePattern(topic: string): string {
+	return `%"${canonicalizeTopic(topic)}"%`;
+}

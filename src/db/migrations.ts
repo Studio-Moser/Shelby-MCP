@@ -7,6 +7,8 @@ export interface Migration {
   up: (db: Database.Database) => void;
 }
 
+export const CURRENT_SCHEMA_VERSION = 11;
+
 const migrations: Migration[] = [
   {
     version: 1,
@@ -264,29 +266,47 @@ const migrations: Migration[] = [
   },
 	{
 		version: 9,
-		description: "Track thought re-confirmation timestamps",
-		up: (db) => {
-			db.exec("ALTER TABLE thoughts ADD COLUMN last_confirmed_at TEXT");
-		},
-	},
-	{
-		version: 10,
 		description: "Local search telemetry and rediscovery tracking",
 		up: (db) => {
 			// Local-only diagnostic data: this table is not part of any sync path.
 			db.exec(`
-				CREATE TABLE search_telemetry (
-					id                 TEXT PRIMARY KEY,
-					created_at         TEXT NOT NULL,
-					query_hash         TEXT NOT NULL,
-					mode               TEXT NOT NULL,
-					result_count       INTEGER NOT NULL,
-					top_ids            TEXT NOT NULL,
-					rediscovery        INTEGER NOT NULL,
+				CREATE TABLE IF NOT EXISTS search_telemetry (
+					id TEXT PRIMARY KEY,
+					created_at TEXT NOT NULL,
+					query_hash TEXT,
+					mode TEXT,
+					result_count INTEGER NOT NULL DEFAULT 0,
+					top_ids TEXT,
+					rediscovery INTEGER NOT NULL DEFAULT 0,
 					project_identifier TEXT
 				);
-				CREATE INDEX idx_search_telemetry_created_at ON search_telemetry(created_at);
+				CREATE INDEX IF NOT EXISTS idx_search_telemetry_created ON search_telemetry(created_at);
 			`);
+		},
+	},
+	{
+		version: 10,
+		description: "Local KTO-shaped feedback log",
+		up: (db) => {
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS feedback (
+					id TEXT PRIMARY KEY,
+					created_at TEXT NOT NULL,
+					feature TEXT NOT NULL,
+					variant_id TEXT,
+					label TEXT NOT NULL,
+					prompt_hash TEXT,
+					response_hash TEXT
+				);
+				CREATE INDEX IF NOT EXISTS idx_feedback_variant ON feedback(variant_id);
+			`);
+		},
+	},
+	{
+		version: 11,
+		description: "Track thought re-confirmation timestamps",
+		up: (db) => {
+			db.exec("ALTER TABLE thoughts ADD COLUMN last_confirmed_at TEXT");
 		},
 	},
 ];

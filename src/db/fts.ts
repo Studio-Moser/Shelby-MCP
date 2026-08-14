@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { canonicalizeTopic } from "./topic-canonicalization.js";
+import { topicLikePattern } from "./topic-canonicalization.js";
 
 export interface SearchResult {
   id: string;
@@ -68,7 +68,7 @@ export function searchThoughts(
   }
 	if (options.topic) {
 		whereClauses.push("t.topics LIKE ?");
-		params.push(`%"${canonicalizeTopic(options.topic)}"%`);
+		params.push(topicLikePattern(options.topic));
 	}
   if (options.shared_only) {
     whereClauses.push("t.visibility = 'shared'");

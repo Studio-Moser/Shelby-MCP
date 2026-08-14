@@ -12,13 +12,15 @@ export function handleGetThought(
     return toolError("invalid_input", "id is required and must be a string");
   }
 
-  const thought = getThought(db.db, id);
+	let thought = getThought(db.db, id);
   if (!thought) {
     return toolError("not_found", `Thought "${id}" not found`);
   }
 
 	try {
-		incrementReinforcement(db.db, id, 1, false);
+		if (incrementReinforcement(db.db, id, 1, false)) {
+			thought = getThought(db.db, id) ?? thought;
+		}
 	} catch {
 		// Reinforcement is best-effort and must never prevent a successful read.
 	}

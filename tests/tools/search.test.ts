@@ -76,6 +76,18 @@ describe("handleSearchThoughts", () => {
 		expect(rows[1].rediscovery).toBe(1);
 	});
 
+	it("keeps the previous telemetry top IDs in memory per database", () => {
+		captureId("Cached telemetry result");
+		handleSearchThoughts(db, { query: "cached telemetry", all_projects: true });
+		db.db.prepare("DELETE FROM search_telemetry").run();
+
+		handleSearchThoughts(db, { query: "cached telemetry", all_projects: true });
+
+		expect(db.db.prepare("SELECT rediscovery FROM search_telemetry").get()).toEqual({
+			rediscovery: 1,
+		});
+	});
+
   it("returns empty results for no FTS matches", () => {
     captureId("Hello world");
 

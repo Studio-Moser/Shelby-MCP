@@ -65,6 +65,7 @@ describe("handleGetThought", () => {
 		const thought = getThought(db.db, id)!;
 		expect(thought.reinforcement_count).toBe(1);
 		expect(thought.last_confirmed_at).toBeNull();
+		expect(parseResult(handleGetThought(db, { id })).reinforcement_count).toBe(2);
 	});
 
 	it("still returns the thought when reinforcement fails", () => {

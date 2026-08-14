@@ -13,10 +13,10 @@ import {
 } from "../db/resolve-project.js";
 import type { ProjectScopeResolution } from "../db/resolve-project.js";
 import type { ProjectReferenceResolution } from "../db/project-identity.js";
-import { canonicalizeTopics } from "../db/topic-canonicalization.js";
 import {
 	findReconciliationCandidates,
 	reconcile,
+	tokenize,
 } from "../db/reconciliation.js";
 import {
   toolSuccess,
@@ -36,6 +36,8 @@ interface SuggestedConnection {
   summary: string | null;
   similarity_reason: string;
 }
+
+const SUGGESTION_LIMIT = 5;
 
 type TrustLevel = "trusted" | "unverified" | "external";
 
@@ -145,22 +147,32 @@ function captureSingle(
 	const effectiveType = args.type === "preference" ? "decision" : args.type;
 	const type = effectiveType ?? "note";
 	const projectIdentifier = resolvedScope?.currentSlug ?? null;
-	const topics = args.topics ? canonicalizeTopics(args.topics) : [];
+	const topics = args.topics ?? [];
+	const contentTokens = tokenize(args.content);
 	const candidates = findReconciliationCandidates(
 		db.db,
 		args.content,
-		type,
-		projectIdentifier,
+		args.summary,
+		resolvedScope?.projectId ?? null,
+		args.project ?? null,
+		contentTokens,
 	);
-	const decision = reconcile(args.content, type, candidates);
+	const decision = reconcile(args.content, type, candidates, contentTokens);
 
 	if (decision.action === "noop") {
 		const existing = getThought(db.db, decision.existingId)!;
-		updateThought(db.db, existing.id, {
-			topics: canonicalizeTopics([...existing.topics, ...topics]),
-			people: [...new Set([...existing.people, ...(args.people ?? [])])],
-		});
+		const mergedTopics = [...new Set([...existing.topics, ...topics])];
+		const mergedPeople = [...new Set([...existing.people, ...(args.people ?? [])])];
 		incrementReinforcement(db.db, existing.id, 1, true);
+		if (
+			mergedTopics.length !== existing.topics.length ||
+			mergedPeople.length !== existing.people.length
+		) {
+			updateThought(db.db, existing.id, {
+				topics: mergedTopics,
+				people: mergedPeople,
+			});
+		}
 		const links = attachRelated(db, existing.id, args.related_to);
 		return {
 			id: existing.id,
@@ -194,11 +206,11 @@ function captureSingle(
 	const links = attachRelated(db, id, [
 		...(args.related_to ?? []),
 		...decision.suggestedEdges.filter(({ autoApply }) => autoApply).map(({ id }) => id),
-	]);
+	], new Set(candidates.map((candidate) => candidate.id)));
 	const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
 	const suggested_connections = decision.suggestedEdges
 		.filter(({ autoApply }) => !autoApply)
-		.slice(0, 5)
+		.slice(0, SUGGESTION_LIMIT)
 		.map(({ id: candidateId, similarity }) => ({
 			id: candidateId,
 			summary: byId.get(candidateId)?.summary ?? null,
@@ -212,11 +224,24 @@ function attachRelated(
 	db: ThoughtDatabase,
 	sourceId: string,
 	relatedIds: string[] | undefined,
+	knownExistingIds: ReadonlySet<string> = new Set(),
 ): { linked: string[]; skipped: string[] } {
 	const linked: string[] = [];
 	const skipped: string[] = [];
-	for (const relatedId of new Set(relatedIds ?? [])) {
-		if (relatedId === sourceId || !getThought(db.db, relatedId)) {
+	const uniqueIds = [...new Set(relatedIds ?? [])];
+	const idsToCheck = uniqueIds.filter(
+		(id) => id !== sourceId && !knownExistingIds.has(id),
+	);
+	const existingIds = new Set(knownExistingIds);
+	if (idsToCheck.length > 0) {
+		const placeholders = idsToCheck.map(() => "?").join(", ");
+		const rows = db.db
+			.prepare(`SELECT id FROM thoughts WHERE id IN (${placeholders})`)
+			.all(...idsToCheck) as Array<{ id: string }>;
+		for (const { id } of rows) existingIds.add(id);
+	}
+	for (const relatedId of uniqueIds) {
+		if (relatedId === sourceId || !existingIds.has(relatedId)) {
 			skipped.push(relatedId);
 			continue;
 		}

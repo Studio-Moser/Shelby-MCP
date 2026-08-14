@@ -4,7 +4,10 @@ import { searchThoughts } from "../db/fts.js";
 import { searchByEmbedding } from "../db/vectors.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
 import { resolveReadProjectScope } from "./project-scope.js";
-import { canonicalizeTopic } from "../db/topic-canonicalization.js";
+import {
+	canonicalizeTopic,
+	topicLikePattern,
+} from "../db/topic-canonicalization.js";
 import {
 	recordSearchTelemetry,
 	type SearchMode,
@@ -68,7 +71,7 @@ function eligibleVectorThoughtIds(
   }
 	if (args.topic) {
 		whereClauses.push("topics LIKE ?");
-		params.push(`%"${canonicalizeTopic(args.topic)}"%`);
+		params.push(topicLikePattern(args.topic));
 	}
   if (args.shared_only) whereClauses.push("visibility = 'shared'");
   if (projectId !== undefined) {
@@ -89,9 +92,10 @@ function matchesFilters(
   metadata: Map<string, SearchMetadata>,
   args: SearchArgs,
   projectId: string | undefined,
+	canonicalTopic: string | undefined,
 ): boolean {
   if (args.type && item.type !== args.type) return false;
-	if (args.topic && !item.topics.includes(canonicalizeTopic(args.topic))) return false;
+	if (canonicalTopic && !item.topics.includes(canonicalTopic)) return false;
   const meta = metadata.get(item.id);
   if (!meta) return false;
   if (args.project && meta.project !== args.project) return false;
@@ -124,6 +128,7 @@ export function handleSearchThoughts(
   const limit = clampLimit(a.limit);
   const offset = a.offset ?? 0;
   const graphDepth = Math.min(Math.max(a.graph_depth ?? 0, 0), 5);
+	const canonicalTopic = a.topic ? canonicalizeTopic(a.topic) : undefined;
   const eligibleThoughtIds = a.embedding
     ? eligibleVectorThoughtIds(db, a, projectId)
     : undefined;
@@ -156,7 +161,7 @@ export function handleSearchThoughts(
     );
     const metadata = loadSearchMetadata(db, candidates.map((item) => item.id));
     const filtered = candidates
-      .filter((item) => matchesFilters(item, metadata, a, projectId))
+      .filter((item) => matchesFilters(item, metadata, a, projectId, canonicalTopic))
       .map((item) => ({ ...item, ...metadata.get(item.id)! }));
     const results = filtered.slice(0, limit);
     const graph_related = fetchGraphRelated(db, results.map((r) => r.id), graphDepth);
@@ -220,7 +225,7 @@ export function handleSearchThoughts(
     const metadata = loadSearchMetadata(db, [...resultById.keys()]);
     const K = 60;
     const scored = [...resultById.values()]
-      .filter((item) => matchesFilters(item, metadata, a, projectId))
+      .filter((item) => matchesFilters(item, metadata, a, projectId, canonicalTopic))
       .map((item) => {
         const ftsRank = ftsRanks.get(item.id);
         const vectorRank = vectorRanks.get(item.id);

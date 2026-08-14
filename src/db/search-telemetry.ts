@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import { parseJsonArray } from "./thoughts.js";
 
 export type SearchMode = "fts" | "vector" | "hybrid";
 
@@ -14,16 +15,29 @@ export function isRediscovery(
 	return overlap / previous.size > 0.5;
 }
 
-function parseTopIds(raw: string | undefined): string[] {
-	if (!raw) return [];
-	try {
-		const value: unknown = JSON.parse(raw);
-		return Array.isArray(value)
-			? value.filter((id): id is string => typeof id === "string")
-			: [];
-	} catch {
-		return [];
-	}
+interface TelemetryStatements {
+	loadPrevious: Database.Statement;
+	insert: Database.Statement;
+	previousTopIds?: string[];
+}
+
+const statementCache = new WeakMap<Database.Database, TelemetryStatements>();
+
+function statementsFor(db: Database.Database): TelemetryStatements {
+	const cached = statementCache.get(db);
+	if (cached) return cached;
+	const statements = {
+		loadPrevious: db.prepare(
+			"SELECT top_ids FROM search_telemetry ORDER BY created_at DESC, rowid DESC LIMIT 1",
+		),
+		insert: db.prepare(
+			`INSERT INTO search_telemetry
+			 (id, created_at, query_hash, mode, result_count, top_ids, rediscovery, project_identifier)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		),
+	};
+	statementCache.set(db, statements);
+	return statements;
 }
 
 export function recordSearchTelemetry(
@@ -36,15 +50,15 @@ export function recordSearchTelemetry(
 		projectIdentifier: string | null;
 	},
 ): void {
-	const previous = db.prepare(
-		"SELECT top_ids FROM search_telemetry ORDER BY created_at DESC, rowid DESC LIMIT 1",
-	).get() as { top_ids: string } | undefined;
-	const rediscovery = isRediscovery(input.topIds, parseTopIds(previous?.top_ids));
-	db.prepare(
-		`INSERT INTO search_telemetry
-		 (id, created_at, query_hash, mode, result_count, top_ids, rediscovery, project_identifier)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-	).run(
+	const statements = statementsFor(db);
+	if (statements.previousTopIds === undefined) {
+		const previous = statements.loadPrevious.get() as
+			| { top_ids: string | null }
+			| undefined;
+		statements.previousTopIds = parseJsonArray(previous?.top_ids ?? null);
+	}
+	const rediscovery = isRediscovery(input.topIds, statements.previousTopIds);
+	statements.insert.run(
 		uuidv4(),
 		new Date().toISOString(),
 		createHash("sha256").update(input.query).digest("hex"),
@@ -54,4 +68,5 @@ export function recordSearchTelemetry(
 		rediscovery ? 1 : 0,
 		input.projectIdentifier,
 	);
+	statements.previousTopIds = [...input.topIds];
 }

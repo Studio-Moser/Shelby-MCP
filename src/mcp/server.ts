@@ -255,7 +255,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       title: "Search Thoughts",
       description: "Search long-term memory by keyword (FTS) or vector similarity, or both (hybrid). Call this before starting any task, making any decision, or when the user asks what you remember about a topic. Returns matching thought summaries with IDs — call get_thought to read full content. Supports graph_depth for GraphRAG-style retrieval: after FTS/vector results are found, traverse N hops of graph edges and include related thoughts in the response.",
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,
@@ -336,7 +336,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       title: "Get Thought",
       description: "Fetch the complete content of a single memory by UUID. Use after search_thoughts or list_thoughts returns a summary that you need to read in full — those tools only return summaries and IDs. Returns all fields: content, summary, type, topics, people, project, source, metadata, and timestamps.",
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,

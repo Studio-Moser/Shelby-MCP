@@ -66,6 +66,14 @@ describe("MCP Integration", () => {
     expect(tools).toHaveLength(12);
   });
 
+	it("marks search and get as write-capable because they record usage", async () => {
+		const { tools } = await client.listTools();
+
+		for (const name of ["search_thoughts", "get_thought"]) {
+			expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(false);
+		}
+	});
+
   it("accepts preference captures and stores the canonical decision type", async () => {
     const result = parseResult(await client.callTool({
       name: "capture_thought",
