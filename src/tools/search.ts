@@ -12,6 +12,7 @@ import {
 	recordSearchTelemetry,
 	type SearchMode,
 } from "../db/search-telemetry.js";
+import { fenceThoughtSummaries } from "./trust-boundary.js";
 
 interface SearchArgs {
   query?: string;
@@ -168,11 +169,13 @@ export function handleSearchThoughts(
 		recordTelemetry("vector", results, filtered.length);
     return toolSuccess({
       mode: "vector",
-      results,
+      results: fenceThoughtSummaries(db.db, results),
       total_count: filtered.length,
       has_more: filtered.length > results.length,
       offset: 0,
-      ...(graphDepth > 0 ? { graph_related } : {}),
+      ...(graphDepth > 0
+        ? { graph_related: fenceThoughtSummaries(db.db, graph_related) }
+        : {}),
     });
   }
 
@@ -193,7 +196,10 @@ export function handleSearchThoughts(
     return toolSuccess({
       mode: "fts",
       ...ftsResult,
-      ...(graphDepth > 0 ? { graph_related } : {}),
+      results: fenceThoughtSummaries(db.db, ftsResult.results),
+      ...(graphDepth > 0
+        ? { graph_related: fenceThoughtSummaries(db.db, graph_related) }
+        : {}),
     });
   }
 
@@ -252,11 +258,13 @@ export function handleSearchThoughts(
 		recordTelemetry("hybrid", sliced, total_count);
     return toolSuccess({
       mode: "hybrid",
-      results: sliced,
+      results: fenceThoughtSummaries(db.db, sliced),
       total_count,
       has_more: offset + sliced.length < total_count,
       offset,
-      ...(graphDepth > 0 ? { graph_related } : {}),
+      ...(graphDepth > 0
+        ? { graph_related: fenceThoughtSummaries(db.db, graph_related) }
+        : {}),
     });
   }
 

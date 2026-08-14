@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `search_thoughts`, `list_thoughts`, `get_thought`, `select_context`, `explore_graph`, `expand_neighbors`, and `capture_thought` relationship suggestions now wrap non-trusted thought bodies and summaries in an explicit data-only quarantine fence. `select_context` also keeps non-trusted topics and people inside that fence, while `get_thought` warns that every structured field is untrusted data. Unknown trust levels fail closed as unverified; trusted text remains unchanged.
 - `get_thought` now reinforces the retrieved thought and returns its updated reinforcement count.
 - The legacy `preference` thought type is normalized to `decision` on both capture and update.
 - **Breaking (output shape):** `get_brief` items now always include a `refuted_claims` array, and a thought carrying a scoped refutation renders with a `(superseded: …)` caveat appended to its line. Consumers that parse brief markdown or item objects should tolerate both. `policy_version` bumped 1 → 2 to signal the change; the canonical cross-codebase fixture is at `fixture_version` 2.

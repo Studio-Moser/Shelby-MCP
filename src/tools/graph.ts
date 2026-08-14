@@ -2,6 +2,7 @@ import type { ThoughtDatabase } from "../db/database.js";
 import { linkThoughts, unlinkThoughts, expireEdge, VALID_EDGE_TYPES, traverseGraph } from "../db/edges.js";
 import { getThought } from "../db/thoughts.js";
 import { clampLimit, toolSuccess, toolError, type ToolResult } from "./helpers.js";
+import { fenceThoughtSummaries, fenceThoughtText } from "./trust-boundary.js";
 
 // --- manage_edges ---
 
@@ -117,7 +118,7 @@ export function handleExploreGraph(
     root: a.thought_id,
     max_depth: depth,
     node_count: nodes.length,
-    nodes,
+    nodes: fenceThoughtSummaries(db.db, nodes),
   });
 }
 
@@ -149,7 +150,7 @@ export function handleExpandNeighbors(
   const thought = getThought(db.db, a.thought_id)!;
   const limit = clampLimit(a.limit, 10, 100);
   const allNeighbors = nodes.filter((node) => node.depth !== 0);
-  const neighbors = allNeighbors
+  const neighbors = fenceThoughtSummaries(db.db, allNeighbors
     .slice(0, limit)
     .map((node) => ({
       id: node.id,
@@ -158,12 +159,14 @@ export function handleExpandNeighbors(
       // ponytail: per-neighbor getThought is an N+1 capped at 100 rows on local
       // SQLite; batch to one SELECT id, topics ... IN (...) if it ever shows up.
       topics: getThought(db.db, node.id)!.topics,
-    }));
+    })));
 
   return toolSuccess({
     id: thought.id,
-    content: thought.content,
-    summary: thought.summary,
+    content: fenceThoughtText(thought.content, thought.trust_level),
+    summary: thought.summary === null
+      ? null
+      : fenceThoughtText(thought.summary, thought.trust_level),
     neighbor_count: allNeighbors.length,
     neighbors,
   });

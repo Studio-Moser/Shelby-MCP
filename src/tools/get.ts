@@ -1,6 +1,7 @@
 import type { ThoughtDatabase } from "../db/database.js";
 import { getThought, incrementReinforcement } from "../db/thoughts.js";
 import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
+import { fenceThoughtRecordText } from "./trust-boundary.js";
 
 export function handleGetThought(
   db: ThoughtDatabase,
@@ -29,6 +30,10 @@ export function handleGetThought(
   const { embedding, ...rest } = thought;
   return toolSuccess({
     ...rest,
+    content: fenceThoughtRecordText(rest.content, rest.trust_level),
+    summary: rest.summary === null
+      ? null
+      : fenceThoughtRecordText(rest.summary, rest.trust_level),
     has_embedding: embedding !== null,
   });
 }

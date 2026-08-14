@@ -4,6 +4,7 @@ import { countThoughts } from "../db/thoughts.js";
 import { toolSuccess, toolError, clampLimit, type ToolResult } from "./helpers.js";
 import { handleGetBrief } from "./brief.js";
 import { resolveReadProjectScope } from "./project-scope.js";
+import { fenceThoughtText } from "./trust-boundary.js";
 
 // ---------------------------------------------------------------------------
 // select_context
@@ -204,17 +205,30 @@ function formatThought(db: ThoughtDatabase, summary: ThoughtSummary): string {
   // for the default limit of 20 that's well within the sub-millisecond budget
   // of better-sqlite3 but keeps each line meaningful.
   const full = getThought(db.db, summary.id);
-  const content = full?.content ?? summary.summary ?? "(no content)";
+  const trustLevel = full?.trust_level;
+  const topicsLine = summary.topics.length > 0
+    ? `Topics: ${summary.topics.join(", ")}`
+    : null;
+  const peopleLine = full?.people && full.people.length > 0
+    ? `People: ${full.people.join(", ")}`
+    : null;
+  const rawContent = full?.content ?? summary.summary ?? "(no content)";
+  const content = fenceThoughtText(
+    trustLevel === "trusted"
+      ? rawContent
+      : [rawContent, topicsLine, peopleLine].filter((line) => line !== null).join("\n"),
+    trustLevel,
+  );
   const lines: string[] = [];
   lines.push(`Content: ${content}`);
-  if (summary.summary) lines.push(`Summary: ${summary.summary}`);
+  if (full?.summary) {
+    lines.push(`Summary: ${fenceThoughtText(full.summary, trustLevel)}`);
+  }
   lines.push(`Created: ${summary.created_at}`);
   lines.push(`Type: ${summary.type}`);
-  if (summary.topics.length > 0) {
-    lines.push(`Topics: ${summary.topics.join(", ")}`);
-  }
-  if (full?.people && full.people.length > 0) {
-    lines.push(`People: ${full.people.join(", ")}`);
+  if (trustLevel === "trusted") {
+    if (topicsLine) lines.push(topicsLine);
+    if (peopleLine) lines.push(peopleLine);
   }
   return lines.join("\n");
 }
