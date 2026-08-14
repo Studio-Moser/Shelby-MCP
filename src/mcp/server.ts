@@ -11,7 +11,11 @@ import { handleListThoughts } from "../tools/list.js";
 import { handleGetThought } from "../tools/get.js";
 import { handleUpdateThought } from "../tools/update.js";
 import { handleDeleteThought } from "../tools/delete.js";
-import { handleManageEdges, handleExploreGraph } from "../tools/graph.js";
+import {
+  handleManageEdges,
+  handleExploreGraph,
+  handleExpandNeighbors,
+} from "../tools/graph.js";
 import { handleThoughtStats } from "../tools/stats.js";
 import { handleGetBrief } from "../tools/brief.js";
 import { handleSelectContext } from "../tools/context.js";
@@ -455,6 +459,27 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       },
     },
     withLogging("explore_graph", (args) => handleExploreGraph(db, args as Record<string, unknown>)),
+  );
+
+  // --- expand_neighbors ---
+
+  server.registerTool(
+    "expand_neighbors",
+    {
+      title: "Expand Neighbors",
+      description: "Fetch a memory's full content together with summaries, types, and topics for its immediate graph neighbors. Use when an agent already has a thought ID and needs both that thought and its directly connected context in one call, instead of calling get_thought and explore_graph separately.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        thought_id: z.string().describe("Thought ID to fetch and expand"),
+        limit: z.number().describe("Max neighbors to return (default 10, max 100)").optional(),
+      },
+    },
+    withLogging("expand_neighbors", (args) => handleExpandNeighbors(db, args as Record<string, unknown>)),
   );
 
   // --- thought_stats ---

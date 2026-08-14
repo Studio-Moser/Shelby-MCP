@@ -1,6 +1,7 @@
 import type { ThoughtDatabase } from "../db/database.js";
 import { linkThoughts, unlinkThoughts, expireEdge, VALID_EDGE_TYPES, traverseGraph } from "../db/edges.js";
-import { toolSuccess, toolError, type ToolResult } from "./helpers.js";
+import { getThought } from "../db/thoughts.js";
+import { clampLimit, toolSuccess, toolError, type ToolResult } from "./helpers.js";
 
 // --- manage_edges ---
 
@@ -117,5 +118,53 @@ export function handleExploreGraph(
     max_depth: depth,
     node_count: nodes.length,
     nodes,
+  });
+}
+
+// --- expand_neighbors ---
+
+interface ExpandNeighborsArgs {
+  thought_id: string;
+  limit?: number;
+}
+
+export function handleExpandNeighbors(
+  db: ThoughtDatabase,
+  args: Record<string, unknown>,
+): ToolResult {
+  const a = args as unknown as ExpandNeighborsArgs;
+
+  if (!a.thought_id || typeof a.thought_id !== "string") {
+    return toolError("invalid_input", "thought_id is required and must be a string");
+  }
+
+  const nodes = traverseGraph(db, a.thought_id, 1);
+  if (nodes.length === 0) {
+    return toolError(
+      "not_found",
+      `Thought "${a.thought_id}" not found. Try search_thoughts to find it by content.`,
+    );
+  }
+
+  const thought = getThought(db.db, a.thought_id)!;
+  const limit = clampLimit(a.limit, 10, 100);
+  const allNeighbors = nodes.filter((node) => node.depth !== 0);
+  const neighbors = allNeighbors
+    .slice(0, limit)
+    .map((node) => ({
+      id: node.id,
+      summary: node.summary,
+      type: node.type,
+      // ponytail: per-neighbor getThought is an N+1 capped at 100 rows on local
+      // SQLite; batch to one SELECT id, topics ... IN (...) if it ever shows up.
+      topics: getThought(db.db, node.id)!.topics,
+    }));
+
+  return toolSuccess({
+    id: thought.id,
+    content: thought.content,
+    summary: thought.summary,
+    neighbor_count: allNeighbors.length,
+    neighbors,
   });
 }
