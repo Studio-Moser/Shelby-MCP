@@ -1,5 +1,9 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import {
+	canonicalizeTopics,
+	topicLikePattern,
+} from "./topic-canonicalization.js";
 
 export type TrustLevel = "trusted" | "unverified" | "external";
 
@@ -39,6 +43,7 @@ export interface ThoughtRecord {
   updated_at: string;
   consolidated_into: string | null;
   reinforcement_count: number;
+	last_confirmed_at: string | null;
 }
 
 export interface ThoughtSummary {
@@ -96,6 +101,7 @@ interface RawThoughtRow {
   updated_at: string;
   consolidated_into: string | null;
   reinforcement_count: number;
+	last_confirmed_at: string | null;
 }
 
 interface RawSummaryRow {
@@ -108,11 +114,13 @@ interface RawSummaryRow {
   created_at: string;
 }
 
-function parseJsonArray(raw: string | null): string[] {
+export function parseJsonArray(raw: string | null): string[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+		const parsed: unknown = JSON.parse(raw);
+		return Array.isArray(parsed)
+			? parsed.filter((item): item is string => typeof item === "string")
+			: [];
   } catch {
     return [];
   }
@@ -151,6 +159,7 @@ function rowToRecord(row: RawThoughtRow): ThoughtRecord {
     updated_at: row.updated_at,
     consolidated_into: row.consolidated_into,
     reinforcement_count: row.reinforcement_count,
+		last_confirmed_at: row.last_confirmed_at,
   };
 }
 
@@ -191,7 +200,7 @@ export function insertThought(db: Database.Database, input: ThoughtInput): strin
     project: input.project ?? null,
     project_id: input.project_id ?? project?.project_id ?? null,
     project_identifier: project?.current_slug ?? input.project_identifier ?? null,
-    topics: input.topics ? JSON.stringify(input.topics) : null,
+    topics: input.topics ? JSON.stringify(canonicalizeTopics(input.topics)) : null,
     people: input.people ? JSON.stringify(input.people) : null,
     visibility: input.visibility ?? "personal",
     metadata: input.metadata ? JSON.stringify(input.metadata) : null,
@@ -210,6 +219,22 @@ export function getThought(db: Database.Database, id: string): ThoughtRecord | n
   `).get(id) as RawThoughtRow | undefined;
   if (!row) return null;
   return rowToRecord(row);
+}
+
+export function incrementReinforcement(
+	db: Database.Database,
+	id: string,
+	amount = 1,
+	confirm = false,
+): boolean {
+	const result = db.prepare(
+		`UPDATE thoughts
+		 SET reinforcement_count = reinforcement_count + @amount,
+		     updated_at = @now,
+		     last_confirmed_at = CASE WHEN @confirm = 1 THEN @now ELSE last_confirmed_at END
+		 WHERE id = @id`,
+	).run({ id, amount, confirm: confirm ? 1 : 0, now: new Date().toISOString() });
+	return result.changes > 0;
 }
 
 export function updateThought(
@@ -250,7 +275,7 @@ export function updateThought(
   }
   if (updates.topics !== undefined) {
     setClauses.push("topics = @topics");
-    params.topics = JSON.stringify(updates.topics);
+		params.topics = JSON.stringify(canonicalizeTopics(updates.topics));
   }
   if (updates.people !== undefined) {
     setClauses.push("people = @people");
@@ -313,7 +338,7 @@ export function listThoughts(db: Database.Database, options: ListOptions = {}): 
   }
   if (options.topic) {
     whereClauses.push("topics LIKE @topic");
-    params.topic = `%"${options.topic}"%`;
+		params.topic = topicLikePattern(options.topic);
   }
   if (options.person) {
     whereClauses.push("people LIKE @person");

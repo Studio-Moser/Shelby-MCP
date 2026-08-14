@@ -162,7 +162,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         content: z.string().max(MAX_CONTENT_LENGTH).describe("The thought content").optional(),
         summary: z.string().max(MAX_SUMMARY_LENGTH).describe("One-line summary for search results").optional(),
         type: z
-          .enum(["note", "decision", "task", "question", "reference", "insight"])
+          .enum(["note", "decision", "task", "question", "reference", "insight", "preference"])
           .describe("Thought type")
           .optional(),
         source: z.string().describe("Source tool or context").optional(),
@@ -255,7 +255,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       title: "Search Thoughts",
       description: "Search long-term memory by keyword (FTS) or vector similarity, or both (hybrid). Call this before starting any task, making any decision, or when the user asks what you remember about a topic. Returns matching thought summaries with IDs — call get_thought to read full content. Supports graph_depth for GraphRAG-style retrieval: after FTS/vector results are found, traverse N hops of graph edges and include related thoughts in the response.",
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,
@@ -269,6 +269,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         limit: z.number().describe("Max results (default 20, max 100)").optional(),
         offset: z.number().describe("Pagination offset").optional(),
         type: z.string().describe("Filter by thought type").optional(),
+		topic: z.string().describe("Filter by topic").optional(),
         project: z.string().describe("Filter by project").optional(),
         project_id: projectIdSchema.optional(),
         project_identifier: z.string().describe("Scope to project slug (use with include_shared to also include shared thoughts; auto-defaulted from cwd when omitted)").optional(),
@@ -335,7 +336,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       title: "Get Thought",
       description: "Fetch the complete content of a single memory by UUID. Use after search_thoughts or list_thoughts returns a summary that you need to read in full — those tools only return summaries and IDs. Returns all fields: content, summary, type, topics, people, project, source, metadata, and timestamps.",
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,

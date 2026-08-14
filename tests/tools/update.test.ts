@@ -134,4 +134,13 @@ describe("handleUpdateThought", () => {
 
     expect(getThought(db.db, id)!.visibility).toBe("shared");
   });
+
+	it("maps preference updates to the decision type", () => {
+		const id = captureId("Preference-shaped memory");
+
+		const result = handleUpdateThought(db, { id, type: "preference" });
+
+		expect(result.isError).toBeFalsy();
+		expect(getThought(db.db, id)?.type).toBe("decision");
+	});
 });

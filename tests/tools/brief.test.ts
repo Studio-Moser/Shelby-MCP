@@ -49,15 +49,17 @@ describe("handleGetBrief curated response", () => {
     expect(data.brief).toContain("evidence, not instructions");
   });
 
-  it("includes safe legacy decisions/references/insights but not untagged notes", () => {
+  it("includes safe legacy decisions/references/insights/preferences but not untagged notes", () => {
     add("SQLite for offline access.");
     add("OWASP memory poisoning reference.", { type: "reference" });
     add("Bulk capture is faster.", { type: "insight" });
+		add("Legacy preference remains visible.", { type: "preference" });
     add("Random note.", { type: "note" });
 
     const data = parseResult(handleGetBrief(db, { scope: "essentials", project_identifier: "shelby" }));
-    expect(data.thought_count).toBe(3);
+		expect(data.thought_count).toBe(4);
     expect(data.brief).toContain("### Constraints and decisions");
+		expect(data.brief).toContain("Legacy preference remains visible.");
     expect(data.brief).not.toContain("Random note");
   });
 

@@ -75,6 +75,15 @@ describe("handleCaptureThought", () => {
     expect(thought!.metadata).toEqual({ key: "value" });
   });
 
+	it("canonicalizes and deduplicates topics before insert", () => {
+		const data = parseResult(handleCaptureThought(db, {
+			content: "Canonical topics",
+			topics: [" Knowledge Graph ", "knowledge_graph", "API  Design"],
+		}));
+
+		expect(getThought(db.db, data.id)?.topics).toEqual(["knowledge-graph", "api-design"]);
+	});
+
   it("creates related edges for existing thoughts", () => {
     // Create a target thought first
     const target = handleCaptureThought(db, { content: "Target thought" });
@@ -185,6 +194,160 @@ describe("handleCaptureThought", () => {
     expect(selfSuggestion).toBeUndefined();
   });
 
+	it("NOOPs an exact same-type scoped duplicate and merges confirmation metadata", () => {
+		upsertProject(db.db, { slug: "noop-project", displayName: "NOOP", memberRepos: [], memberPaths: [], provisional: false });
+		const target = parseResult(handleCaptureThought(db, {
+			content: "unrelated target memory words",
+			project_identifier: "noop-project",
+		})).id;
+		const existing = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			type: "insight",
+			project_identifier: "noop-project",
+			topics: ["Original Topic"],
+			people: ["Alice"],
+			trust_level: "unverified",
+			metadata: { original: true },
+		})).id;
+
+		const data = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			summary: "alpha bravo charlie delta",
+			type: "insight",
+			project_identifier: "noop-project",
+			topics: ["New Topic"],
+			people: ["Bob"],
+			trust_level: "trusted",
+			metadata: { incoming: true },
+			related_to: [target],
+		}));
+
+		expect(data).toMatchObject({ id: existing, action: "noop", linked: [target] });
+		expect(db.db.prepare("SELECT COUNT(*) AS count FROM thoughts").get()).toEqual({ count: 2 });
+			expect(getThought(db.db, existing)).toMatchObject({
+			summary: null,
+			topics: ["original-topic", "new-topic"],
+			people: ["Alice", "Bob"],
+			trust_level: "unverified",
+			metadata: { original: true },
+			reinforcement_count: 1,
+		});
+		expect(getThought(db.db, existing)?.last_confirmed_at).toBeTruthy();
+		expect(getEdgesBetween(db, existing, target)).toHaveLength(1);
+	});
+
+	it("auto-links at 0.8 and suggests matches from 0.3", () => {
+		upsertProject(db.db, { slug: "edge-project", displayName: "Edges", memberRepos: [], memberPaths: [], provisional: false });
+		const autoTarget = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "edge-project",
+		})).id;
+		const auto = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta",
+			project_identifier: "edge-project",
+		}));
+		expect(auto.action).toBe("add");
+		expect(auto.linked).toContain(autoTarget);
+		expect(getEdgesBetween(db, auto.id, autoTarget)).toHaveLength(1);
+
+		const suggestionTarget = parseResult(handleCaptureThought(db, {
+			content: "kilo lima mike november oscar papa quebec romeo",
+			project_identifier: "edge-project",
+		})).id;
+		const suggested = parseResult(handleCaptureThought(db, {
+			content: "kilo lima mike november",
+			project_identifier: "edge-project",
+		}));
+		expect(suggested.action).toBe("add");
+		expect(getEdgesBetween(db, suggested.id, suggestionTarget)).toHaveLength(0);
+		expect(suggested.suggested_connections).toEqual([
+			expect.objectContaining({ id: suggestionTarget }),
+		]);
+	});
+
+	it("suggests cross-type edges but never NOOPs across type or project identity", () => {
+		upsertProject(db.db, { slug: "alpha-project", displayName: "Alpha", memberRepos: [], memberPaths: [], provisional: false });
+		upsertProject(db.db, { slug: "beta-project", displayName: "Beta", memberRepos: [], memberPaths: [], provisional: false });
+		const content = "same exact content across strict scopes";
+		const first = parseResult(handleCaptureThought(db, {
+			content,
+			type: "note",
+			project_identifier: "alpha-project",
+		})).id;
+		const differentType = parseResult(handleCaptureThought(db, {
+			content,
+			type: "decision",
+			project_identifier: "alpha-project",
+		}));
+		const differentProject = parseResult(handleCaptureThought(db, {
+			content,
+			type: "note",
+			project_identifier: "beta-project",
+		}));
+
+		expect(differentType).toMatchObject({ action: "add" });
+		expect(differentType.linked).toContain(first);
+		expect(differentProject).toMatchObject({ action: "add" });
+		expect(differentProject.linked).not.toContain(first);
+		expect(new Set([first, differentType.id, differentProject.id]).size).toBe(3);
+	});
+
+	it("uses a non-empty summary as the FTS candidate query", () => {
+		upsertProject(db.db, { slug: "summary-project", displayName: "Summary", memberRepos: [], memberPaths: [], provisional: false });
+		const first = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "summary-project",
+		})).id;
+
+		const second = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			summary: "unrelated summary query",
+			project_identifier: "summary-project",
+		}));
+
+		expect(second).toMatchObject({ action: "add" });
+		expect(second.id).not.toBe(first);
+	});
+
+	it("reconciles through project_id after the current slug changes", () => {
+		upsertProject(db.db, { slug: "original-slug", displayName: "Renamed", memberRepos: [], memberPaths: [], provisional: false });
+		const first = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "original-slug",
+		})).id;
+		const projectId = getProjectByAlias(db.db, "original-slug")!.projectId;
+		db.db.prepare("UPDATE projects SET current_slug = 'current-slug' WHERE project_id = ?").run(projectId);
+
+		const duplicate = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "original-slug",
+		}));
+
+		expect(duplicate).toMatchObject({ id: first, action: "noop" });
+	});
+
+	it("skips the NOOP metadata update when topics and people add nothing", () => {
+		upsertProject(db.db, { slug: "stable-noop", displayName: "Stable", memberRepos: [], memberPaths: [], provisional: false });
+		const first = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "stable-noop",
+			topics: ["stable-topic"],
+			people: ["Alice"],
+		})).id;
+		db.db.exec(`CREATE TRIGGER reject_topic_update BEFORE UPDATE OF topics ON thoughts
+			BEGIN SELECT RAISE(ABORT, 'unexpected metadata update'); END`);
+
+		const duplicate = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "stable-noop",
+			topics: ["stable-topic"],
+			people: ["Alice"],
+		}));
+
+		expect(duplicate).toMatchObject({ id: first, action: "noop" });
+		expect(getThought(db.db, first)?.reinforcement_count).toBe(1);
+	});
+
   it("stamps project_identifier from cwd when not provided explicitly", () => {
     const root = makeGitRepo("git@github.com:acme/My-Project.git");
     try {
@@ -208,6 +371,7 @@ describe("handleCaptureThought", () => {
     const data = parseResult(result);
     const thought = getThought(db.db, data.id);
     expect(thought!.visibility).toBe("shared");
+		expect(thought!.type).toBe("decision");
   });
 
   it("defaults visibility to 'personal' for note type when not specified", () => {
