@@ -2,6 +2,7 @@ import type { ThoughtDatabase } from "../db/database.js";
 import { listThoughts, type TrustLevel } from "../db/thoughts.js";
 import { toolSuccess, clampLimit, type ToolResult } from "./helpers.js";
 import { resolveReadProjectScope } from "./project-scope.js";
+import { fenceThoughtSummaries } from "./trust-boundary.js";
 
 interface ListArgs {
   type?: string;
@@ -49,5 +50,8 @@ export function handleListThoughts(
     offset: a.offset,
   });
 
-  return toolSuccess(result);
+  return toolSuccess({
+    ...result,
+    results: fenceThoughtSummaries(db.db, result.results),
+  });
 }

@@ -30,6 +30,7 @@ import {
   MAX_PERSON_LENGTH,
   MAX_BULK_THOUGHTS,
 } from "./helpers.js";
+import { fenceThoughtSummaries } from "./trust-boundary.js";
 
 interface SuggestedConnection {
   id: string;
@@ -208,14 +209,14 @@ function captureSingle(
 		...decision.suggestedEdges.filter(({ autoApply }) => autoApply).map(({ id }) => id),
 	], new Set(candidates.map((candidate) => candidate.id)));
 	const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-	const suggested_connections = decision.suggestedEdges
+	const suggested_connections = fenceThoughtSummaries(db.db, decision.suggestedEdges
 		.filter(({ autoApply }) => !autoApply)
 		.slice(0, SUGGESTION_LIMIT)
 		.map(({ id: candidateId, similarity }) => ({
 			id: candidateId,
 			summary: byId.get(candidateId)?.summary ?? null,
 			similarity_reason: `Jaccard token similarity: ${similarity.toFixed(2)}`,
-		}));
+		})));
 
 	return { id, action: "add", ...links, suggested_connections };
 }

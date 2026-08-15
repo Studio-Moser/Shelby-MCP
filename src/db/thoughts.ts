@@ -88,7 +88,7 @@ interface RawThoughtRow {
   type: string;
   source: string;
   source_agent: string | null;
-  trust_level: TrustLevel;
+  trust_level: TrustLevel | null;
   project: string | null;
   project_id: string | null;
   project_identifier: string | null;
@@ -146,7 +146,7 @@ function rowToRecord(row: RawThoughtRow): ThoughtRecord {
     type: row.type,
     source: row.source,
     source_agent: row.source_agent,
-    trust_level: row.trust_level ?? "trusted",
+    trust_level: row.trust_level ?? "unverified",
     project: row.project,
     project_id: row.project_id,
     project_identifier: row.project_identifier,
