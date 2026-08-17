@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { runMigrations, getSchemaVersion } from "./migrations.js";
+import { canonicalizeTopic } from "./topic-canonicalization.js";
 
 export class ThoughtDatabase {
   readonly db: Database.Database;
@@ -39,7 +40,7 @@ export class ThoughtDatabase {
          ORDER BY je.value
          LIMIT @limit`,
       )
-      .all({ prefix: `${prefix}%`, limit }) as { val: string }[];
+      .all({ prefix: `${column === "topics" ? canonicalizeTopic(prefix) : prefix}%`, limit }) as { val: string }[];
 
     return rows.map((r) => r.val);
   }

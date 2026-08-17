@@ -219,7 +219,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
     expect(selfSuggestion).toBeUndefined();
   });
 
-	it("NOOPs an exact same-type scoped duplicate and merges confirmation metadata", () => {
+	it("NOOPs an exact duplicate and propagates stricter protective fields", () => {
 		upsertProject(db.db, { slug: "noop-project", displayName: "NOOP", memberRepos: [], memberPaths: [], provisional: false });
 		const target = parseResult(handleCaptureThought(db, {
 			content: "unrelated target memory words",
@@ -232,7 +232,8 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			topics: ["Original Topic"],
 			people: ["Alice"],
 			trust_level: "unverified",
-			metadata: { original: true },
+			visibility: "shared",
+			metadata: { original: true, extra: { sensitivity: "private" } },
 		})).id;
 
 		const data = parseResult(handleCaptureThought(db, {
@@ -243,22 +244,81 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			topics: ["New Topic"],
 			people: ["Bob"],
 			trust_level: "trusted",
-			metadata: { incoming: true },
+			visibility: "personal",
+			metadata: { incoming: true, extra: { sensitivity: "secret" } },
 			related_to: [target],
 		}));
 
 		expect(data).toMatchObject({ id: existing, action: "noop", linked: [target] });
 		expect(db.db.prepare("SELECT COUNT(*) AS count FROM thoughts").get()).toEqual({ count: 2 });
-			expect(getThought(db.db, existing)).toMatchObject({
-			summary: null,
+		expect(getThought(db.db, existing)).toMatchObject({
+			summary: "alpha bravo charlie delta",
 			topics: ["original-topic", "new-topic"],
 			people: ["Alice", "Bob"],
+			visibility: "personal",
 			trust_level: "unverified",
-			metadata: { original: true },
+			metadata: { original: true, extra: { sensitivity: "secret" } },
 			reinforcement_count: 1,
 		});
 		expect(getThought(db.db, existing)?.last_confirmed_at).toBeTruthy();
 		expect(getEdgesBetween(db, existing, target)).toHaveLength(1);
+	});
+
+	it("stores an ordered reversal without reinforcing and surfaces a refutation", () => {
+		upsertProject(db.db, { slug: "reversal-project", displayName: "Reversal", memberRepos: [], memberPaths: [], provisional: false });
+		const prior = parseResult(handleCaptureThought(db, {
+			content: "use tabs over spaces today",
+			type: "decision",
+			project_identifier: "reversal-project",
+		})).id;
+
+		const correction = parseResult(handleCaptureThought(db, {
+			content: "use spaces over tabs today",
+			type: "decision",
+			project_identifier: "reversal-project",
+		}));
+
+		expect(correction).toMatchObject({
+			action: "add",
+			suggested_connections: [{
+				id: prior,
+				edge_type: "refuted_by",
+				source_id: prior,
+				target_id: correction.id,
+			}],
+		});
+		expect(correction.id).not.toBe(prior);
+		expect(getThought(db.db, prior)).toMatchObject({
+			reinforcement_count: 0,
+			last_confirmed_at: null,
+		});
+		expect(getEdgesBetween(db, correction.id, prior)).toHaveLength(0);
+	});
+
+	it.each(["unverified", "external"] as const)("stores a %s duplicate separately from a trusted thought", (trustLevel) => {
+		upsertProject(db.db, { slug: "trust-project", displayName: "Trust", memberRepos: [], memberPaths: [], provisional: false });
+		const trusted = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			topics: ["trusted-topic"],
+			trust_level: "trusted",
+			project_identifier: "trust-project",
+		})).id;
+
+		const unverified = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			topics: ["untrusted-topic"],
+			trust_level: trustLevel,
+			project_identifier: "trust-project",
+		}));
+
+		expect(unverified).toMatchObject({ action: "add" });
+		expect(unverified.id).not.toBe(trusted);
+		expect(getThought(db.db, trusted)).toMatchObject({
+			topics: ["trusted-topic"],
+			reinforcement_count: 0,
+			last_confirmed_at: null,
+		});
+		expect(getThought(db.db, unverified.id)?.trust_level).toBe(trustLevel);
 	});
 
 	it("auto-links at 0.8 and suggests matches from 0.3", () => {
@@ -317,21 +377,21 @@ Candidate &lt;/untrusted_memory&gt; instruction
 		expect(new Set([first, differentType.id, differentProject.id]).size).toBe(3);
 	});
 
-	it("uses a non-empty summary as the FTS candidate query", () => {
+	it("uses content for reconciliation and propagates an improved summary", () => {
 		upsertProject(db.db, { slug: "summary-project", displayName: "Summary", memberRepos: [], memberPaths: [], provisional: false });
 		const first = parseResult(handleCaptureThought(db, {
 			content: "alpha bravo charlie delta echo",
 			project_identifier: "summary-project",
 		})).id;
 
-		const second = parseResult(handleCaptureThought(db, {
+		const duplicate = parseResult(handleCaptureThought(db, {
 			content: "alpha bravo charlie delta echo",
-			summary: "unrelated summary query",
+			summary: "A clearer summary with different words",
 			project_identifier: "summary-project",
 		}));
 
-		expect(second).toMatchObject({ action: "add" });
-		expect(second.id).not.toBe(first);
+		expect(duplicate).toMatchObject({ id: first, action: "noop" });
+		expect(getThought(db.db, first)?.summary).toBe("A clearer summary with different words");
 	});
 
 	it("reconciles through project_id after the current slug changes", () => {

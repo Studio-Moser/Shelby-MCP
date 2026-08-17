@@ -14,6 +14,17 @@ export function canonicalizeTopics(topics: string[]): string[] {
 	return canonical;
 }
 
+export function canonicalizeStoredTopics(raw: string): string | null {
+	try {
+		const topics: unknown = JSON.parse(raw);
+		return Array.isArray(topics) && topics.every((topic) => typeof topic === "string")
+			? JSON.stringify(canonicalizeTopics(topics))
+			: null;
+	} catch {
+		return null;
+	}
+}
+
 export function topicLikePattern(topic: string): string {
 	return `%"${canonicalizeTopic(topic)}"%`;
 }

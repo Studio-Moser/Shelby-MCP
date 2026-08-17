@@ -36,6 +36,7 @@ function candidate(overrides: Partial<BriefCandidate> = {}): BriefCandidate {
     summary: "Safe decision.",
     source: "test",
     reinforcement_count: 0,
+		last_confirmed_at: null,
     consolidated_into: null,
     metadata: {},
     created_at: now,
@@ -96,6 +97,39 @@ describe("brief policy eligibility", () => {
 });
 
 describe("brief candidate query", () => {
+	it("ranks deliberate confirmation above repeated reads", () => {
+		const confirmed = insertThought(db.db, {
+			content: "confirmed",
+			summary: "Deliberately confirmed",
+			type: "decision",
+			project_identifier: "shelby",
+			metadata: {},
+		});
+		const frequentlyRead = insertThought(db.db, {
+			content: "read popular",
+			summary: "Frequently read",
+			type: "decision",
+			project_identifier: "shelby",
+			metadata: {},
+		});
+		db.db.prepare(
+			"UPDATE thoughts SET reinforcement_count = 1, last_confirmed_at = '2026-07-16T00:00:00Z' WHERE id = ?",
+		).run(confirmed);
+		db.db.prepare(
+			"UPDATE thoughts SET reinforcement_count = 100, last_confirmed_at = NULL WHERE id = ?",
+		).run(frequentlyRead);
+
+		const loaded = loadBriefCandidates(db.db, now, { project_id: projectId });
+		expect(loaded.map(({ id }) => id)).toEqual([confirmed, frequentlyRead]);
+		const result = selectBriefItems(loaded, {
+			scope: "essentials",
+			project_id: projectId,
+			now,
+		});
+
+		expect(result.items.map(({ id }) => id)).toEqual([confirmed, frequentlyRead]);
+	});
+
   it("caps at 250 after prioritizing an old explicit milestone", () => {
     const insert = db.db.prepare(`
       INSERT INTO thoughts

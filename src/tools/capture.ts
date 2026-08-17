@@ -4,6 +4,8 @@ import {
 	incrementReinforcement,
 	insertThought,
 	updateThought,
+	type ThoughtInput,
+	type TrustLevel,
 } from "../db/thoughts.js";
 import { linkThoughts } from "../db/edges.js";
 import {
@@ -30,17 +32,18 @@ import {
   MAX_PERSON_LENGTH,
   MAX_BULK_THOUGHTS,
 } from "./helpers.js";
-import { fenceThoughtSummaries } from "./trust-boundary.js";
+import { canReconcileCapture, fenceThoughtSummaries } from "./trust-boundary.js";
 
 interface SuggestedConnection {
   id: string;
   summary: string | null;
   similarity_reason: string;
+	edge_type?: "refuted_by";
+	source_id?: string;
+	target_id?: string;
 }
 
 const SUGGESTION_LIMIT = 5;
-
-type TrustLevel = "trusted" | "unverified" | "external";
 
 interface CaptureArgs {
   content?: string;
@@ -73,6 +76,39 @@ interface CaptureArgs {
     metadata?: Record<string, unknown>;
     related_to?: string[];
   }>;
+}
+
+function stricterSensitivity(
+	existing: Record<string, unknown> | null,
+	incoming: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const sensitivityRank = (value: unknown): number => {
+		if (value === undefined || value === "normal") return 0;
+		if (value === "private") return 1;
+		if (value === "secret") return 2;
+		return 3;
+	};
+	const existingExtra = existing?.extra;
+	const incomingExtra = incoming?.extra;
+	const existingSensitivity = existingExtra !== null && typeof existingExtra === "object" && !Array.isArray(existingExtra)
+		? (existingExtra as Record<string, unknown>).sensitivity
+		: undefined;
+	const incomingSensitivity = incomingExtra !== null && typeof incomingExtra === "object" && !Array.isArray(incomingExtra)
+		? (incomingExtra as Record<string, unknown>).sensitivity
+		: undefined;
+	if (
+		typeof incomingSensitivity !== "string" ||
+		sensitivityRank(incomingSensitivity) <= sensitivityRank(existingSensitivity)
+	) return undefined;
+	return {
+		...(existing ?? {}),
+		extra: {
+			...(existingExtra !== null && typeof existingExtra === "object" && !Array.isArray(existingExtra)
+				? existingExtra as Record<string, unknown>
+				: {}),
+			sensitivity: incomingSensitivity,
+		},
+	};
 }
 
 /**
@@ -144,7 +180,7 @@ function captureSingle(
 } {
   // Default visibility: 'shared' for preference type, otherwise 'personal'
   const effectiveVisibility =
-    args.visibility ?? (args.type === "preference" ? "shared" : undefined);
+    args.visibility ?? (args.type === "preference" ? "shared" : "personal");
 	const effectiveType = args.type === "preference" ? "decision" : args.type;
 	const type = effectiveType ?? "note";
 	const projectIdentifier = resolvedScope?.currentSlug ?? null;
@@ -153,27 +189,30 @@ function captureSingle(
 	const candidates = findReconciliationCandidates(
 		db.db,
 		args.content,
-		args.summary,
 		resolvedScope?.projectId ?? null,
 		args.project ?? null,
 		contentTokens,
-	);
+	).filter((candidate) => canReconcileCapture(
+		args.trust_level ?? "trusted",
+		candidate.trust_level,
+	));
 	const decision = reconcile(args.content, type, candidates, contentTokens);
 
 	if (decision.action === "noop") {
 		const existing = getThought(db.db, decision.existingId)!;
 		const mergedTopics = [...new Set([...existing.topics, ...topics])];
 		const mergedPeople = [...new Set([...existing.people, ...(args.people ?? [])])];
-		incrementReinforcement(db.db, existing.id, 1, true);
-		if (
-			mergedTopics.length !== existing.topics.length ||
-			mergedPeople.length !== existing.people.length
-		) {
-			updateThought(db.db, existing.id, {
-				topics: mergedTopics,
-				people: mergedPeople,
-			});
+		const updates: Partial<ThoughtInput> = {};
+		if (mergedTopics.length !== existing.topics.length) updates.topics = mergedTopics;
+		if (mergedPeople.length !== existing.people.length) updates.people = mergedPeople;
+		if (args.summary?.trim() && args.summary !== existing.summary) updates.summary = args.summary;
+		if (existing.visibility === "shared" && effectiveVisibility === "personal") {
+			updates.visibility = "personal";
 		}
+		const metadata = stricterSensitivity(existing.metadata, args.metadata);
+		if (metadata) updates.metadata = metadata;
+		incrementReinforcement(db.db, existing.id, 1, true);
+		if (Object.keys(updates).length > 0) updateThought(db.db, existing.id, updates);
 		const links = attachRelated(db, existing.id, args.related_to);
 		return {
 			id: existing.id,
@@ -212,10 +251,15 @@ function captureSingle(
 	const suggested_connections = fenceThoughtSummaries(db.db, decision.suggestedEdges
 		.filter(({ autoApply }) => !autoApply)
 		.slice(0, SUGGESTION_LIMIT)
-		.map(({ id: candidateId, similarity }) => ({
+		.map(({ id: candidateId, similarity, edgeType }) => ({
 			id: candidateId,
 			summary: byId.get(candidateId)?.summary ?? null,
 			similarity_reason: `Jaccard token similarity: ${similarity.toFixed(2)}`,
+			...(edgeType ? {
+				edge_type: edgeType,
+				source_id: candidateId,
+				target_id: id,
+			} : {}),
 		})));
 
 	return { id, action: "add", ...links, suggested_connections };

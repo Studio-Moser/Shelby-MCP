@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { sanitizeFTSQuery } from "./fts.js";
+import type { TrustLevel } from "./thoughts.js";
 
 const MIN_TOKENS = 4;
 const NOOP_THRESHOLD = 0.9;
@@ -12,12 +13,14 @@ export interface ReconciliationCandidate {
 	content: string;
 	type: string;
 	summary?: string | null;
+	trust_level?: TrustLevel | null;
 }
 
 export interface SuggestedEdge {
 	id: string;
 	similarity: number;
 	autoApply: boolean;
+	edgeType?: "refuted_by";
 }
 
 export type ReconciliationDecision =
@@ -25,13 +28,25 @@ export type ReconciliationDecision =
 	| { action: "add"; suggestedEdges: SuggestedEdge[] };
 
 export function tokenize(content: string): Set<string> {
-	return new Set(content.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+	return new Set(tokenSequence(content));
+}
+
+function tokenSequence(content: string): string[] {
+	return content.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 function jaccard(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
 	let intersection = 0;
 	for (const token of left) if (right.has(token)) intersection++;
 	return intersection / (left.size + right.size - intersection);
+}
+
+function orderedSimilarity(left: string, right: string): number {
+	const bigrams = (content: string): Set<string> => {
+		const tokens = tokenSequence(content);
+		return new Set(tokens.slice(1).map((token, index) => `${tokens[index]}\0${token}`));
+	};
+	return jaccard(bigrams(left), bigrams(right));
 }
 
 export function reconcile(
@@ -47,12 +62,13 @@ export function reconcile(
 		return {
 			id: candidate.id,
 			similarity: jaccard(inputTokens, candidateTokens),
+			orderedSimilarity: orderedSimilarity(content, candidate.content),
 			type: candidate.type,
 		};
 	}).sort((left, right) => right.similarity - left.similarity || left.id.localeCompare(right.id));
 
-	const duplicate = scored.find(({ similarity, type: candidateType }) =>
-		candidateType === type && similarity >= NOOP_THRESHOLD,
+	const duplicate = scored.find(({ similarity, orderedSimilarity, type: candidateType }) =>
+		candidateType === type && similarity >= NOOP_THRESHOLD && orderedSimilarity >= NOOP_THRESHOLD,
 	);
 	if (duplicate) {
 		return { action: "noop", existingId: duplicate.id, suggestedEdges: [] };
@@ -62,10 +78,15 @@ export function reconcile(
 		action: "add",
 		suggestedEdges: scored
 			.filter(({ similarity }) => similarity >= SUGGEST_THRESHOLD)
-			.map(({ id, similarity }) => ({
+			.map(({ id, similarity, orderedSimilarity, type: candidateType }) => ({
 				id,
 				similarity,
-				autoApply: similarity >= AUTO_EDGE_THRESHOLD,
+				autoApply: similarity >= AUTO_EDGE_THRESHOLD && !(
+					candidateType === type && similarity >= NOOP_THRESHOLD && orderedSimilarity < NOOP_THRESHOLD
+				),
+				...(candidateType === type && similarity >= NOOP_THRESHOLD && orderedSimilarity < NOOP_THRESHOLD
+					? { edgeType: "refuted_by" as const }
+					: {}),
 			})),
 	};
 }
@@ -73,14 +94,12 @@ export function reconcile(
 export function findReconciliationCandidates(
 	db: Database.Database,
 	content: string,
-	summary: string | undefined,
 	projectId: string | null,
 	project: string | null,
 	inputTokens: ReadonlySet<string> = tokenize(content),
 ): ReconciliationCandidate[] {
 	if (inputTokens.size < MIN_TOKENS) return [];
-	const searchText = summary?.trim() ? summary : content.slice(0, 200);
-	const ftsQuery = sanitizeFTSQuery(searchText);
+	const ftsQuery = sanitizeFTSQuery(content.slice(0, 200));
 	if (ftsQuery === "") return [];
 	if (projectId === null && project !== null) return [];
 	const scopeClause = projectId === null
@@ -88,15 +107,14 @@ export function findReconciliationCandidates(
 		   AND t.project_identifier IS NULL
 		   AND t.project IS NULL
 		   AND t.visibility = 'personal'`
-		: `t.visibility != 'shared'
-		   AND t.project_id = @project_id
+		: `t.project_id = @project_id
 		   AND (t.project_identifier IS NULL OR EXISTS (
 		     SELECT 1 FROM project_slug_aliases alias
 		     WHERE alias.slug = t.project_identifier
 		       AND alias.project_id = t.project_id
 		   ))`;
 	const rows = db.prepare(
-		`SELECT t.id, t.content, t.type, t.summary
+		`SELECT t.id, t.content, t.type, t.summary, t.trust_level
 		 FROM thoughts_fts
 		 JOIN thoughts t ON thoughts_fts.rowid = t.rowid
 		 WHERE thoughts_fts MATCH @query
@@ -112,6 +130,7 @@ export function findReconciliationCandidates(
 		content: string;
 		type: string;
 		summary: string | null;
+		trust_level: TrustLevel | null;
 	}>;
 	return rows;
 }

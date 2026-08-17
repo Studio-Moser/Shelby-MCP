@@ -39,4 +39,18 @@ describe("reconcile", () => {
 			],
 		});
 	});
+
+	it("treats a set-identical ordered reversal as a refutation suggestion", () => {
+		expect(reconcile("use spaces over tabs today", "decision", [
+			{ id: "prior", content: "use tabs over spaces today", type: "decision", trust_level: "trusted" },
+		])).toEqual({
+			action: "add",
+			suggestedEdges: [{
+				id: "prior",
+				similarity: 1,
+				autoApply: false,
+				edgeType: "refuted_by",
+			}],
+		});
+	});
 });
