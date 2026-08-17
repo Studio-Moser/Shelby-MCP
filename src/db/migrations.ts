@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { deriveExistingProjectId } from "./project-identity.js";
+import { canonicalizeStoredTopics } from "./topic-canonicalization.js";
 
 export interface Migration {
   version: number;
@@ -7,7 +8,7 @@ export interface Migration {
   up: (db: Database.Database) => void;
 }
 
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 18;
 
 const migrations: Migration[] = [
   {
@@ -307,6 +308,23 @@ const migrations: Migration[] = [
 		description: "Track thought re-confirmation timestamps",
 		up: (db) => {
 			db.exec("ALTER TABLE thoughts ADD COLUMN last_confirmed_at TEXT");
+		},
+	},
+	{
+		// v12-v17 are occupied by macOS-only tables and columns. The next shared
+		// migration keeps the cross-engine sequence aligned without renumbering.
+		version: 18,
+		description: "Canonicalize legacy thought topics",
+		up: (db) => {
+			const rows = db.prepare("SELECT id, topics FROM thoughts WHERE topics IS NOT NULL").all() as Array<{
+				id: string;
+				topics: string;
+			}>;
+			const update = db.prepare("UPDATE thoughts SET topics = ? WHERE id = ?");
+			for (const row of rows) {
+				const topics = canonicalizeStoredTopics(row.topics);
+				if (topics !== null && topics !== row.topics) update.run(topics, row.id);
+			}
 		},
 	},
 ];

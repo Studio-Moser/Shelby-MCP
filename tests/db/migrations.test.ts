@@ -24,9 +24,9 @@ describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
     db?.close();
   });
 
-	it("schema version is 11 after all migrations", () => {
-		expect(getSchemaVersion(db.db)).toBe(11);
-		expect(CURRENT_SCHEMA_VERSION).toBe(11);
+	it("schema version is 18 after all migrations", () => {
+		expect(getSchemaVersion(db.db)).toBe(18);
+		expect(CURRENT_SCHEMA_VERSION).toBe(18);
   });
 
   it("thoughts table has source_agent column", () => {
@@ -128,7 +128,7 @@ describe("migration v6 — project identity", () => {
     const db = new Database(":memory:");
     runMigrations(db);
 
-		expect(getSchemaVersion(db)).toBe(11);
+		expect(getSchemaVersion(db)).toBe(18);
 
 		const thoughtCols = db
 			.prepare("PRAGMA table_info(thoughts)")
@@ -170,11 +170,40 @@ describe("migration v11 — thought confirmation timestamp", () => {
 			setSchemaVersion(db, migration.version);
 		}
 
-		expect(getSchemaVersion(db)).toBe(11);
+		expect(getSchemaVersion(db)).toBe(18);
 		expect(
 			db.prepare("SELECT last_confirmed_at FROM thoughts WHERE id = 'legacy'").get(),
 		).toEqual({ last_confirmed_at: null });
 		db.close();
+	});
+});
+
+describe("migration v18 — canonical topic backfill", () => {
+	it("canonicalizes legacy topic casings before completion suggestions", () => {
+		const dir = mkdtempSync(join(tmpdir(), "shelby-topic-migration-"));
+		const path = join(dir, "memory.db");
+		try {
+			const legacy = new Database(path);
+			for (const migration of getMigrations().filter(({ version }) => version <= 11)) {
+				migration.up(legacy);
+			}
+			setSchemaVersion(legacy, 11);
+			legacy.prepare(
+				`INSERT INTO thoughts (id, content, type, source, topics, created_at, updated_at)
+				 VALUES ('legacy-topics', 'content', 'note', 'test', ?, '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z')`,
+			).run(JSON.stringify(["Knowledge Graph", "knowledge_graph", " API  Design "]));
+			legacy.close();
+
+			const migrated = new ThoughtDatabase(path);
+			expect(migrated.getSchemaVersion()).toBe(18);
+			expect(migrated.db.prepare("SELECT topics FROM thoughts WHERE id = 'legacy-topics'").get()).toEqual({
+				topics: JSON.stringify(["knowledge-graph", "api-design"]),
+			});
+			expect(migrated.getDistinctArrayValues("topics", "Knowledge G")).toEqual(["knowledge-graph"]);
+			migrated.close();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -399,7 +428,7 @@ describe("migration v8 — canonical project identity", () => {
 				)
 				.get();
 			expect(after).toEqual(before);
-			expect(reopened.getSchemaVersion()).toBe(11);
+			expect(reopened.getSchemaVersion()).toBe(18);
 			reopened.close();
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
@@ -438,11 +467,11 @@ describe("migrations v9-v11 — macOS parity", () => {
 			expect.objectContaining({ name: "response_hash", notnull: 0 }),
 		]));
 		expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_feedback_variant'").get()).toEqual({ name: "idx_feedback_variant" });
-		expect(getSchemaVersion(db)).toBe(11);
+		expect(getSchemaVersion(db)).toBe(18);
 		db.close();
 	});
 
-	it.each([9, 10])("walks a macOS-stamped v%i database to v11", (macVersion) => {
+	it.each([9, 10])("walks a macOS-stamped v%i database to v18", (macVersion) => {
 		const db = new Database(":memory:");
 		for (const migration of getMigrations().filter(({ version }) => version <= 8)) migration.up(db);
 		db.exec(`
@@ -466,7 +495,7 @@ describe("migrations v9-v11 — macOS parity", () => {
 
 		runMigrations(db);
 
-		expect(getSchemaVersion(db)).toBe(11);
+		expect(getSchemaVersion(db)).toBe(18);
 		expect(db.prepare("PRAGMA table_info(feedback)").all()).not.toHaveLength(0);
 		expect(db.prepare("PRAGMA table_info(thoughts)").all()).toEqual(expect.arrayContaining([
 			expect.objectContaining({ name: "last_confirmed_at" }),

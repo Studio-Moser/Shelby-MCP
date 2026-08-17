@@ -53,6 +53,7 @@ export function emptyOmissionCounts(): Record<BriefOmissionReason, number> {
 interface EligibleItem extends BriefItem {
   explicitEligible: boolean;
   reinforcementCount: number;
+  lastConfirmedAt: string | null;
 }
 
 function extraMetadata(candidate: BriefCandidate): Record<string, unknown> | null | undefined {
@@ -186,12 +187,15 @@ export function selectBriefItems(
       refuted_claims: sanitizeRefutedClaims(candidate.refuted_claims),
       explicitEligible: classified.explicitEligible,
       reinforcementCount: candidate.reinforcement_count,
+      lastConfirmedAt: candidate.last_confirmed_at,
     });
   }
 
   eligible.sort((a, b) =>
     LANE[a.role] - LANE[b.role] ||
     Number(b.explicitEligible) - Number(a.explicitEligible) ||
+    Number(b.lastConfirmedAt !== null) - Number(a.lastConfirmedAt !== null) ||
+    (b.lastConfirmedAt ?? "").localeCompare(a.lastConfirmedAt ?? "") ||
     b.reinforcementCount - a.reinforcementCount ||
     b.updated_at.localeCompare(a.updated_at) ||
     a.id.localeCompare(b.id),
@@ -204,7 +208,7 @@ export function selectBriefItems(
     if (ids.has(item.id) || summaries.has(item.summary)) { omitted.duplicate++; continue; }
     ids.add(item.id);
     summaries.add(item.summary);
-    const { explicitEligible: _, reinforcementCount: __, ...briefItem } = item;
+    const { explicitEligible: _, reinforcementCount: __, lastConfirmedAt: ___, ...briefItem } = item;
     items.push(briefItem);
   }
 
