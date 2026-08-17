@@ -4,6 +4,7 @@ import type { TrustLevel } from "./thoughts.js";
 
 const MIN_TOKENS = 4;
 const NOOP_THRESHOLD = 0.9;
+const ORDERED_NOOP_THRESHOLD = 0.8;
 const AUTO_EDGE_THRESHOLD = 0.8;
 const SUGGEST_THRESHOLD = 0.3;
 const CANDIDATE_LIMIT = 20;
@@ -42,11 +43,52 @@ function jaccard(left: ReadonlySet<string>, right: ReadonlySet<string>): number 
 }
 
 function orderedSimilarity(left: string, right: string): number {
-	const bigrams = (content: string): Set<string> => {
-		const tokens = tokenSequence(content);
-		return new Set(tokens.slice(1).map((token, index) => `${tokens[index]}\0${token}`));
-	};
-	return jaccard(bigrams(left), bigrams(right));
+	const leftTokens = tokenSequence(left);
+	const rightTokens = tokenSequence(right);
+	if (leftTokens.length === 0 || rightTokens.length === 0) return 0;
+	const maxLength = Math.max(leftTokens.length, rightTokens.length);
+	let start = 0;
+	while (start < leftTokens.length && start < rightTokens.length && leftTokens[start] === rightTokens[start]) {
+		start++;
+	}
+	let leftEnd = leftTokens.length - 1;
+	let rightEnd = rightTokens.length - 1;
+	while (leftEnd >= start && rightEnd >= start && leftTokens[leftEnd] === rightTokens[rightEnd]) {
+		leftEnd--;
+		rightEnd--;
+	}
+	const leftMiddle = leftTokens.slice(start, leftEnd + 1);
+	const rightMiddle = rightTokens.slice(start, rightEnd + 1);
+	if (leftMiddle.length === 0 || rightMiddle.length === 0) {
+		return 1 - Math.max(leftMiddle.length, rightMiddle.length) / maxLength;
+	}
+
+	const [pattern, text] = leftMiddle.length <= rightMiddle.length
+		? [leftMiddle, rightMiddle]
+		: [rightMiddle, leftMiddle];
+	const masks = new Map<string, bigint>();
+	for (let index = 0; index < pattern.length; index++) {
+		masks.set(pattern[index]!, (masks.get(pattern[index]!) ?? 0n) | (1n << BigInt(index)));
+	}
+	const fullMask = (1n << BigInt(pattern.length)) - 1n;
+	const highBit = 1n << BigInt(pattern.length - 1);
+	let positive = fullMask;
+	let negative = 0n;
+	let distance = pattern.length;
+	for (const token of text) {
+		const equal = masks.get(token) ?? 0n;
+		const changed = equal | negative;
+		const horizontal = ((((equal & positive) + positive) ^ positive) | equal) & fullMask;
+		let positiveHorizontal = (negative | ~(horizontal | positive)) & fullMask;
+		let negativeHorizontal = positive & horizontal;
+		if ((positiveHorizontal & highBit) !== 0n) distance++;
+		else if ((negativeHorizontal & highBit) !== 0n) distance--;
+		positiveHorizontal = ((positiveHorizontal << 1n) | 1n) & fullMask;
+		negativeHorizontal = (negativeHorizontal << 1n) & fullMask;
+		positive = (negativeHorizontal | ~(changed | positiveHorizontal)) & fullMask;
+		negative = positiveHorizontal & changed;
+	}
+	return 1 - distance / maxLength;
 }
 
 export function reconcile(
@@ -59,16 +101,20 @@ export function reconcile(
 
 	const scored = candidates.map((candidate) => {
 		const candidateTokens = tokenize(candidate.content);
+		const similarity = jaccard(inputTokens, candidateTokens);
 		return {
 			id: candidate.id,
-			similarity: jaccard(inputTokens, candidateTokens),
-			orderedSimilarity: orderedSimilarity(content, candidate.content),
+			similarity,
+			orderedSimilarity: candidate.type === type && similarity >= NOOP_THRESHOLD
+				? orderedSimilarity(content, candidate.content)
+				: undefined,
 			type: candidate.type,
 		};
 	}).sort((left, right) => right.similarity - left.similarity || left.id.localeCompare(right.id));
 
 	const duplicate = scored.find(({ similarity, orderedSimilarity, type: candidateType }) =>
-		candidateType === type && similarity >= NOOP_THRESHOLD && orderedSimilarity >= NOOP_THRESHOLD,
+		candidateType === type && similarity >= NOOP_THRESHOLD &&
+		orderedSimilarity !== undefined && orderedSimilarity >= ORDERED_NOOP_THRESHOLD,
 	);
 	if (duplicate) {
 		return { action: "noop", existingId: duplicate.id, suggestedEdges: [] };
@@ -82,9 +128,11 @@ export function reconcile(
 				id,
 				similarity,
 				autoApply: similarity >= AUTO_EDGE_THRESHOLD && !(
-					candidateType === type && similarity >= NOOP_THRESHOLD && orderedSimilarity < NOOP_THRESHOLD
+					candidateType === type && similarity >= NOOP_THRESHOLD &&
+					orderedSimilarity !== undefined && orderedSimilarity < ORDERED_NOOP_THRESHOLD
 				),
-				...(candidateType === type && similarity >= NOOP_THRESHOLD && orderedSimilarity < NOOP_THRESHOLD
+				...(candidateType === type && similarity >= NOOP_THRESHOLD &&
+				orderedSimilarity !== undefined && orderedSimilarity < ORDERED_NOOP_THRESHOLD
 					? { edgeType: "refuted_by" as const }
 					: {}),
 			})),

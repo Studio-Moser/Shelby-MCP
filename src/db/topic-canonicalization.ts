@@ -1,5 +1,5 @@
 export function canonicalizeTopic(topic: string): string {
-	return topic.trim().toLowerCase().replace(/[\s_-]+/g, "-");
+	return topic.normalize("NFC").toLowerCase().replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 export function canonicalizeTopics(topics: string[]): string[] {

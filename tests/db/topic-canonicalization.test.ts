@@ -9,6 +9,8 @@ describe("topic canonicalization", () => {
 		[" Knowledge Graph ", "knowledge-graph"],
 		["knowledge_graph", "knowledge-graph"],
 		["knowledge---  __graph", "knowledge-graph"],
+		["_swift_", "swift"],
+		["Cafe\u0301", "café"],
 	])("canonicalizes %j to %j", (input, expected) => {
 		expect(canonicalizeTopic(input)).toBe(expected);
 	});

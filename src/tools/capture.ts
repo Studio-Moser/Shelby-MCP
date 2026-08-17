@@ -20,6 +20,7 @@ import {
 	reconcile,
 	tokenize,
 } from "../db/reconciliation.js";
+import { canonicalizeTopics } from "../db/topic-canonicalization.js";
 import {
   toolSuccess,
   toolError,
@@ -44,6 +45,8 @@ interface SuggestedConnection {
 }
 
 const SUGGESTION_LIMIT = 5;
+
+type CaptureAction = "created" | "reinforced" | "merged" | "superseded" | "stored_unverified";
 
 interface CaptureArgs {
   content?: string;
@@ -86,7 +89,7 @@ function stricterSensitivity(
 		if (value === undefined || value === "normal") return 0;
 		if (value === "private") return 1;
 		if (value === "secret") return 2;
-		return 3;
+		return 0;
 	};
 	const existingExtra = existing?.extra;
 	const incomingExtra = incoming?.extra;
@@ -109,6 +112,12 @@ function stricterSensitivity(
 			sensitivity: incomingSensitivity,
 		},
 	};
+}
+
+function trustRank(value: TrustLevel): number {
+	if (value === "trusted") return 2;
+	if (value === "unverified") return 1;
+	return 0;
 }
 
 /**
@@ -173,7 +182,7 @@ function captureSingle(
 	> | null,
 ): {
 	id: string;
-	action: "noop" | "add";
+	action: CaptureAction;
 	linked: string[];
 	skipped: string[];
 	suggested_connections: SuggestedConnection[];
@@ -184,19 +193,28 @@ function captureSingle(
 	const effectiveType = args.type === "preference" ? "decision" : args.type;
 	const type = effectiveType ?? "note";
 	const projectIdentifier = resolvedScope?.currentSlug ?? null;
-	const topics = args.topics ?? [];
+	const topics = canonicalizeTopics(args.topics ?? []);
 	const contentTokens = tokenize(args.content);
-	const candidates = findReconciliationCandidates(
+	const incomingTrust = args.trust_level ?? "trusted";
+	const allCandidates = findReconciliationCandidates(
 		db.db,
 		args.content,
 		resolvedScope?.projectId ?? null,
 		args.project ?? null,
 		contentTokens,
-	).filter((candidate) => canReconcileCapture(
-		args.trust_level ?? "trusted",
+	);
+	const candidates = allCandidates.filter((candidate) => canReconcileCapture(
+		incomingTrust,
+		candidate.trust_level,
+	));
+	const blockedCandidates = allCandidates.filter((candidate) => !canReconcileCapture(
+		incomingTrust,
 		candidate.trust_level,
 	));
 	const decision = reconcile(args.content, type, candidates, contentTokens);
+	const blockedDecision = reconcile(args.content, type, blockedCandidates, contentTokens);
+	const trustGatePreventedReconciliation = blockedDecision.action === "noop" ||
+		blockedDecision.suggestedEdges.some(({ edgeType }) => edgeType === "refuted_by");
 
 	if (decision.action === "noop") {
 		const existing = getThought(db.db, decision.existingId)!;
@@ -209,14 +227,18 @@ function captureSingle(
 		if (existing.visibility === "shared" && effectiveVisibility === "personal") {
 			updates.visibility = "personal";
 		}
+		if (trustRank(incomingTrust) > trustRank(existing.trust_level)) {
+			updates.trust_level = incomingTrust;
+		}
 		const metadata = stricterSensitivity(existing.metadata, args.metadata);
 		if (metadata) updates.metadata = metadata;
+		const action: CaptureAction = Object.keys(updates).length > 0 ? "merged" : "reinforced";
 		incrementReinforcement(db.db, existing.id, 1, true);
 		if (Object.keys(updates).length > 0) updateThought(db.db, existing.id, updates);
 		const links = attachRelated(db, existing.id, args.related_to);
 		return {
 			id: existing.id,
-			action: "noop",
+			action,
 			...links,
 			suggested_connections: [],
 		};
@@ -242,6 +264,14 @@ function captureSingle(
 			.prepare("UPDATE thoughts SET project_id = ? WHERE id = ?")
 			.run(resolvedScope.projectId, id);
 	}
+	const reversals = decision.suggestedEdges.filter(({ edgeType }) => edgeType === "refuted_by");
+	for (const { id: supersededId } of reversals) {
+		linkThoughts(db, {
+			source_id: supersededId,
+			target_id: id,
+			edge_type: "refuted_by",
+		});
+	}
 
 	const links = attachRelated(db, id, [
 		...(args.related_to ?? []),
@@ -262,7 +292,12 @@ function captureSingle(
 			} : {}),
 		})));
 
-	return { id, action: "add", ...links, suggested_connections };
+	const action: CaptureAction = reversals.length > 0
+		? "superseded"
+		: trustGatePreventedReconciliation
+			? "stored_unverified"
+			: "created";
+	return { id, action, ...links, suggested_connections };
 }
 
 function attachRelated(

@@ -53,4 +53,14 @@ describe("reconcile", () => {
 			}],
 		});
 	});
+
+	it("uses normalized token Levenshtein similarity with an ordered threshold of 0.8", () => {
+		expect(reconcile("alpha bravo charlie delta echo foxtrot golf hotel juliet india", "note", [
+			{ id: "prior", content: "alpha bravo charlie delta echo foxtrot golf hotel india juliet", type: "note" },
+		])).toEqual({
+			action: "noop",
+			existingId: "prior",
+			suggestedEdges: [],
+		});
+	});
 });

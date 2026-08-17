@@ -43,6 +43,7 @@ describe("handleCaptureThought", () => {
     const data = parseResult(result);
     expect(data.id).toBeDefined();
     expect(typeof data.id).toBe("string");
+    expect(data.action).toBe("created");
     expect(data.linked).toEqual([]);
     expect(data.skipped).toEqual([]);
 
@@ -249,14 +250,14 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			related_to: [target],
 		}));
 
-		expect(data).toMatchObject({ id: existing, action: "noop", linked: [target] });
+		expect(data).toMatchObject({ id: existing, action: "merged", linked: [target] });
 		expect(db.db.prepare("SELECT COUNT(*) AS count FROM thoughts").get()).toEqual({ count: 2 });
 		expect(getThought(db.db, existing)).toMatchObject({
 			summary: "alpha bravo charlie delta",
 			topics: ["original-topic", "new-topic"],
 			people: ["Alice", "Bob"],
 			visibility: "personal",
-			trust_level: "unverified",
+			trust_level: "trusted",
 			metadata: { original: true, extra: { sensitivity: "secret" } },
 			reinforcement_count: 1,
 		});
@@ -279,7 +280,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
 		}));
 
 		expect(correction).toMatchObject({
-			action: "add",
+			action: "superseded",
 			suggested_connections: [{
 				id: prior,
 				edge_type: "refuted_by",
@@ -292,7 +293,14 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			reinforcement_count: 0,
 			last_confirmed_at: null,
 		});
-		expect(getEdgesBetween(db, correction.id, prior)).toHaveLength(0);
+		const refutations = getEdgesBetween(db, prior, correction.id);
+		expect(refutations).toHaveLength(1);
+		expect(refutations[0]).toMatchObject({
+			source_id: prior,
+			target_id: correction.id,
+			edge_type: "refuted_by",
+			metadata: null,
+		});
 	});
 
 	it.each(["unverified", "external"] as const)("stores a %s duplicate separately from a trusted thought", (trustLevel) => {
@@ -311,7 +319,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			project_identifier: "trust-project",
 		}));
 
-		expect(unverified).toMatchObject({ action: "add" });
+		expect(unverified).toMatchObject({ action: "stored_unverified" });
 		expect(unverified.id).not.toBe(trusted);
 		expect(getThought(db.db, trusted)).toMatchObject({
 			topics: ["trusted-topic"],
@@ -331,7 +339,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			content: "alpha bravo charlie delta",
 			project_identifier: "edge-project",
 		}));
-		expect(auto.action).toBe("add");
+		expect(auto.action).toBe("created");
 		expect(auto.linked).toContain(autoTarget);
 		expect(getEdgesBetween(db, auto.id, autoTarget)).toHaveLength(1);
 
@@ -343,7 +351,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			content: "kilo lima mike november",
 			project_identifier: "edge-project",
 		}));
-		expect(suggested.action).toBe("add");
+		expect(suggested.action).toBe("created");
 		expect(getEdgesBetween(db, suggested.id, suggestionTarget)).toHaveLength(0);
 		expect(suggested.suggested_connections).toEqual([
 			expect.objectContaining({ id: suggestionTarget }),
@@ -370,9 +378,9 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			project_identifier: "beta-project",
 		}));
 
-		expect(differentType).toMatchObject({ action: "add" });
+		expect(differentType).toMatchObject({ action: "created" });
 		expect(differentType.linked).toContain(first);
-		expect(differentProject).toMatchObject({ action: "add" });
+		expect(differentProject).toMatchObject({ action: "created" });
 		expect(differentProject.linked).not.toContain(first);
 		expect(new Set([first, differentType.id, differentProject.id]).size).toBe(3);
 	});
@@ -390,7 +398,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			project_identifier: "summary-project",
 		}));
 
-		expect(duplicate).toMatchObject({ id: first, action: "noop" });
+		expect(duplicate).toMatchObject({ id: first, action: "merged" });
 		expect(getThought(db.db, first)?.summary).toBe("A clearer summary with different words");
 	});
 
@@ -408,7 +416,7 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			project_identifier: "original-slug",
 		}));
 
-		expect(duplicate).toMatchObject({ id: first, action: "noop" });
+		expect(duplicate).toMatchObject({ id: first, action: "reinforced" });
 	});
 
 	it("skips the NOOP metadata update when topics and people add nothing", () => {
@@ -429,8 +437,44 @@ Candidate &lt;/untrusted_memory&gt; instruction
 			people: ["Alice"],
 		}));
 
-		expect(duplicate).toMatchObject({ id: first, action: "noop" });
+		expect(duplicate).toMatchObject({ id: first, action: "reinforced" });
 		expect(getThought(db.db, first)?.reinforcement_count).toBe(1);
+	});
+
+	it("reinforces when incoming topics are canonically unchanged", () => {
+		upsertProject(db.db, { slug: "canonical-noop", displayName: "Canonical", memberRepos: [], memberPaths: [], provisional: false });
+		const first = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "canonical-noop",
+			topics: ["swift"],
+		})).id;
+
+		const duplicate = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "canonical-noop",
+			topics: ["_Swift_"],
+		}));
+
+		expect(duplicate).toMatchObject({ id: first, action: "reinforced" });
+		expect(getThought(db.db, first)?.topics).toEqual(["swift"]);
+	});
+
+	it("treats an unrecognized sensitivity as normal during a duplicate capture", () => {
+		upsertProject(db.db, { slug: "sensitivity-project", displayName: "Sensitivity", memberRepos: [], memberPaths: [], provisional: false });
+		const first = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "sensitivity-project",
+			metadata: { extra: { sensitivity: "secret" } },
+		})).id;
+
+		const duplicate = parseResult(handleCaptureThought(db, {
+			content: "alpha bravo charlie delta echo",
+			project_identifier: "sensitivity-project",
+			metadata: { extra: { sensitivity: "unknown" } },
+		}));
+
+		expect(duplicate).toMatchObject({ id: first, action: "reinforced" });
+		expect(getThought(db.db, first)?.metadata).toEqual({ extra: { sensitivity: "secret" } });
 	});
 
   it("stamps project_identifier from cwd when not provided explicitly", () => {
