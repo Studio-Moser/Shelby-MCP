@@ -120,7 +120,7 @@ export function handleUpdateThought(
   const updates: Record<string, unknown> = {};
   if (a.content !== undefined) updates.content = a.content;
   if (a.summary !== undefined) updates.summary = a.summary;
-  if (a.type !== undefined) updates.type = a.type;
+  if (a.type !== undefined) updates.type = a.type === "preference" ? "decision" : a.type;
   if (a.source !== undefined) updates.source = a.source;
   if (a.project !== undefined) updates.project = a.project;
   if (projectReference?.kind === "resolved") {

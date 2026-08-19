@@ -1,7 +1,13 @@
 import type { ThoughtDatabase } from "../db/database.js";
-import { insertThought, getThought } from "../db/thoughts.js";
+import {
+	getThought,
+	incrementReinforcement,
+	insertThought,
+	updateThought,
+	type ThoughtInput,
+	type TrustLevel,
+} from "../db/thoughts.js";
 import { linkThoughts } from "../db/edges.js";
-import { searchThoughts, sanitizeFTSQuery } from "../db/fts.js";
 import {
 	resolveProjectReference,
 	resolveProjectScope,
@@ -9,6 +15,12 @@ import {
 } from "../db/resolve-project.js";
 import type { ProjectScopeResolution } from "../db/resolve-project.js";
 import type { ProjectReferenceResolution } from "../db/project-identity.js";
+import {
+	findReconciliationCandidates,
+	reconcile,
+	tokenize,
+} from "../db/reconciliation.js";
+import { canonicalizeTopics } from "../db/topic-canonicalization.js";
 import {
   toolSuccess,
   toolError,
@@ -21,56 +33,20 @@ import {
   MAX_PERSON_LENGTH,
   MAX_BULK_THOUGHTS,
 } from "./helpers.js";
-
-const SUGGESTION_LIMIT = 5;
-const SUGGESTION_MIN_RANK = 0.5; // BM25 rank threshold (higher = more relevant)
+import { canReconcileCapture, fenceThoughtSummaries } from "./trust-boundary.js";
 
 interface SuggestedConnection {
   id: string;
   summary: string | null;
   similarity_reason: string;
+	edge_type?: "refuted_by";
+	source_id?: string;
+	target_id?: string;
 }
 
-/**
- * Run a quick FTS search against existing thoughts to find potential connections.
- * Returns up to SUGGESTION_LIMIT results above the rank threshold, excluding
- * the newly captured thought itself.
- */
-function findSuggestedConnections(
-  db: ThoughtDatabase,
-  content: string,
-  summary: string | undefined,
-  excludeId: string,
-): SuggestedConnection[] {
-  // Build a search query from the summary (preferred, more focused) or first 200 chars of content
-  const searchText = summary ?? content.slice(0, 200);
-  if (!searchText.trim()) return [];
+const SUGGESTION_LIMIT = 5;
 
-  const sanitized = sanitizeFTSQuery(searchText);
-  if (!sanitized) return [];
-
-  const ftsResult = searchThoughts(db.db, {
-    query: sanitized,
-    limit: SUGGESTION_LIMIT + 1, // +1 to account for possible self-match
-    offset: 0,
-  });
-
-  const suggestions: SuggestedConnection[] = [];
-  for (const r of ftsResult.results) {
-    if (r.id === excludeId) continue;
-    if (r.rank < SUGGESTION_MIN_RANK) continue;
-    suggestions.push({
-      id: r.id,
-      summary: r.summary,
-      similarity_reason: `FTS match (relevance: ${r.rank.toFixed(2)})`,
-    });
-    if (suggestions.length >= SUGGESTION_LIMIT) break;
-  }
-
-  return suggestions;
-}
-
-type TrustLevel = "trusted" | "unverified" | "external";
+type CaptureAction = "created" | "reinforced" | "merged" | "superseded" | "stored_unverified";
 
 interface CaptureArgs {
   content?: string;
@@ -103,6 +79,45 @@ interface CaptureArgs {
     metadata?: Record<string, unknown>;
     related_to?: string[];
   }>;
+}
+
+function stricterSensitivity(
+	existing: Record<string, unknown> | null,
+	incoming: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	const sensitivityRank = (value: unknown): number => {
+		if (value === undefined || value === "normal") return 0;
+		if (value === "private") return 1;
+		if (value === "secret") return 2;
+		return 0;
+	};
+	const existingExtra = existing?.extra;
+	const incomingExtra = incoming?.extra;
+	const existingSensitivity = existingExtra !== null && typeof existingExtra === "object" && !Array.isArray(existingExtra)
+		? (existingExtra as Record<string, unknown>).sensitivity
+		: undefined;
+	const incomingSensitivity = incomingExtra !== null && typeof incomingExtra === "object" && !Array.isArray(incomingExtra)
+		? (incomingExtra as Record<string, unknown>).sensitivity
+		: undefined;
+	if (
+		typeof incomingSensitivity !== "string" ||
+		sensitivityRank(incomingSensitivity) <= sensitivityRank(existingSensitivity)
+	) return undefined;
+	return {
+		...(existing ?? {}),
+		extra: {
+			...(existingExtra !== null && typeof existingExtra === "object" && !Array.isArray(existingExtra)
+				? existingExtra as Record<string, unknown>
+				: {}),
+			sensitivity: incomingSensitivity,
+		},
+	};
+}
+
+function trustRank(value: TrustLevel): number {
+	if (value === "trusted") return 2;
+	if (value === "unverified") return 1;
+	return 0;
 }
 
 /**
@@ -165,22 +180,81 @@ function captureSingle(
 		ProjectReferenceResolution,
 		{ kind: "resolved" }
 	> | null,
-): { id: string; linked: string[]; skipped: string[] } {
+): {
+	id: string;
+	action: CaptureAction;
+	linked: string[];
+	skipped: string[];
+	suggested_connections: SuggestedConnection[];
+} {
   // Default visibility: 'shared' for preference type, otherwise 'personal'
   const effectiveVisibility =
-    args.visibility ?? (args.type === "preference" ? "shared" : undefined);
+    args.visibility ?? (args.type === "preference" ? "shared" : "personal");
+	const effectiveType = args.type === "preference" ? "decision" : args.type;
+	const type = effectiveType ?? "note";
+	const projectIdentifier = resolvedScope?.currentSlug ?? null;
+	const topics = canonicalizeTopics(args.topics ?? []);
+	const contentTokens = tokenize(args.content);
+	const incomingTrust = args.trust_level ?? "trusted";
+	const allCandidates = findReconciliationCandidates(
+		db.db,
+		args.content,
+		resolvedScope?.projectId ?? null,
+		args.project ?? null,
+		contentTokens,
+	);
+	const candidates = allCandidates.filter((candidate) => canReconcileCapture(
+		incomingTrust,
+		candidate.trust_level,
+	));
+	const blockedCandidates = allCandidates.filter((candidate) => !canReconcileCapture(
+		incomingTrust,
+		candidate.trust_level,
+	));
+	const decision = reconcile(args.content, type, candidates, contentTokens);
+	const blockedDecision = reconcile(args.content, type, blockedCandidates, contentTokens);
+	const trustGatePreventedReconciliation = blockedDecision.action === "noop" ||
+		blockedDecision.suggestedEdges.some(({ edgeType }) => edgeType === "refuted_by");
+
+	if (decision.action === "noop") {
+		const existing = getThought(db.db, decision.existingId)!;
+		const mergedTopics = [...new Set([...existing.topics, ...topics])];
+		const mergedPeople = [...new Set([...existing.people, ...(args.people ?? [])])];
+		const updates: Partial<ThoughtInput> = {};
+		if (mergedTopics.length !== existing.topics.length) updates.topics = mergedTopics;
+		if (mergedPeople.length !== existing.people.length) updates.people = mergedPeople;
+		if (args.summary?.trim() && args.summary !== existing.summary) updates.summary = args.summary;
+		if (existing.visibility === "shared" && effectiveVisibility === "personal") {
+			updates.visibility = "personal";
+		}
+		if (trustRank(incomingTrust) > trustRank(existing.trust_level)) {
+			updates.trust_level = incomingTrust;
+		}
+		const metadata = stricterSensitivity(existing.metadata, args.metadata);
+		if (metadata) updates.metadata = metadata;
+		const action: CaptureAction = Object.keys(updates).length > 0 ? "merged" : "reinforced";
+		incrementReinforcement(db.db, existing.id, 1, true);
+		if (Object.keys(updates).length > 0) updateThought(db.db, existing.id, updates);
+		const links = attachRelated(db, existing.id, args.related_to);
+		return {
+			id: existing.id,
+			action,
+			...links,
+			suggested_connections: [],
+		};
+	}
 
   const id = insertThought(db.db, {
     content: args.content,
     summary: args.summary,
-    type: args.type,
+		type,
     source: args.source,
     source_agent: args.source_agent,
     trust_level: args.trust_level,
     project: args.project,
-		project_identifier: resolvedScope?.currentSlug,
+		project_identifier: projectIdentifier ?? undefined,
     visibility: effectiveVisibility,
-    topics: args.topics,
+		topics: topics,
     people: args.people,
     metadata: args.metadata,
   });
@@ -190,31 +264,79 @@ function captureSingle(
 			.prepare("UPDATE thoughts SET project_id = ? WHERE id = ?")
 			.run(resolvedScope.projectId, id);
 	}
+	const reversals = decision.suggestedEdges.filter(({ edgeType }) => edgeType === "refuted_by");
+	for (const { id: supersededId } of reversals) {
+		linkThoughts(db, {
+			source_id: supersededId,
+			target_id: id,
+			edge_type: "refuted_by",
+		});
+	}
 
-  const linked: string[] = [];
-  const skipped: string[] = [];
+	const links = attachRelated(db, id, [
+		...(args.related_to ?? []),
+		...decision.suggestedEdges.filter(({ autoApply }) => autoApply).map(({ id }) => id),
+	], new Set(candidates.map((candidate) => candidate.id)));
+	const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+	const suggested_connections = fenceThoughtSummaries(db.db, decision.suggestedEdges
+		.filter(({ autoApply }) => !autoApply)
+		.slice(0, SUGGESTION_LIMIT)
+		.map(({ id: candidateId, similarity, edgeType }) => ({
+			id: candidateId,
+			summary: byId.get(candidateId)?.summary ?? null,
+			similarity_reason: `Jaccard token similarity: ${similarity.toFixed(2)}`,
+			...(edgeType ? {
+				edge_type: edgeType,
+				source_id: candidateId,
+				target_id: id,
+			} : {}),
+		})));
 
-  if (args.related_to && Array.isArray(args.related_to)) {
-    for (const relatedId of args.related_to) {
-      const exists = getThought(db.db, relatedId);
-      if (!exists) {
-        skipped.push(relatedId);
-        continue;
-      }
-      try {
-        linkThoughts(db, {
-          source_id: id,
-          target_id: relatedId,
-          edge_type: "related",
-        });
-        linked.push(relatedId);
-      } catch {
-        skipped.push(relatedId);
-      }
-    }
-  }
+	const action: CaptureAction = reversals.length > 0
+		? "superseded"
+		: trustGatePreventedReconciliation
+			? "stored_unverified"
+			: "created";
+	return { id, action, ...links, suggested_connections };
+}
 
-  return { id, linked, skipped };
+function attachRelated(
+	db: ThoughtDatabase,
+	sourceId: string,
+	relatedIds: string[] | undefined,
+	knownExistingIds: ReadonlySet<string> = new Set(),
+): { linked: string[]; skipped: string[] } {
+	const linked: string[] = [];
+	const skipped: string[] = [];
+	const uniqueIds = [...new Set(relatedIds ?? [])];
+	const idsToCheck = uniqueIds.filter(
+		(id) => id !== sourceId && !knownExistingIds.has(id),
+	);
+	const existingIds = new Set(knownExistingIds);
+	if (idsToCheck.length > 0) {
+		const placeholders = idsToCheck.map(() => "?").join(", ");
+		const rows = db.db
+			.prepare(`SELECT id FROM thoughts WHERE id IN (${placeholders})`)
+			.all(...idsToCheck) as Array<{ id: string }>;
+		for (const { id } of rows) existingIds.add(id);
+	}
+	for (const relatedId of uniqueIds) {
+		if (relatedId === sourceId || !existingIds.has(relatedId)) {
+			skipped.push(relatedId);
+			continue;
+		}
+		try {
+			linkThoughts(db, {
+				source_id: sourceId,
+				target_id: relatedId,
+				edge_type: "related",
+			});
+			linked.push(relatedId);
+		} catch {
+			skipped.push(relatedId);
+		}
+	}
+	return { linked, skipped };
 }
 
 type ResolvedReference = Extract<
@@ -403,17 +525,11 @@ export function handleCaptureThought(
 		);
   })();
 
-  const suggested_connections = findSuggestedConnections(
-    db,
-    a.content,
-    a.summary,
-    result.id,
-  );
-
   return toolSuccess({
     id: result.id,
+		action: result.action,
     linked: result.linked,
     skipped: result.skipped,
-    suggested_connections,
+		suggested_connections: result.suggested_connections,
   });
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { deriveExistingProjectId } from "../../src/db/project-identity.js";
 import {
+	CURRENT_SCHEMA_VERSION,
 	getMigrations,
 	getSchemaVersion,
 	runMigrations,
@@ -23,8 +24,9 @@ describe("Migration v5 — version-stamp alignment with Shelby-MacOS", () => {
     db?.close();
   });
 
-	it("schema version is 8 after all migrations", () => {
-		expect(getSchemaVersion(db.db)).toBe(8);
+	it("schema version is 18 after all migrations", () => {
+		expect(getSchemaVersion(db.db)).toBe(18);
+		expect(CURRENT_SCHEMA_VERSION).toBe(18);
   });
 
   it("thoughts table has source_agent column", () => {
@@ -126,7 +128,7 @@ describe("migration v6 — project identity", () => {
     const db = new Database(":memory:");
     runMigrations(db);
 
-		expect(getSchemaVersion(db)).toBe(8);
+		expect(getSchemaVersion(db)).toBe(18);
 
 		const thoughtCols = db
 			.prepare("PRAGMA table_info(thoughts)")
@@ -149,6 +151,60 @@ describe("migration v6 — project identity", () => {
     );
     db.close();
   });
+});
+
+describe("migration v11 — thought confirmation timestamp", () => {
+	it("adds nullable last_confirmed_at without backfilling existing thoughts", () => {
+		const db = new Database(":memory:");
+		for (const migration of getMigrations().filter(({ version }) => version <= 8)) {
+			migration.up(db);
+		}
+		setSchemaVersion(db, 8);
+		db.prepare(
+			`INSERT INTO thoughts (id, content, type, source, created_at, updated_at)
+			 VALUES ('legacy', 'content', 'note', 'test', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z')`,
+		).run();
+
+		for (const migration of getMigrations().filter(({ version }) => version >= 9)) {
+			migration.up(db);
+			setSchemaVersion(db, migration.version);
+		}
+
+		expect(getSchemaVersion(db)).toBe(18);
+		expect(
+			db.prepare("SELECT last_confirmed_at FROM thoughts WHERE id = 'legacy'").get(),
+		).toEqual({ last_confirmed_at: null });
+		db.close();
+	});
+});
+
+describe("migration v18 — canonical topic backfill", () => {
+	it("canonicalizes legacy topic casings before completion suggestions", () => {
+		const dir = mkdtempSync(join(tmpdir(), "shelby-topic-migration-"));
+		const path = join(dir, "memory.db");
+		try {
+			const legacy = new Database(path);
+			for (const migration of getMigrations().filter(({ version }) => version <= 11)) {
+				migration.up(legacy);
+			}
+			setSchemaVersion(legacy, 11);
+			legacy.prepare(
+				`INSERT INTO thoughts (id, content, type, source, topics, created_at, updated_at)
+				 VALUES ('legacy-topics', 'content', 'note', 'test', ?, '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z')`,
+			).run(JSON.stringify(["Knowledge Graph", "knowledge_graph", " API  Design "]));
+			legacy.close();
+
+			const migrated = new ThoughtDatabase(path);
+			expect(migrated.getSchemaVersion()).toBe(18);
+			expect(migrated.db.prepare("SELECT topics FROM thoughts WHERE id = 'legacy-topics'").get()).toEqual({
+				topics: JSON.stringify(["knowledge-graph", "api-design"]),
+			});
+			expect(migrated.getDistinctArrayValues("topics", "Knowledge G")).toEqual(["knowledge-graph"]);
+			migrated.close();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("migration v7 — normalize legacy display-name project_identifiers", () => {
@@ -372,10 +428,78 @@ describe("migration v8 — canonical project identity", () => {
 				)
 				.get();
 			expect(after).toEqual(before);
-			expect(reopened.getSchemaVersion()).toBe(8);
+			expect(reopened.getSchemaVersion()).toBe(18);
 			reopened.close();
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}
   });
+});
+
+describe("migrations v9-v11 — macOS parity", () => {
+	it("creates the exact search telemetry and feedback schemas", () => {
+		const db = new Database(":memory:");
+		runMigrations(db);
+
+		const telemetryColumns = db.prepare("PRAGMA table_info(search_telemetry)").all() as Array<{
+			name: string;
+			notnull: number;
+			dflt_value: string | null;
+		}>;
+		expect(telemetryColumns.map(({ name, notnull, dflt_value }) => ({ name, notnull, dflt_value }))).toEqual([
+			{ name: "id", notnull: 0, dflt_value: null },
+			{ name: "created_at", notnull: 1, dflt_value: null },
+			{ name: "query_hash", notnull: 0, dflt_value: null },
+			{ name: "mode", notnull: 0, dflt_value: null },
+			{ name: "result_count", notnull: 1, dflt_value: "0" },
+			{ name: "top_ids", notnull: 0, dflt_value: null },
+			{ name: "rediscovery", notnull: 1, dflt_value: "0" },
+			{ name: "project_identifier", notnull: 0, dflt_value: null },
+		]);
+		expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_search_telemetry_created'").get()).toEqual({ name: "idx_search_telemetry_created" });
+		expect(db.prepare("PRAGMA table_info(feedback)").all()).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: "id", notnull: 0 }),
+			expect.objectContaining({ name: "created_at", notnull: 1 }),
+			expect.objectContaining({ name: "feature", notnull: 1 }),
+			expect.objectContaining({ name: "variant_id", notnull: 0 }),
+			expect.objectContaining({ name: "label", notnull: 1 }),
+			expect.objectContaining({ name: "prompt_hash", notnull: 0 }),
+			expect.objectContaining({ name: "response_hash", notnull: 0 }),
+		]));
+		expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_feedback_variant'").get()).toEqual({ name: "idx_feedback_variant" });
+		expect(getSchemaVersion(db)).toBe(18);
+		db.close();
+	});
+
+	it.each([9, 10])("walks a macOS-stamped v%i database to v18", (macVersion) => {
+		const db = new Database(":memory:");
+		for (const migration of getMigrations().filter(({ version }) => version <= 8)) migration.up(db);
+		db.exec(`
+			CREATE TABLE IF NOT EXISTS search_telemetry (
+				id TEXT PRIMARY KEY, created_at TEXT NOT NULL, query_hash TEXT, mode TEXT,
+				result_count INTEGER NOT NULL DEFAULT 0, top_ids TEXT,
+				rediscovery INTEGER NOT NULL DEFAULT 0, project_identifier TEXT
+			);
+			CREATE INDEX IF NOT EXISTS idx_search_telemetry_created ON search_telemetry(created_at);
+		`);
+		if (macVersion >= 10) {
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS feedback (
+					id TEXT PRIMARY KEY, created_at TEXT NOT NULL, feature TEXT NOT NULL,
+					variant_id TEXT, label TEXT NOT NULL, prompt_hash TEXT, response_hash TEXT
+				);
+				CREATE INDEX IF NOT EXISTS idx_feedback_variant ON feedback(variant_id);
+			`);
+		}
+		setSchemaVersion(db, macVersion);
+
+		runMigrations(db);
+
+		expect(getSchemaVersion(db)).toBe(18);
+		expect(db.prepare("PRAGMA table_info(feedback)").all()).not.toHaveLength(0);
+		expect(db.prepare("PRAGMA table_info(thoughts)").all()).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: "last_confirmed_at" }),
+		]));
+		db.close();
+	});
 });

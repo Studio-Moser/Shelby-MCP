@@ -7,6 +7,7 @@ import {
   deleteThought,
   listThoughts,
   countThoughts,
+	incrementReinforcement,
 } from "../../src/db/thoughts.js";
 import { runMigrations } from "../../src/db/migrations.js";
 import BetterSqlite3 from "better-sqlite3";
@@ -46,6 +47,7 @@ describe("thoughts CRUD", () => {
       expect(thought!.embedding).toBeNull();
       expect(thought!.consolidated_into).toBeNull();
       expect(thought!.reinforcement_count).toBe(0);
+		expect(thought!.last_confirmed_at).toBeNull();
       expect(thought!.created_at).toBeTruthy();
       expect(thought!.updated_at).toBeTruthy();
     });
@@ -73,6 +75,15 @@ describe("thoughts CRUD", () => {
       expect(thought.visibility).toBe("team");
       expect(thought.metadata).toEqual({ priority: "high", version: 2 });
     });
+
+		it("canonicalizes topics at the database insert boundary", () => {
+			const id = insertThought(db, {
+				content: "Canonical insert",
+				topics: [" Knowledge Graph ", "knowledge_graph", "API  Design"],
+			});
+
+			expect(getThought(db, id)?.topics).toEqual(["knowledge-graph", "api-design"]);
+		});
   });
 
   describe("getThought", () => {
@@ -81,6 +92,30 @@ describe("thoughts CRUD", () => {
       expect(result).toBeNull();
     });
   });
+
+	describe("incrementReinforcement", () => {
+		it("increments use count without confirming by default", () => {
+			const id = insertThought(db, { content: "Useful thought" });
+			db.prepare("UPDATE thoughts SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(id);
+
+			expect(incrementReinforcement(db, id, 2)).toBe(true);
+
+			const thought = getThought(db, id)!;
+			expect(thought.reinforcement_count).toBe(2);
+			expect(thought.updated_at).not.toBe("2000-01-01T00:00:00.000Z");
+			expect(thought.last_confirmed_at).toBeNull();
+		});
+
+		it("sets last_confirmed_at when explicitly confirming", () => {
+			const id = insertThought(db, { content: "Confirmed thought" });
+
+			expect(incrementReinforcement(db, id, 1, true)).toBe(true);
+
+			const thought = getThought(db, id)!;
+			expect(thought.reinforcement_count).toBe(1);
+			expect(thought.last_confirmed_at).toBeTruthy();
+		});
+	});
 
   describe("updateThought", () => {
     it("updates content", () => {
@@ -115,6 +150,16 @@ describe("thoughts CRUD", () => {
       const thought = getThought(db, id)!;
       expect(thought.topics).toEqual(["new", "topics"]);
     });
+
+		it("canonicalizes topics at the database update boundary", () => {
+			const id = insertThought(db, { content: "Test", topics: ["old"] });
+
+			updateThought(db, id, {
+				topics: [" Knowledge Graph ", "knowledge_graph", "API  Design"],
+			});
+
+			expect(getThought(db, id)?.topics).toEqual(["knowledge-graph", "api-design"]);
+		});
 
     it("updates updated_at timestamp", () => {
       const id = insertThought(db, { content: "Test" });

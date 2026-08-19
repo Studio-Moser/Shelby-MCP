@@ -13,6 +13,7 @@ export interface BriefCandidate {
   summary: string | null;
   source: string;
   reinforcement_count: number;
+  last_confirmed_at: string | null;
   consolidated_into: string | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
@@ -90,7 +91,9 @@ const VALID_EXPLICIT_METADATA = `json_valid(t.metadata)
       json_extract(t.metadata, '$.extra.sensitivity') = 'normal')
   )`;
 
-const LEGACY_SAFE = `t.type IN ('decision', 'reference', 'insight')
+// `preference` is retained as a legacy alias for rows captured before preferences
+// were folded into the canonical `decision` type.
+const LEGACY_SAFE = `t.type IN ('decision', 'reference', 'insight', 'preference')
   AND json_valid(t.metadata)
   AND json_type(t.metadata) = 'object'
   AND (
@@ -139,7 +142,7 @@ export function loadBriefCandidates(
       t.id, t.project_id,
       COALESCE((SELECT current_slug FROM projects WHERE projects.project_id = t.project_id), t.project_identifier) AS project_identifier,
       t.visibility, t.trust_level, t.type,
-      t.summary, t.source, t.reinforcement_count, t.consolidated_into,
+      t.summary, t.source, t.reinforcement_count, t.last_confirmed_at, t.consolidated_into,
       t.metadata, t.created_at, t.updated_at,
       EXISTS (
         SELECT 1 FROM edges e
@@ -166,6 +169,8 @@ export function loadBriefCandidates(
         WHEN ${LEGACY_SAFE} THEN 1
         ELSE 0
       END DESC,
+      CASE WHEN t.last_confirmed_at IS NULL THEN 0 ELSE 1 END DESC,
+      t.last_confirmed_at DESC,
       t.reinforcement_count DESC,
       t.updated_at DESC,
       t.id ASC
