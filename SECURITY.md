@@ -1,58 +1,39 @@
 # Security
 
-> **DRAFT** — not yet published guidance. Blocks on Shelby-MacOS#269, Shelby-MacOS#275, Shelby-MCP#43; publish once those land.
-
-This document states what ShelbyMCP actually enforces, with the code path that enforces it, and what it does not. Claims without a citation don't belong here. Where the npm server's defaults are weaker than the Shelby Mac app's, that is called out explicitly.
+This document describes the security controls ShelbyMCP currently enforces and the limits callers must account for.
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Email <!-- TODO(Tim): replace placeholder with real address --> security@studiomoser.example with a description, reproduction steps, and impact. We acknowledge within 48 hours, give a status assessment within 7 days, and aim to fix critical issues within 14 days of triage. Coordinated disclosure: please give us the chance to ship a fix before publishing.
+**Do not open a public issue.** Email security@studiomoser.com with a description, reproduction steps, and impact. We acknowledge reports within 48 hours, provide a status assessment within 7 days, and aim to fix critical issues within 14 days of triage. Please give us a chance to ship a fix before publishing details.
 
-## What is enforced (and where)
+## What is enforced
 
-**Stdio is the default transport, and it has no network surface.** Without `--transport http` (or `SHELBY_TRANSPORT=http`), the server speaks stdio to its parent process only (`src/index.ts:66-72`, `src/config.ts:72`). The OS process boundary is the access control.
+**Stdio is the default transport and exposes no network listener.** Without `--transport http` or `SHELBY_TRANSPORT=http`, the server connects only to its parent process over stdio (`src/index.ts:64-72`, `src/config.ts:67-75`).
 
-**Bearer-token verification is constant-time.** When HTTP auth is on, tokens are checked with `crypto.timingSafeEqual` against the API key or its derived access token (`src/mcp/oauth.ts:41-52`), enforced on every `/mcp` request (`src/mcp/http-transport.ts:130-141`).
+**Bearer-token verification is constant-time.** When HTTP auth is enabled, `/mcp` accepts the configured API key or its derived access token and compares it with `crypto.timingSafeEqual` (`src/mcp/oauth.ts:28-52`, `src/mcp/http-transport.ts:129-141`).
 
-**OAuth token issuance requires PKCE and validates redirect URIs.** The authorize flow rejects unregistered clients and mismatched redirect URIs (`src/mcp/oauth.ts:278-288,319-323`), the token exchange verifies the S256 PKCE challenge and expires codes after 10 minutes (`oauth.ts:339-345,379-390`), and failed key attempts are rate-limited to 5 per 15 minutes per IP (`oauth.ts:160-173,303-308`).
+**OAuth authorization validates registered redirect URIs and token exchange requires PKCE.** The authorization flow rejects unknown clients and redirect URI mismatches (`src/mcp/oauth.ts:278-288,318-323`). Authorization codes expire after 10 minutes, are single-use, and require an S256 verifier (`src/mcp/oauth.ts:339-345,373-399`). The authorization form accepts at most five POST submissions per 15 minutes per source IP; successful and failed submissions both count (`src/mcp/oauth.ts:160-173,302-308`).
 
-**Input length caps limit memory-poisoning amplification.** Enforced at the Zod schema layer on `capture_thought`, bulk capture, and `update_thought` (`src/mcp/server.ts:162-198,366-374`): content ≤ 50,000 chars, summary ≤ 200, topics/people ≤ 20 entries of ≤ 100 chars, bulk arrays ≤ 50 thoughts (constants at `src/tools/helpers.ts:7-13`). A single call cannot flood the store.
+**Specific memory fields have size limits.** Capture and update schemas cap content at 50,000 characters, summaries at 200, topics and people at 20 entries of 100 characters each, and bulk capture at 50 thoughts (`src/tools/helpers.ts:7-13`, `src/mcp/server.ts:161-199,366-374`). These are field limits, not a whole-request or storage quota. Fields such as metadata, source, project identifiers, and relationship arrays are not covered by a total input budget.
 
-**Non-trusted memories never reach `get_brief`.** The brief policy drops any candidate whose `trust_level` is not `trusted` (`src/tools/brief-policy.ts:155`), along with wrong-project, consolidated, refuted, and non-`normal`-sensitivity candidates (`brief-policy.ts:147-163`). Surviving summaries pass a regex gate for injection markers, secrets, and PII, then get Markdown-escaped (`brief-policy.ts:75-99`). The regex gate is a heuristic filter, not a security boundary — the load-bearing defense is that untrusted content is excluded from the brief entirely.
+**Non-trusted memories never reach `get_brief`.** The brief policy omits every candidate whose `trust_level` is not `trusted`, as well as wrong-project, consolidated, refuted, and non-normal-sensitivity candidates (`src/tools/brief-policy.ts:149-165`). Eligible summaries pass a heuristic gate for injection markers, secrets, personal data, and Markdown controls before rendering (`src/tools/brief-policy.ts:76-99`).
+
+**Non-trusted memory reads are fenced as data.** Full content and summaries from `get_thought`, graph reads, and selected context are wrapped in an `untrusted_memory` block with a caution preamble; list and search summaries receive the same treatment (`src/tools/trust-boundary.ts:4-45`, `src/tools/get.ts:29-38`, `src/tools/graph.ts:150-172`, `src/tools/context.ts:203-226`, `src/tools/list.ts:53-56`, `src/tools/search.ts:255-268`). Delimiter characters in untrusted text are escaped before the wrapper is constructed (`src/tools/trust-boundary.ts:19-38`).
 
 ## What is not guaranteed
 
-Stated plainly so nobody builds on a guarantee that isn't there. Several of these are weaker than the Shelby Mac app's equivalents — the Mac app fail-closes its HTTP auth, binds loopback-only, and stamps external ingest as `external`; this server does none of those by default.
+**HTTP auth is opt-in and off by default.** Without `SHELBY_API_KEY`, `/mcp` accepts requests without authentication and emits only a startup warning (`src/mcp/http-transport.ts:129-141,178-185`).
 
-**HTTP auth is opt-in, and off by default.** Without `SHELBY_API_KEY`, the HTTP transport serves `/mcp` to anyone who can reach the socket — no auth at all, just a startup warning (`src/mcp/http-transport.ts:130-141,184`). The Mac app's server denies everything when its token is unresolvable; this one allows everything when the key is unset.
+**HTTP mode binds `0.0.0.0` by default.** Starting HTTP transport without `HOST` or `--host` listens on all interfaces (`src/config.ts:100-114`). On a bare machine, bind `127.0.0.1` and set `SHELBY_API_KEY`.
 
-**HTTP mode binds `0.0.0.0` by default.** If you pass `--transport http` without an explicit `HOST` or `--host`, the server listens on all interfaces — a container-friendly default that is network-exposed on a bare machine (`src/config.ts:111-114`). Combined with the point above, `shelbymcp --transport http` with no further flags is an unauthenticated network service. Bind `127.0.0.1` and set `SHELBY_API_KEY` unless you are inside a container boundary you trust. The Mac app hard-pins its listener to `127.0.0.1`.
+**There is no DNS-rebinding guard.** The HTTP transport does not validate `Host` or `Origin` before routing requests (`src/mcp/http-transport.ts:110-176`).
 
-**No DNS-rebinding guard.** The HTTP transport does not check `Host` or `Origin` headers. A malicious website resolving to your loopback could reach an unauthenticated local instance from your browser. The Mac app rejects non-loopback `Host`/`Origin` on every route; this server does not.
+**Captured thoughts default to `trusted`.** When a caller omits `trust_level`, the database write path stores `trusted` (`src/mcp/server.ts:168-176`, `src/db/thoughts.ts:187-205`). A compromised or prompt-injected client can therefore create memories eligible for future briefs unless it explicitly marks them `unverified` or `external`.
 
-**Captured thoughts default to `trusted`.** `capture_thought` stamps `trust_level: "trusted"` unless the caller says otherwise (`src/db/thoughts.ts:190`, schema default documented at `src/mcp/server.ts:170`). Every MCP client on the machine is trusted equally — a compromised or prompt-injected agent can write `trusted` memories that flow into every other agent's brief. The Mac app's external-ingest path defaults to `external`; here the discipline is left to the caller.
+**OAuth tokens are static and do not expire.** Access and refresh tokens are deterministic HMACs of the API key (`src/mcp/oauth.ts:28-34`). Revocation requires changing `SHELBY_API_KEY`. Dynamic client registration is open to callers that can reach `/register`; the API key entered at `/authorize` remains the authorization gate (`src/mcp/oauth.ts:232-267,302-353`).
 
-**Memory reads return non-trusted content unfenced.** `get_thought` and `search_thoughts` return full raw content regardless of trust level, with no fencing or annotation (`src/tools/get.ts`, `src/tools/search.ts` — neither consults `trust_level`). An agent that fetches an `external` thought gets its content verbatim, injection strings included. Fencing is tracked in Shelby-MCP#43.
+**Database file permissions are not explicitly restricted.** The server creates the database directory and SQLite file using the process umask (`src/db/database.ts:10-18`). Set restrictive filesystem permissions if other local users are in your threat model.
 
-**OAuth tokens are static and never expire.** Access and refresh tokens are deterministic HMACs of the API key (`src/mcp/oauth.ts:28-34`). There is one access token per key, it never rotates, and revocation means changing `SHELBY_API_KEY` for every client at once. Client registration is open — anyone who can reach `/register` can register a client (`oauth.ts:233-267`); the API key prompt at `/authorize` is the actual gate.
+**There is no semantic filtering on capture.** Stored content is not classified or rewritten for prompt injection. Trust levels control where content flows, not what the content says.
 
-**Database file permissions are not enforced.** The server creates `~/.shelbymcp/` and the SQLite file with your process umask (`src/db/database.ts:11`) — typically world-readable. If other local users matter in your threat model, `chmod 600` it yourself.
-
-**No semantic content filtering.** The server makes no attempt to detect or strip prompt-injection strings from stored content. That would require inference — which the "smart agent, dumb server" architecture deliberately avoids — and would false-positive on legitimate content. The trust-level system controls where content flows, not what it says.
-
-**No per-caller authorization on stdio.** All local callers are trusted equally. This is a single-user, local server; if multi-agent trust boundaries become load-bearing, per-caller identity would need to exist first.
-
-## Known vulnerabilities
-
-### CVE-2026-0621 — ReDoS in MCP TypeScript SDK UriTemplate regex
-
-| Field | Detail |
-|-------|--------|
-| **CVE** | CVE-2026-0621 |
-| **Severity** | High (ReDoS — remote denial of service) |
-| **Affected package** | `@modelcontextprotocol/sdk` < v2.0.0-alpha.2 |
-| **Current ShelbyMCP version** | `@modelcontextprotocol/sdk` ^1.26.0 (`package.json:28`, noted at `src/mcp/http-transport.ts:5-6`) |
-| **Fix** | Available in v2.0.0-alpha.2 (alpha — not yet stable) |
-| **Reported** | 2026-04-07 |
-
-Maliciously crafted URI template strings can cause catastrophic backtracking in the SDK's UriTemplate parser, blocking the Node.js event loop. ShelbyMCP does not parse untrusted URI templates from incoming requests, and the default stdio transport has no network surface, so practical risk is low — but the vulnerable code is in the dependency tree. Remediation: upgrade to SDK v2 once stable. Do not publish ShelbyMCP to npm while still on the v1 SDK. Tracking: strategy-tracker #32.
+**Stdio has no per-caller authorization.** All processes able to launch and communicate with the local stdio server have the same access.
