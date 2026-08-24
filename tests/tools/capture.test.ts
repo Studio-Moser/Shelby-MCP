@@ -178,6 +178,26 @@ describe("handleCaptureThought", () => {
     });
   });
 
+  it("rejects an invalid summary before default scope resolution", () => {
+    let scopeQueries = 0;
+    const scopeProbeDb = {
+      db: {
+        prepare: () => {
+          scopeQueries += 1;
+          return { all: () => [], get: () => undefined };
+        },
+      },
+    } as unknown as ThoughtDatabase;
+
+    const result = handleCaptureThoughtImpl(scopeProbeDb, {
+      content: "Invalid summary must not resolve scope",
+      summary: "   ",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(scopeQueries).toBe(0);
+  });
+
   it.each([
     ["missing", { content: "Missing summary" }],
     ["blank", { content: "Blank summary", summary: "   " }],

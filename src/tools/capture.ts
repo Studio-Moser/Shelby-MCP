@@ -149,6 +149,50 @@ function validateThoughtInput(t: {
   return null;
 }
 
+export function validateCaptureThoughtInput(args: Record<string, unknown>): ToolResult | null {
+  const a = args as unknown as CaptureArgs;
+
+  if (a.thoughts && Array.isArray(a.thoughts)) {
+    if (a.thoughts.length === 0) {
+      return toolError("invalid_input", "thoughts array is empty");
+    }
+    if (a.thoughts.length > MAX_BULK_THOUGHTS) {
+      return toolError(
+        "invalid_input",
+        `bulk capture exceeds maximum of ${MAX_BULK_THOUGHTS} thoughts per call (got ${a.thoughts.length})`,
+      );
+    }
+    for (const [index, thought] of a.thoughts.entries()) {
+      if (!thought.content || typeof thought.content !== "string") {
+        return toolError("invalid_input", `thoughts[${index}].content is required and must be a string`);
+      }
+      if (typeof thought.summary !== "string" || thought.summary.trim().length === 0) {
+        return toolError("invalid_input", `thoughts[${index}].summary is required and must be a non-empty string`);
+      }
+      const error = validateThoughtInput({ ...thought, summary: thought.summary.trim() });
+      if (error) return toolError("invalid_input", `thoughts[${index}].${error}`);
+    }
+    return null;
+  }
+
+  if (!a.content || typeof a.content !== "string") {
+    return toolError(
+      "invalid_input",
+      "content is required and must be a string. For bulk capture, provide a thoughts array.",
+    );
+  }
+  if (typeof a.summary !== "string" || a.summary.trim().length === 0) {
+    return toolError("invalid_input", "summary is required and must be a non-empty string");
+  }
+  const error = validateThoughtInput({
+    content: a.content,
+    summary: a.summary.trim(),
+    topics: a.topics,
+    people: a.people,
+  });
+  return error ? toolError("invalid_input", error) : null;
+}
+
 function captureSingle(
   db: ThoughtDatabase,
   args: CaptureItem,
@@ -412,11 +456,12 @@ function resolveCaptureScope(
 export function handleCaptureThought(
   db: ThoughtDatabase,
   args: Record<string, unknown>,
-	detectedScope: ProjectScopeResolution = resolveProjectScope(db.db, [
-		process.cwd(),
-	]),
+	detectedScope?: ProjectScopeResolution,
 ): ToolResult {
   const a = args as unknown as CaptureArgs;
+  const preflightError = validateCaptureThoughtInput(args);
+  if (preflightError) return preflightError;
+  const scopeResolution = detectedScope ?? resolveProjectScope(db.db, [process.cwd()]);
 
   // Bulk capture mode
   if (a.thoughts && Array.isArray(a.thoughts)) {
@@ -453,7 +498,7 @@ export function handleCaptureThought(
 
 		const validThoughts = thoughts as CaptureItem[];
 		const scopes = validThoughts.map((thought) =>
-			captureScope(db, thought, detectedScope),
+			captureScope(db, thought, scopeResolution),
 		);
     const scopeError = scopes.find(isToolError);
     if (scopeError) return scopeError;
@@ -495,7 +540,7 @@ export function handleCaptureThought(
     return toolError("invalid_input", singleErr);
   }
 
-  const scope = captureScope(db, a, detectedScope);
+  const scope = captureScope(db, a, scopeResolution);
   if (isToolError(scope)) return scope;
   const content = a.content;
 

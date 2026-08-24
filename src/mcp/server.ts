@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { ShelbyConfig } from "../config.js";
 import { ThoughtDatabase } from "../db/database.js";
 import { VALID_EDGE_TYPES } from "../db/edges.js";
-import { handleCaptureThought } from "../tools/capture.js";
+import { handleCaptureThought, validateCaptureThoughtInput } from "../tools/capture.js";
 import { handleSearchThoughts } from "../tools/search.js";
 import { handleListThoughts } from "../tools/list.js";
 import { handleGetThought } from "../tools/get.js";
@@ -199,6 +199,8 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
       inputSchema: captureThoughtInputSchema,
     },
     withLogging("capture_thought", async (args) => {
+      const preflightError = validateCaptureThoughtInput(args as Record<string, unknown>);
+      if (preflightError) return preflightError;
       const roots = await resolutionRoots();
       const scope = resolveProjectScope(db.db, pathsFrom(roots));
       const result = handleCaptureThought(db, args as Record<string, unknown>, scope);
