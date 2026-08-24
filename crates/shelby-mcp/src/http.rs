@@ -44,7 +44,7 @@ async fn bearer_guard(State(auth): State<Auth>, req: Request<Body>, next: Next) 
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .unwrap_or("");
-        if !constant_time_eq(token.as_bytes(), key.as_bytes()) {
+        if !crate::oauth::verify_bearer_token(token, key) {
             return (
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Bearer")],
@@ -54,13 +54,6 @@ async fn bearer_guard(State(auth): State<Auth>, req: Request<Body>, next: Next) 
         }
     }
     next.run(req).await
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<()> {
@@ -88,6 +81,19 @@ pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<(
     let auth = Auth {
         api_key: cfg.api_key.clone(),
     };
+    let oauth: axum::Router = match &cfg.api_key {
+        Some(key) => {
+            crate::oauth::router(crate::oauth::OAuthState::new(key.clone(), memory.clone()))
+        }
+        None => axum::Router::new()
+            .route(
+                "/.well-known/oauth-authorization-server",
+                get(oauth_not_configured),
+            )
+            .route("/register", any(oauth_not_configured))
+            .route("/authorize", any(oauth_not_configured))
+            .route("/token", any(oauth_not_configured)),
+    };
     let app = axum::Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/.well-known/mcp.json", get(|| async { Json(discovery()) }))
@@ -95,13 +101,7 @@ pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<(
             "/.well-known/mcp/server.json",
             get(|| async { Json(discovery()) }),
         )
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(oauth_not_configured),
-        )
-        .route("/register", any(oauth_not_configured))
-        .route("/authorize", any(oauth_not_configured))
-        .route("/token", any(oauth_not_configured))
+        .merge(oauth)
         .nest_service(
             "/mcp",
             axum::Router::new()
@@ -119,9 +119,12 @@ pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<(
     } else {
         eprintln!("[WARN] No SHELBY_API_KEY set — running without auth");
     }
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await
 }

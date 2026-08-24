@@ -1,6 +1,7 @@
 //! `shelby-mcp`: the Shelby memory server binary (stdio by default, streamable HTTP optional).
 mod config;
 mod http;
+mod oauth;
 mod prompts;
 mod schemas;
 mod server;

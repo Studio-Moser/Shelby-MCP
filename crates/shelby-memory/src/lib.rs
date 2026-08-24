@@ -27,6 +27,7 @@ pub mod vectors;
 
 pub use db::Memory;
 pub use error::{Error, Result};
+pub use rusqlite;
 
 /// ISO 8601 UTC with millisecond precision, byte-identical to JS `Date#toISOString()`.
 pub fn now_iso() -> String {
