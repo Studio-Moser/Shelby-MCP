@@ -90,6 +90,30 @@ describe("MCP Integration", () => {
     expect(stored).toEqual({ type: "decision", visibility: "shared" });
   });
 
+  it.each([
+    ["single missing", { content: "Missing summary" }],
+    ["single blank", { content: "Blank summary", summary: "   " }],
+    ["single non-string", { content: "Non-string summary", summary: 42 }],
+    ["bulk missing", { thoughts: [{ content: "Missing summary" }] }],
+    ["bulk blank", { thoughts: [{ content: "Blank summary", summary: "   " }] }],
+    ["bulk non-string", { thoughts: [{ content: "Non-string summary", summary: 42 }] }],
+  ])("rejects %s summaries at the MCP schema boundary", async (_case, arguments_) => {
+    const result = await client.callTool({ name: "capture_thought", arguments: arguments_ });
+
+    expect(result.isError).toBe(true);
+  });
+
+  it("allows bulk capture without a root summary", async () => {
+    const result = await client.callTool({
+      name: "capture_thought",
+      arguments: {
+        thoughts: [{ content: "Bulk item", summary: "Bulk item summary" }],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+  });
+
   it("exposes include_shared and applies shared/all-project brief scope", async () => {
     upsertProject(db.db, {
       slug: "shelby",
@@ -254,15 +278,15 @@ describe("MCP Integration", () => {
   it("lists thoughts filtered by type", async () => {
     await client.callTool({
       name: "capture_thought",
-      arguments: { content: "A decision was made", type: "decision" },
+      arguments: { content: "A decision was made", summary: "Decision", type: "decision" },
     });
     await client.callTool({
       name: "capture_thought",
-      arguments: { content: "A task to do", type: "task" },
+      arguments: { content: "A task to do", summary: "Task", type: "task" },
     });
     await client.callTool({
       name: "capture_thought",
-      arguments: { content: "Another task", type: "task" },
+      arguments: { content: "Another task", summary: "Another task", type: "task" },
     });
 
     const listResult = await client.callTool({
@@ -301,7 +325,7 @@ describe("MCP Integration", () => {
   it("deletes a thought so get returns error", async () => {
     const captureResult = await client.callTool({
       name: "capture_thought",
-      arguments: { content: "To be deleted" },
+      arguments: { content: "To be deleted", summary: "Delete this" },
     });
     const captured = parseResult(captureResult) as { id: string };
 
@@ -364,11 +388,11 @@ describe("MCP Integration", () => {
   it("thought_stats reflects captured data", async () => {
     await client.callTool({
       name: "capture_thought",
-      arguments: { content: "Stat thought 1", type: "note" },
+      arguments: { content: "Stat thought 1", summary: "First stat", type: "note" },
     });
     await client.callTool({
       name: "capture_thought",
-      arguments: { content: "Stat thought 2", type: "decision" },
+      arguments: { content: "Stat thought 2", summary: "Second stat", type: "decision" },
     });
 
     const statsResult = await client.callTool({

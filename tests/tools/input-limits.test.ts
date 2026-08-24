@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { handleCaptureThought } from "../../src/tools/capture.js";
+import { handleCaptureThought as handleCaptureThoughtImpl } from "../../src/tools/capture.js";
 import { handleUpdateThought } from "../../src/tools/update.js";
 import {
   MAX_CONTENT_LENGTH,
@@ -36,6 +36,16 @@ function isError(result: object): boolean {
 function errorMessage(result: object): string {
   const r = result as { content: Array<{ text: string }> };
   return JSON.parse(r.content[0].text).message as string;
+}
+
+function handleCaptureThought(database: ThoughtDatabase, args: Record<string, unknown>) {
+  const withSummary = Array.isArray(args.thoughts)
+    ? {
+      ...args,
+      thoughts: args.thoughts.map((thought) => ({ summary: "Test summary", ...(thought as Record<string, unknown>) })),
+    }
+    : { summary: "Test summary", ...args };
+  return handleCaptureThoughtImpl(database, withSummary);
 }
 
 function captureId(content: string): string {

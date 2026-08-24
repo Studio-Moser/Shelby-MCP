@@ -151,7 +151,7 @@ External get summary
   });
 
 	it("reinforces a retrieved thought without confirming it", () => {
-		const id = parseResult(handleCaptureThought(db, { content: "Frequently useful" })).id;
+		const id = parseResult(handleCaptureThought(db, { content: "Frequently useful", summary: "Frequently useful" })).id;
 
 		handleGetThought(db, { id });
 
@@ -162,7 +162,7 @@ External get summary
 	});
 
 	it("still returns the thought when reinforcement fails", () => {
-		const id = parseResult(handleCaptureThought(db, { content: "Readable regardless" })).id;
+		const id = parseResult(handleCaptureThought(db, { content: "Readable regardless", summary: "Readable regardless" })).id;
 		db.db.exec(`CREATE TRIGGER reject_reinforcement BEFORE UPDATE OF reinforcement_count ON thoughts
 			BEGIN SELECT RAISE(ABORT, 'blocked'); END`);
 

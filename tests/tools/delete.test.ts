@@ -21,7 +21,7 @@ function parseResult(result: object): any {
 
 describe("handleDeleteThought", () => {
   it("deletes an existing thought", () => {
-    const captureResult = handleCaptureThought(db, { content: "Delete me" });
+    const captureResult = handleCaptureThought(db, { content: "Delete me", summary: "Delete me" });
     const id = parseResult(captureResult).id;
 
     const result = handleDeleteThought(db, { id });

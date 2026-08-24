@@ -97,6 +97,7 @@ describe("MCP Capabilities", () => {
         name: "capture_thought",
         arguments: {
           content: "Auth architecture",
+          summary: "Auth architecture",
           topics: ["auth", "api-design", "architecture"],
           people: ["Alice", "Bob"],
           project: "shelby",
@@ -108,6 +109,7 @@ describe("MCP Capabilities", () => {
         name: "capture_thought",
         arguments: {
           content: "MCP integration",
+          summary: "MCP integration",
           topics: ["mcp", "api-design"],
           people: ["Charlie"],
           project: "shelby-app",

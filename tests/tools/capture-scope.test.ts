@@ -5,10 +5,20 @@ import { join } from "node:path";
 import { ThoughtDatabase } from "../../src/db/database.js";
 import { getProjectByAlias, getProjectBySlug, upsertProject } from "../../src/db/projects.js";
 import { resolveProjectScope } from "../../src/db/resolve-project.js";
-import { handleCaptureThought } from "../../src/tools/capture.js";
+import { handleCaptureThought as handleCaptureThoughtImpl } from "../../src/tools/capture.js";
 
 let db: ThoughtDatabase;
 beforeEach(() => { db = new ThoughtDatabase(":memory:"); });
+
+function handleCaptureThought(
+  database: ThoughtDatabase,
+  args: Record<string, unknown>,
+  scope?: Parameters<typeof handleCaptureThoughtImpl>[2],
+) {
+  return scope === undefined
+    ? handleCaptureThoughtImpl(database, { summary: "Test summary", ...args })
+    : handleCaptureThoughtImpl(database, { summary: "Test summary", ...args }, scope);
+}
 
 function repo(remote: string): string {
   const root = mkdtempSync(join(tmpdir(), "capture-scope-"));

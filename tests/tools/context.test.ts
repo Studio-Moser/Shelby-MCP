@@ -29,7 +29,7 @@ function capture(content: string, extra: Record<string, unknown> = {}): void {
   if (typeof slug === "string") {
     upsertProject(db.db, { slug, displayName: slug, memberRepos: [], memberPaths: [], provisional: false });
   }
-  handleCaptureThought(db, { content, ...extra });
+  handleCaptureThought(db, { content, summary: "Test summary", ...extra });
 }
 
 function makeTrustLevelNullable(): void {

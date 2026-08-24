@@ -21,7 +21,7 @@ function parseResult(result: object): any {
 }
 
 function captureId(content: string, extra: Record<string, unknown> = {}): string {
-  const result = handleCaptureThought(db, { content, ...extra });
+  const result = handleCaptureThought(db, { content, summary: "Test summary", ...extra });
   return parseResult(result).id;
 }
 

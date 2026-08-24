@@ -26,7 +26,7 @@ function parseResult(result: object): any {
 }
 
 function captureId(content: string): string {
-  const result = handleCaptureThought(db, { content });
+  const result = handleCaptureThought(db, { content, summary: "Test summary" });
   return parseResult(result).id;
 }
 

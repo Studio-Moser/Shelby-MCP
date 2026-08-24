@@ -48,9 +48,9 @@ const SUGGESTION_LIMIT = 5;
 
 type CaptureAction = "created" | "reinforced" | "merged" | "superseded" | "stored_unverified";
 
-interface CaptureArgs {
-  content?: string;
-  summary?: string;
+interface CaptureItem {
+  content: string;
+  summary: string;
   type?: string;
   source?: string;
   source_agent?: string;
@@ -63,22 +63,12 @@ interface CaptureArgs {
   people?: string[];
   metadata?: Record<string, unknown>;
   related_to?: string[];
-  thoughts?: Array<{
-    content: string;
-    summary?: string;
-    type?: string;
-    source?: string;
-    source_agent?: string;
-    trust_level?: TrustLevel;
-    project?: string;
-		project_id?: string;
-    project_identifier?: string;
-    visibility?: string;
-    topics?: string[];
-    people?: string[];
-    metadata?: Record<string, unknown>;
-    related_to?: string[];
-  }>;
+}
+
+interface CaptureArgs extends Omit<CaptureItem, "content" | "summary"> {
+  content?: string;
+  summary?: string;
+  thoughts?: CaptureItem[];
 }
 
 function stricterSensitivity(
@@ -126,14 +116,14 @@ function trustRank(value: TrustLevel): number {
  */
 function validateThoughtInput(t: {
   content: string;
-  summary?: string;
+  summary: string;
   topics?: string[];
   people?: string[];
 }): string | null {
   if (t.content.length > MAX_CONTENT_LENGTH) {
     return `content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters (got ${t.content.length})`;
   }
-  if (t.summary !== undefined && t.summary.length > MAX_SUMMARY_LENGTH) {
+  if (t.summary.length > MAX_SUMMARY_LENGTH) {
     return `summary exceeds maximum length of ${MAX_SUMMARY_LENGTH} characters (got ${t.summary.length})`;
   }
   if (t.topics !== undefined) {
@@ -161,21 +151,7 @@ function validateThoughtInput(t: {
 
 function captureSingle(
   db: ThoughtDatabase,
-  args: {
-    content: string;
-    summary?: string;
-    type?: string;
-    source?: string;
-    source_agent?: string;
-    trust_level?: TrustLevel;
-    project?: string;
-    project_identifier?: string;
-    visibility?: string;
-    topics?: string[];
-    people?: string[];
-    metadata?: Record<string, unknown>;
-    related_to?: string[];
-  },
+  args: CaptureItem,
 	resolvedScope: Extract<
 		ProjectReferenceResolution,
 		{ kind: "resolved" }
@@ -415,6 +391,10 @@ function isToolError(value: CaptureScope | ToolResult): value is ToolResult {
   return "content" in value;
 }
 
+function isCaptureValidationError(value: CaptureItem | ToolResult): value is ToolResult {
+  return "isError" in value && value.isError === true;
+}
+
 function resolveCaptureScope(
 	db: ThoughtDatabase,
 	scope: CaptureScope,
@@ -451,25 +431,35 @@ export function handleCaptureThought(
       );
     }
 
-    for (const thought of a.thoughts) {
+    const thoughts = a.thoughts.map((thought, index) => {
       if (!thought.content || typeof thought.content !== "string") {
 				return toolError(
 					"invalid_input",
-					"Each thought in bulk capture must have a content string",
+					`thoughts[${index}].content is required and must be a string`,
 				);
       }
-      const err = validateThoughtInput(thought);
-      if (err) return toolError("invalid_input", err);
-    }
+      if (typeof thought.summary !== "string" || thought.summary.trim().length === 0) {
+				return toolError(
+					"invalid_input",
+					`thoughts[${index}].summary is required and must be a non-empty string`,
+				);
+      }
+      const normalizedThought = { ...thought, summary: thought.summary.trim() };
+      const err = validateThoughtInput(normalizedThought);
+      return err ? toolError("invalid_input", `thoughts[${index}].${err}`) : normalizedThought;
+    });
+    const invalidThought = thoughts.find(isCaptureValidationError);
+    if (invalidThought) return invalidThought;
 
-		const scopes = a.thoughts.map((thought) =>
+		const validThoughts = thoughts as CaptureItem[];
+		const scopes = validThoughts.map((thought) =>
 			captureScope(db, thought, detectedScope),
 		);
     const scopeError = scopes.find(isToolError);
     if (scopeError) return scopeError;
 
 		const results = db.db.transaction(() =>
-			a.thoughts!.map((thought, index) => {
+			validThoughts.map((thought, index) => {
 				const scope = scopes[index] as CaptureScope;
 				return captureSingle(db, thought, resolveCaptureScope(db, scope));
 			}),
@@ -489,9 +479,15 @@ export function handleCaptureThought(
     );
   }
 
+  if (typeof a.summary !== "string" || a.summary.trim().length === 0) {
+    return toolError("invalid_input", "summary is required and must be a non-empty string");
+  }
+
+  const summary = a.summary.trim();
+
   const singleErr = validateThoughtInput({
     content: a.content,
-    summary: a.summary,
+    summary,
     topics: a.topics,
     people: a.people,
   });
@@ -508,7 +504,7 @@ export function handleCaptureThought(
 			db,
 			{
       content,
-      summary: a.summary,
+      summary,
       type: a.type,
       source: a.source,
       source_agent: a.source_agent,

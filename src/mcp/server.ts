@@ -42,6 +42,44 @@ import { storeEmbedding } from "../db/vectors.js";
 // Keep in sync with package.json version.
 const VERSION = "0.3.0";
 const projectIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).describe("Immutable canonical project UUID");
+const captureThoughtFields = {
+  type: z
+    .enum(["note", "decision", "task", "question", "reference", "insight", "preference"])
+    .describe("Thought type")
+    .optional(),
+  source: z.string().describe("Source tool or context").optional(),
+  source_agent: z.string().describe("Originating AI agent identifier (e.g. claude-code, cursor, windsurf)").optional(),
+  trust_level: z.enum(["trusted", "unverified", "external"]).describe("Trust level for memory poisoning defense: trusted (default), unverified, or external").optional(),
+  project: z.string().describe("Project association").optional(),
+  project_id: z.string().describe("Immutable project UUID").optional(),
+  project_identifier: z.string().describe("Project registry slug (auto-resolved from cwd if omitted)").optional(),
+  visibility: z.enum(["personal", "shared"]).describe("Visibility: personal (default) or shared across projects").optional(),
+  topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("Topic tags").optional(),
+  people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("People mentioned").optional(),
+  metadata: z.record(z.unknown()).describe("Arbitrary metadata").optional(),
+  related_to: z.array(z.string()).describe("IDs of related thoughts to link").optional(),
+};
+const requiredSummarySchema = z.string().trim().min(1).max(MAX_SUMMARY_LENGTH).describe("One-line summary for search results");
+const bulkThoughtSchema = z.object({
+  content: z.string().max(MAX_CONTENT_LENGTH),
+  summary: requiredSummarySchema,
+  ...captureThoughtFields,
+  type: z.string().optional(),
+});
+const captureThoughtInputSchema = z.union([
+  z.object({
+    content: z.string().max(MAX_CONTENT_LENGTH).describe("The thought content"),
+    summary: requiredSummarySchema,
+    ...captureThoughtFields,
+    thoughts: z.never().optional(),
+  }),
+  z.object({
+    content: z.string().max(MAX_CONTENT_LENGTH).describe("The thought content").optional(),
+    summary: z.string().max(MAX_SUMMARY_LENGTH).describe("One-line summary for search results").optional(),
+    ...captureThoughtFields,
+    thoughts: z.array(bulkThoughtSchema).max(MAX_BULK_THOUGHTS).describe("Bulk capture: array of thoughts"),
+  }),
+]);
 
 // Logging levels in order of severity (syslog-style)
 const LOG_LEVELS: LoggingLevel[] = [
@@ -158,47 +196,7 @@ export function createServerWithDb(db: ThoughtDatabase): McpServer {
         idempotentHint: false,
         openWorldHint: false,
       },
-      inputSchema: {
-        content: z.string().max(MAX_CONTENT_LENGTH).describe("The thought content").optional(),
-        summary: z.string().max(MAX_SUMMARY_LENGTH).describe("One-line summary for search results").optional(),
-        type: z
-          .enum(["note", "decision", "task", "question", "reference", "insight", "preference"])
-          .describe("Thought type")
-          .optional(),
-        source: z.string().describe("Source tool or context").optional(),
-        source_agent: z.string().describe("Originating AI agent identifier (e.g. claude-code, cursor, windsurf)").optional(),
-        trust_level: z.enum(["trusted", "unverified", "external"]).describe("Trust level for memory poisoning defense: trusted (default), unverified, or external").optional(),
-        project: z.string().describe("Project association").optional(),
-        project_id: z.string().describe("Immutable project UUID").optional(),
-        project_identifier: z.string().describe("Project registry slug (auto-resolved from cwd if omitted)").optional(),
-        visibility: z.enum(["personal", "shared"]).describe("Visibility: personal (default) or shared across projects").optional(),
-        topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).describe("Topic tags").optional(),
-        people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).describe("People mentioned").optional(),
-        metadata: z.record(z.unknown()).describe("Arbitrary metadata").optional(),
-        related_to: z.array(z.string()).describe("IDs of related thoughts to link").optional(),
-        thoughts: z
-          .array(
-            z.object({
-              content: z.string().max(MAX_CONTENT_LENGTH),
-              summary: z.string().max(MAX_SUMMARY_LENGTH).optional(),
-              type: z.string().optional(),
-              source: z.string().optional(),
-              source_agent: z.string().optional(),
-              trust_level: z.enum(["trusted", "unverified", "external"]).optional(),
-              project: z.string().optional(),
-              project_id: z.string().optional(),
-              project_identifier: z.string().optional(),
-              visibility: z.enum(["personal", "shared"]).optional(),
-              topics: z.array(z.string().max(MAX_TOPIC_LENGTH)).max(MAX_TOPICS_COUNT).optional(),
-              people: z.array(z.string().max(MAX_PERSON_LENGTH)).max(MAX_PEOPLE_COUNT).optional(),
-              metadata: z.record(z.unknown()).optional(),
-              related_to: z.array(z.string()).optional(),
-            }),
-          )
-          .max(MAX_BULK_THOUGHTS)
-          .describe("Bulk capture: array of thoughts")
-          .optional(),
-      },
+      inputSchema: captureThoughtInputSchema,
     },
     withLogging("capture_thought", async (args) => {
       const roots = await resolutionRoots();

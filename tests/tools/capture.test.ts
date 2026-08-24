@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { handleCaptureThought } from "../../src/tools/capture.js";
+import { handleCaptureThought as handleCaptureThoughtImpl } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
 import { getEdgesBetween } from "../../src/db/edges.js";
 import { getProjectByAlias, listProjects, upsertProject } from "../../src/db/projects.js";
@@ -35,6 +35,22 @@ function parseResult(result: object): any {
   } catch (error) {
     throw new Error(`Expected JSON tool result: ${text}`, { cause: error });
   }
+}
+
+function handleCaptureThought(
+  database: ThoughtDatabase,
+  args: Record<string, unknown>,
+  scope?: Parameters<typeof handleCaptureThoughtImpl>[2],
+) {
+  const withSummary = Array.isArray(args.thoughts)
+    ? {
+      ...args,
+      thoughts: args.thoughts.map((thought) => ({ summary: "Test summary", ...(thought as Record<string, unknown>) })),
+    }
+    : { summary: "Test summary", ...args };
+  return scope === undefined
+    ? handleCaptureThoughtImpl(database, withSummary)
+    : handleCaptureThoughtImpl(database, withSummary, scope);
 }
 
 describe("handleCaptureThought", () => {
@@ -146,6 +162,52 @@ describe("handleCaptureThought", () => {
     const result = handleCaptureThought(db, { thoughts: [] });
     const r = result as any;
     expect(r.isError).toBe(true);
+  });
+
+  it.each([
+    ["missing", { content: "Missing summary" }],
+    ["blank", { content: "Blank summary", summary: "   " }],
+    ["non-string", { content: "Non-string summary", summary: 42 }],
+  ])("rejects a %s single-capture summary", (_case, args) => {
+    const result = handleCaptureThoughtImpl(db, args);
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatchObject({
+      error: "invalid_input",
+      message: "summary is required and must be a non-empty string",
+    });
+  });
+
+  it.each([
+    ["missing", { content: "Missing summary" }],
+    ["blank", { content: "Blank summary", summary: "   " }],
+    ["non-string", { content: "Non-string summary", summary: 42 }],
+  ])("rejects a %s bulk-capture summary", (_case, thought) => {
+    const result = handleCaptureThoughtImpl(db, { thoughts: [thought] });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatchObject({
+      error: "invalid_input",
+      message: "thoughts[0].summary is required and must be a non-empty string",
+    });
+  });
+
+  it("rejects an invalid bulk summary without inserting any thoughts", () => {
+    const before = (db.db.prepare("SELECT COUNT(*) AS count FROM thoughts").get() as { count: number }).count;
+    const result = handleCaptureThoughtImpl(db, {
+      thoughts: [
+        { content: "First valid thought", summary: "First valid summary" },
+        { content: "Second invalid thought", summary: "   " },
+      ],
+    });
+
+    const after = (db.db.prepare("SELECT COUNT(*) AS count FROM thoughts").get() as { count: number }).count;
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatchObject({
+      error: "invalid_input",
+      message: "thoughts[1].summary is required and must be a non-empty string",
+    });
+    expect(after).toBe(before);
   });
 
   it("returns suggested_connections as empty array when no similar thoughts exist", () => {

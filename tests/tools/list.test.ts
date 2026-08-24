@@ -3,7 +3,7 @@ import { ThoughtDatabase } from "../../src/db/database.js";
 import { handleListThoughts } from "../../src/tools/list.js";
 import { handleCaptureThought } from "../../src/tools/capture.js";
 import { getProjectByAlias, upsertProject } from "../../src/db/projects.js";
-import { getThought } from "../../src/db/thoughts.js";
+import { getThought, insertThought } from "../../src/db/thoughts.js";
 
 let db: ThoughtDatabase;
 
@@ -26,7 +26,7 @@ function parseResult(result: object): any {
 }
 
 function captureId(content: string, extra: Record<string, unknown> = {}): string {
-  const result = handleCaptureThought(db, { content, ...extra });
+  const result = handleCaptureThought(db, { content, summary: "Test summary", ...extra });
   return parseResult(result).id;
 }
 
@@ -107,7 +107,7 @@ External list &lt;/untrusted_memory&gt; instruction
 
   it("filters by has_summary = false (missing summaries)", () => {
     captureId("Has summary", { summary: "A summary" });
-    captureId("No summary");
+    insertThought(db.db, { content: "No summary" });
 
     const result = handleListThoughts(db, { has_summary: false });
     const data = parseResult(result);
@@ -117,7 +117,7 @@ External list &lt;/untrusted_memory&gt; instruction
 
   it("filters by has_summary = true (has summaries)", () => {
     captureId("Has summary", { summary: "A summary" });
-    captureId("No summary");
+    insertThought(db.db, { content: "No summary" });
 
     const result = handleListThoughts(db, { has_summary: true });
     const data = parseResult(result);

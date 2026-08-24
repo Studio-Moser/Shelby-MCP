@@ -31,7 +31,7 @@ function captureId(content: string, extra: Record<string, unknown> = {}): string
   if (typeof slug === "string") {
     upsertProject(db.db, { slug, displayName: slug, memberRepos: [], memberPaths: [], provisional: false });
   }
-  const result = handleCaptureThought(db, { content, ...extra });
+  const result = handleCaptureThought(db, { content, summary: "Test summary", ...extra });
   return parseResult(result).id;
 }
 

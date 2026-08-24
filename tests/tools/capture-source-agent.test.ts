@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ThoughtDatabase } from "../../src/db/database.js";
-import { handleCaptureThought } from "../../src/tools/capture.js";
+import { handleCaptureThought as handleCaptureThoughtImpl } from "../../src/tools/capture.js";
 import { getThought } from "../../src/db/thoughts.js";
 
 let db: ThoughtDatabase;
@@ -12,6 +12,16 @@ beforeEach(() => {
 afterEach(() => {
   db.close();
 });
+
+function handleCaptureThought(database: ThoughtDatabase, args: Record<string, unknown>) {
+  const withSummary = Array.isArray(args.thoughts)
+    ? {
+      ...args,
+      thoughts: args.thoughts.map((thought) => ({ summary: "Test summary", ...(thought as Record<string, unknown>) })),
+    }
+    : { summary: "Test summary", ...args };
+  return handleCaptureThoughtImpl(database, withSummary);
+}
 
 function parseResult(result: object): Record<string, unknown> {
   const r = result as { content: Array<{ text: string }> };
