@@ -5,15 +5,21 @@
 //! are pure contract functions. Tool-level behavior (scope resolution, capture
 //! actions, briefs) sits above this crate's storage layer.
 
+pub mod brief;
 pub mod db;
+pub mod detect;
 pub mod edges;
 pub mod error;
 pub mod fts;
 pub mod identity;
 pub mod limits;
 pub mod migrations;
+pub mod projects;
 pub mod reconcile;
+pub mod resolve;
+pub mod telemetry;
 pub mod thoughts;
+pub mod tools;
 pub mod topics;
 pub mod trust;
 pub mod vectors;

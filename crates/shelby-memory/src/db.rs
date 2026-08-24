@@ -9,6 +9,8 @@ use crate::topics::canonicalize_topic;
 
 pub struct Memory {
     pub conn: Connection,
+    /// Top ids of the previous search on this connection (rediscovery telemetry).
+    pub(crate) telemetry_prev: std::cell::RefCell<Option<Vec<String>>>,
 }
 
 impl Memory {
@@ -29,7 +31,10 @@ impl Memory {
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         run_migrations(&conn)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            telemetry_prev: std::cell::RefCell::new(None),
+        })
     }
 
     pub fn schema_version(&self) -> Result<i64> {
