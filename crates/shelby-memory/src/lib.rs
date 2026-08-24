@@ -17,6 +17,7 @@ pub mod migrations;
 pub mod projects;
 pub mod reconcile;
 pub mod resolve;
+pub mod seed;
 pub mod telemetry;
 pub mod thoughts;
 pub mod tools;

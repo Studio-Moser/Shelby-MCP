@@ -1,6 +1,6 @@
 //! Automatic brief contract (ADR 0001 §6a): candidate load, deterministic policy, rendering.
 use regex::Regex;
-use rusqlite::{Connection, named_params};
+use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::sync::LazyLock;
@@ -186,7 +186,13 @@ pub fn load_brief_candidates(
          LIMIT @limit"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(named_params! { "@now": now, "@limit": BRIEF_CANDIDATE_LIMIT, "@project_id": scope.project_id }, |r| {
+    // Only bind @project_id when the scope clause references it; SQLite rejects unknown names.
+    let mut params: Vec<(&str, &dyn rusqlite::ToSql)> =
+        vec![("@now", &now), ("@limit", &BRIEF_CANDIDATE_LIMIT)];
+    if sql.contains("@project_id") {
+        params.push(("@project_id", &scope.project_id));
+    }
+    let rows = stmt.query_map(params.as_slice(), |r| {
         let trust: Option<String> = r.get(4)?;
         let metadata: Option<String> = r.get(11)?;
         let claims: Option<String> = r.get(15)?;
@@ -654,6 +660,33 @@ mod tests {
             result.policy_version,
             fx["policy_version"].as_i64().unwrap()
         );
+    }
+
+    #[test]
+    fn shared_only_scope_binds_without_project_id() {
+        let (m, fx, _) = seeded();
+        let now = fx["request"]["now"].as_str().unwrap();
+        let input = BriefScopeInput {
+            project_id: None,
+            include_shared: Some(true),
+            shared_only: true,
+            all_projects: false,
+        };
+        let cands = load_brief_candidates(&m.conn, now, &input).unwrap();
+        let result = select_brief_items(&cands, BriefScope::Full, &input, now);
+        let ids: Vec<&str> = result.items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["00000000-0000-4000-8000-000000000011"],
+            "only the brief-eligible shared preference survives"
+        );
+        let all = BriefScopeInput {
+            project_id: None,
+            include_shared: None,
+            shared_only: false,
+            all_projects: true,
+        };
+        assert!(load_brief_candidates(&m.conn, now, &all).is_ok());
     }
 
     #[test]
