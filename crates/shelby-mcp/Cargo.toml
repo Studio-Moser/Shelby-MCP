@@ -11,8 +11,8 @@ name = "shelby-mcp"
 path = "src/main.rs"
 
 [dependencies]
-shelby-integrations = { path = "../shelby-integrations" }
-shelby-memory = { path = "../shelby-memory" }
+shelby-integrations = { version = "0.4.0", path = "../shelby-integrations" }
+shelby-memory = { version = "0.4.0", path = "../shelby-memory" }
 axum = "0.8"
 hmac.workspace = true
 sha2.workspace = true

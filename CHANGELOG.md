@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Rust crates for the SQLite memory engine, reusable client integrations, and the stdio/HTTP MCP server.
+- OAuth 2.1 for hosted Streamable HTTP deployments, with bearer-key authentication retained.
+- Native npm packages for macOS ARM64/x64, Linux ARM64/x64, and Windows x64, plus current client plugin packages.
+- A protected, approval-gated prerelease workflow that builds and verifies every artifact without publishing by default.
 - Schema migrations v9-v11, aligned with Shelby-MacOS: local search telemetry, the local feedback log, and thought re-confirmation timestamps.
 - `capture_thought` responses now include an `action` describing whether the thought was created, reinforced as a duplicate, or returned with relationship suggestions.
 - `search_thoughts` now accepts a canonicalized `topic` filter.
@@ -18,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `npx shelbymcp` now launches the platform-native Rust binary; the server performs no inference or automatic embedding generation.
+- Client setup prefers current plugin/extension packages and keeps safe CLI configuration as a fallback without editing global instruction files.
 - `search_thoughts`, `list_thoughts`, `get_thought`, `select_context`, `explore_graph`, `expand_neighbors`, and `capture_thought` relationship suggestions now wrap non-trusted thought bodies and summaries in an explicit data-only quarantine fence. `select_context` also keeps non-trusted topics and people inside that fence, while `get_thought` warns that every structured field is untrusted data. Unknown trust levels fail closed as unverified; trusted text remains unchanged.
 - `get_thought` now reinforces the retrieved thought and returns its updated reinforcement count.
 - The legacy `preference` thought type is normalized to `decision` on both capture and update.
