@@ -5,6 +5,7 @@ pub enum Client {
     Cursor,
     Codex,
     Devin,
+    Windsurf,
     Gemini,
     Antigravity,
 }
@@ -62,6 +63,13 @@ pub const CLIENTS: [ClientInfo; 7] = [
     },
 ];
 
+const WINDSURF_COMPAT: ClientInfo = ClientInfo {
+    client: Client::Windsurf,
+    slug: "windsurf",
+    display_name: "Windsurf",
+    package_kind: "legacy JSON integration",
+};
+
 impl Client {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -69,7 +77,8 @@ impl Client {
             "claude-desktop" => Some(Self::ClaudeDesktop),
             "cursor" => Some(Self::Cursor),
             "codex" => Some(Self::Codex),
-            "devin" | "windsurf" => Some(Self::Devin),
+            "devin" => Some(Self::Devin),
+            "windsurf" => Some(Self::Windsurf),
             "gemini" => Some(Self::Gemini),
             "antigravity" => Some(Self::Antigravity),
             _ => None,
@@ -77,6 +86,9 @@ impl Client {
     }
 
     pub fn info(self) -> &'static ClientInfo {
+        if self == Self::Windsurf {
+            return &WINDSURF_COMPAT;
+        }
         CLIENTS
             .iter()
             .find(|info| info.client == self)
@@ -90,7 +102,7 @@ mod tests {
 
     #[test]
     fn current_catalog_keeps_the_windsurf_compatibility_alias() {
-        assert_eq!(Client::parse("windsurf"), Some(Client::Devin));
+        assert_eq!(Client::parse("windsurf"), Some(Client::Windsurf));
         assert_eq!(Client::parse("devin"), Some(Client::Devin));
         assert_eq!(CLIENTS.len(), 7);
         assert_eq!(Client::Devin.info().display_name, "Devin Desktop");

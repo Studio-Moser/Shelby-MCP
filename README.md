@@ -19,7 +19,7 @@ npx -y shelbymcp
 
 The default stdio server stores data at `~/.shelbymcp/memory.db`. Existing databases created by ShelbyMCP schema v18 open unchanged.
 
-Package-first integrations are included in each `v0.4.0-*` prerelease:
+Package-first integrations are included in the protected `v0.4.0` release:
 
 | Client | Release package |
 |---|---|
@@ -28,10 +28,10 @@ Package-first integrations are included in each `v0.4.0-*` prerelease:
 | Cursor and Agent Plugins clients | `shelbymcp-agent-plugin-0.4.0.zip` |
 | Gemini CLI | `shelbymcp-gemini-0.4.0.zip` |
 | Antigravity | `shelbymcp-antigravity-0.4.0.zip` |
-| Claude Desktop | `shelbymcp-claude-desktop-0.4.0.mcpb` |
+| Claude Desktop | `shelbymcp-claude-desktop-<platform>-0.4.0.mcpb` |
 | Devin | `shelbymcp-devin-0.4.0.zip` |
 
-Use `shelby-mcp setup <client>` only when the client package or marketplace entry is not available yet. The fallback supports `claude-code`, `claude-desktop`, `cursor`, `codex`, `devin`, `gemini`, and `antigravity`; `windsurf` remains an alias for existing users. It safely merges the MCP entry and never appends instructions to a global rules file. See [Agent Setup](docs/AGENT-SETUP.md).
+Use `shelby-mcp setup <client>` only when the client package or marketplace entry is not available yet. The fallback supports `claude-code`, `claude-desktop`, `cursor`, `codex`, `gemini`, and `antigravity`; `devin` directs you to its organization-managed marketplace, while `windsurf` keeps the legacy local config flow. It safely merges the MCP entry and never appends instructions to a global rules file. See [Agent Setup](docs/AGENT-SETUP.md).
 
 ## What agents can do
 

@@ -53,6 +53,44 @@ fn filesystem_error(path: &Path, source: io::Error) -> IntegrationError {
     }
 }
 
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both pointers reference live, null-terminated UTF-16 buffers for the call.
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 fn load_document(path: &Path) -> Result<Document> {
     if !path.exists() {
         return Ok(Document::Object(Map::new()));
@@ -131,7 +169,7 @@ fn atomic_write_json(path: &Path, document: Map<String, Value>) -> Result<()> {
         file.sync_all()
             .map_err(|error| filesystem_error(&temporary, error))?;
         drop(file);
-        fs::rename(&temporary, path).map_err(|error| filesystem_error(path, error))?;
+        replace_file(&temporary, path).map_err(|error| filesystem_error(path, error))?;
         Ok(())
     })();
     if result.is_err() {

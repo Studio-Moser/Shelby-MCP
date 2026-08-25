@@ -93,7 +93,7 @@ The last two commands are optional local validators; repository contract tests r
 `scripts/Verify Release Workflow.mjs` checks the release policy locally. The workflow always builds and uploads dry-run artifacts, but publishes only when all of these are true:
 
 1. The run is manually requested with `publish: true`.
-2. The ref is a `v0.4.0-*` tag.
+2. The ref is the exact `v0.4.0` tag.
 3. The protected `release` environment approves the job.
 
 Platform npm packages publish before the wrapper. `shelby-memory` and `shelby-integrations` publish as reusable Rust libraries. No local command in the development gate publishes anything.

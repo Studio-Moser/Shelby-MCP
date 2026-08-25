@@ -8,9 +8,9 @@
     "command": "npx",
     "args": ["-y", "shelbymcp"]
   },
-  "fallback": {
+  "compatibility": {
     "clientAlias": "windsurf",
-    "command": "shelby-mcp setup devin",
-    "note": "The windsurf alias is retained for existing CLI users only."
+    "command": "shelby-mcp setup windsurf",
+    "note": "The windsurf command configures only the legacy local Windsurf client."
   }
 }

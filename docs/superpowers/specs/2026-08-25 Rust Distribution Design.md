@@ -28,7 +28,7 @@ The existing npm dependency tree reports 17 vulnerabilities on a clean install, 
 Current client ecosystems favor installable packages over global config mutation:
 
 - ChatGPT and Codex use one universal plugin directory. Local Codex clients share MCP configuration, consume MCP server `instructions`, and support stdio and Streamable HTTP.
-- Claude Code plugins, Claude Desktop MCP Bundles, Cursor Agent Plugins, Gemini extensions, Antigravity plugins, and the Windsurf/Devin MCP registry each provide a native distribution surface.
+- Claude Code plugins, target-specific Claude Desktop MCP Bundles, Cursor Agent Plugins, Gemini extensions, Antigravity plugins, and Devin marketplace metadata each provide a native distribution surface.
 
 ## Goals
 
@@ -111,7 +111,7 @@ Committed sources under `integrations/` describe:
 - A Gemini extension with `gemini-extension.json`.
 - An Antigravity plugin using its current manifest and MCP configuration.
 - A Claude Desktop MCP Bundle manifest assembled with the target binary.
-- A Windsurf/Devin MCP registry entry and one-click deeplink metadata.
+- Devin marketplace metadata plus a separate legacy Windsurf CLI fallback.
 
 The source tree has one canonical copy of each skill. A packaging script assembles per-client archives into `target/integrations/`; generated archives are not committed. Manifests launch `npx -y shelbymcp` when the client expects a portable stdio command. The MCP Bundle release artifact embeds the platform binary and needs no separate Node installation.
 
@@ -191,7 +191,7 @@ This replaces installer edits to global agent instruction files and follows curr
 3. Merge PR #63.
 4. Retarget the distribution PR to `main`, rebase if necessary, and rerun all gates.
 5. Merge without publishing.
-6. Publish a `0.4.0` prerelease through the protected workflow, verify `npx shelbymcp --version`, stdio initialization, HTTP OAuth, and an existing database.
+6. Publish `0.4.0` from its exact tag through the protected workflow, verify `npx shelbymcp --version`, stdio initialization, HTTP OAuth, and an existing database.
 7. Promote the same artifacts after manual release approval.
 
 ## Deferred app reuse

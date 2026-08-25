@@ -55,7 +55,7 @@ When `SHELBY_API_KEY` is configured, every `/mcp` request requires a valid beare
 
 The root npm package is a dependency-free launcher. It maps the current OS/architecture to one of five optional native packages and calls the binary with `spawnSync`, inherited stdio, and `shell: false`. Platform tarballs declare exact `os` and `cpu` guards.
 
-Client manifests live in `integrations/`. Assembly copies canonical skills and builds the Claude Desktop MCPB from an explicit native binary. Release builds produce native archives, npm packages, client packages, Rust library crates, and SHA-256 checksums. Publication is disabled by default and requires a matching prerelease tag plus approval through GitHub's `release` environment.
+Client manifests live in `integrations/`. Assembly copies canonical skills and builds a target-labeled Claude Desktop MCPB from each explicit native binary. Release builds produce native archives, npm packages, client packages, Rust library crates, and SHA-256 checksums. Publication is disabled by default and requires the exact version tag plus approval through GitHub's `release` environment.
 
 ## Shelby App reuse
 

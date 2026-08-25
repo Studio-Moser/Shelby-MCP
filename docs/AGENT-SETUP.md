@@ -20,7 +20,7 @@ Prefer the package for your client because it includes the canonical Forage and 
 | Cursor | `shelbymcp-agent-plugin-0.4.0.zip` | Agent Plugins 1.0 package for the client plugin UI or registry. |
 | Gemini CLI | `shelbymcp-gemini-0.4.0.zip` | Unpack, then run `gemini extensions install <unpacked-directory>`. |
 | Antigravity | `shelbymcp-antigravity-0.4.0.zip` | Unpack as `shelbymcp` under `~/.gemini/config/plugins/`. |
-| Claude Desktop | `shelbymcp-claude-desktop-0.4.0.mcpb` | Open the MCP Bundle in Claude Desktop and approve the server. |
+| Claude Desktop | `shelbymcp-claude-desktop-<platform>-0.4.0.mcpb` | Choose the artifact matching your OS and architecture, then open it in Claude Desktop. |
 | Devin | `shelbymcp-devin-0.4.0.zip` | In Settings > MCP Marketplace, choose Add Your Own and use its `registry.json` values. |
 
 Release artifacts are checksummed in `SHA256SUMS`. Review a package's MCP command and requested capabilities before installing it.
@@ -40,7 +40,7 @@ Supported client names are:
 claude-code  claude-desktop  cursor  codex  devin  gemini  antigravity
 ```
 
-`windsurf` remains a compatibility alias for `devin`. Setup prefers the client's own CLI when that is the safe current route. JSON fallbacks merge only `mcpServers.shelbymcp`, preserve unrelated keys and file permissions, use atomic replacement, and leave malformed files byte-identical with manual instructions. Exit code `2` means manual action is required.
+`devin` returns exit code `2` with its organization-managed MCP Marketplace route; there is no local Devin config file to edit. `windsurf` remains a separate compatibility command for the legacy local Windsurf config. Setup prefers the client's own CLI when that is the safe current route. JSON fallbacks merge only `mcpServers.shelbymcp`, preserve unrelated keys and file permissions, use atomic replacement, and leave malformed files byte-identical with manual instructions. Exit code `2` means manual action is required.
 
 Remove a fallback entry with:
 
@@ -63,7 +63,7 @@ If neither a package nor fallback installer is usable, add this server entry usi
 }
 ```
 
-Do not put `npx -y shelbymcp` into a single `command` string. Keeping the executable and arguments separate prevents shell interpretation and works across platforms.
+Do not put `npx -y shelbymcp` into a single `command` string. Keep the executable and arguments separate. On native Windows JSON fallbacks, use `"command": "cmd"` with `"args": ["/c", "npx", "-y", "shelbymcp"]` so clients can launch npm's command shim.
 
 ## Skills and cold start
 

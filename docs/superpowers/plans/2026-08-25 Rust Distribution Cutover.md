@@ -120,7 +120,7 @@ Expected: Rust and TypeScript contracts agree and all gates pass.
 Tests must assert:
 
 ```rust
-assert_eq!(Client::parse("windsurf"), Some(Client::Devin));
+assert_eq!(Client::parse("windsurf"), Some(Client::Windsurf));
 assert_eq!(Client::parse("devin"), Some(Client::Devin));
 assert_eq!(CLIENTS.len(), 7);
 assert!(matches!(status(Client::Cursor, &paths).unwrap(), IntegrationStatus::NotConfigured { .. }));
@@ -140,7 +140,7 @@ Define:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Client { ClaudeCode, ClaudeDesktop, Cursor, Codex, Devin, Gemini, Antigravity }
+pub enum Client { ClaudeCode, ClaudeDesktop, Cursor, Codex, Devin, Windsurf, Gemini, Antigravity }
 
 pub struct ClientInfo {
     pub client: Client,
@@ -160,7 +160,7 @@ pub const CLIENTS: [ClientInfo; 7] = [
 ];
 ```
 
-`Client::parse("windsurf")` maps to `Devin` for command compatibility. The catalog contains current package names and documentation labels but makes no marketplace network calls.
+`Client::parse("windsurf")` maps to a separate legacy `Windsurf` fallback; Devin remains organization-managed through its marketplace. The catalog contains current package names and documentation labels but makes no marketplace network calls.
 
 - [ ] **Step 4: Implement safe JSON mutation and command execution**
 
@@ -411,7 +411,7 @@ Expected: npm reports zero vulnerabilities and the current Rust binary runs thro
 - Create: `tests/integrations.test.js`
 
 **Interfaces:**
-- Consumes: canonical `skills/shelby-forage`, canonical `skills/shelby-onboard`, `npx -y shelbymcp`, and a target-native binary for MCPB assembly.
+- Consumes: canonical `skills/shelby-forage`, canonical `skills/shelby-onboard`, `npx -y shelbymcp`, and target-native binaries for MCPB assembly.
 - Produces: portable Agent Plugins 1.0 output for Cursor-compatible clients, Codex/ChatGPT plugin output, Claude Code plugin output, Gemini extension output, Antigravity plugin output, Claude Desktop MCPB source, and Devin registry metadata under `target/integrations/`.
 
 - [ ] **Step 1: Use the `plugin-creator` workflow to scaffold the Codex source manifest**
@@ -449,11 +449,11 @@ Use these exact portable formats:
 }
 ```
 
-Claude Code uses `.claude-plugin/plugin.json` plus root `.mcp.json`; Gemini uses `gemini-extension.json`; Antigravity uses root `plugin.json` plus `mcp_config.json`; Codex uses `.codex-plugin/plugin.json`; Claude Desktop uses MCPB `manifest_version: "0.4"` and a bundle-relative binary; Devin metadata documents the current plugin-store/default configuration and retains `windsurf` as a CLI alias only.
+Claude Code uses `.claude-plugin/plugin.json` plus root `.mcp.json`; Gemini uses `gemini-extension.json`; Antigravity uses root `plugin.json` plus `mcp_config.json`; Codex uses `.codex-plugin/plugin.json`; Claude Desktop uses target-labeled MCPB `manifest_version: "0.4"` artifacts and bundle-relative binaries; Devin metadata documents the current plugin-store/default configuration, while `windsurf` retains its legacy local fallback.
 
 - [ ] **Step 5: Implement deterministic package assembly**
 
-`Build Integration Packages.mjs` clears only `target/integrations`, copies source manifests, copies the two canonical skill directories, and for MCPB requires an explicit target binary path. It must not follow symlinks outside the repository and must reject unknown client names.
+`Build Integration Packages.mjs` clears only `target/integrations`, copies source manifests, copies the two canonical skill directories, and for MCPB requires explicit target/binary pairs (or the current-host binary for local verification). It must not follow symlinks outside the repository and must reject unknown client names.
 
 - [ ] **Step 6: Validate assembled packages and commit**
 
@@ -480,7 +480,7 @@ Expected: all assembled packages validate, canonical skills match byte-for-byte,
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
-- Consumes: the five Rust targets, npm package builder, integration builder, and GitHub Release tag `v0.4.0-*`.
+- Consumes: the five Rust targets, npm package builder, integration builder, and exact GitHub Release tag `v0.4.0`.
 - Produces: checksummed native archives, npm wrapper/platform tarballs, integration archives/MCPBs, and optional protected publication.
 
 - [ ] **Step 1: Write a failing release-workflow contract**
@@ -499,7 +499,7 @@ Use native runners for each target, run target-specific Cargo tests where runnab
 
 - [ ] **Step 4: Gate publication behind the protected environment**
 
-Only when `inputs.publish == true` and the ref is a `v0.4.0-*` tag may a job with `environment: release` publish platform packages first, the wrapper second, and create/update the GitHub prerelease. Tokens are read from secrets and never echoed. crates.io publication remains an explicit step in the same protected job.
+Only when `inputs.publish == true` and the ref is the exact `v0.4.0` tag may a job with `environment: release` publish platform packages first, the wrapper second, and create or update the GitHub release. Tokens are read from secrets and never echoed. crates.io publication remains an explicit step in the same protected job.
 
 - [ ] **Step 5: Verify workflow and run the full commit gate**
 

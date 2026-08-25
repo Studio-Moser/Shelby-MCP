@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rust crates for the SQLite memory engine, reusable client integrations, and the stdio/HTTP MCP server.
 - OAuth 2.1 for hosted Streamable HTTP deployments, with bearer-key authentication retained.
 - Native npm packages for macOS ARM64/x64, Linux ARM64/x64, and Windows x64, plus current client plugin packages.
-- A protected, approval-gated prerelease workflow that builds and verifies every artifact without publishing by default.
+- A protected, approval-gated release workflow that builds and verifies every artifact without publishing by default.
 - Schema migrations v9-v11, aligned with Shelby-MacOS: local search telemetry, the local feedback log, and thought re-confirmation timestamps.
 - `capture_thought` responses now include an `action` describing whether the thought was created, reinforced as a duplicate, or returned with relationship suggestions.
 - `search_thoughts` now accepts a canonicalized `topic` filter.

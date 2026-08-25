@@ -34,8 +34,8 @@ pub trait CommandRunner {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<bool>;
 }
 
-fn config_path(client: Client, paths: &IntegrationPaths) -> PathBuf {
-    match client {
+fn config_path(client: Client, paths: &IntegrationPaths) -> Option<PathBuf> {
+    Some(match client {
         Client::ClaudeCode => paths.home_dir.join(".claude.json"),
         Client::ClaudeDesktop => match &paths.app_data_dir {
             Some(app_data) => app_data.join("Claude/claude_desktop_config.json"),
@@ -51,11 +51,11 @@ fn config_path(client: Client, paths: &IntegrationPaths) -> PathBuf {
         },
         Client::Cursor => paths.home_dir.join(".cursor/mcp.json"),
         Client::Codex => paths.home_dir.join(".codex/config.toml"),
-        // `windsurf` remains a CLI alias, so the safe fallback keeps its legacy config path.
-        Client::Devin => paths.home_dir.join(".codeium/windsurf/mcp_config.json"),
+        Client::Devin => return None,
+        Client::Windsurf => paths.home_dir.join(".codeium/windsurf/mcp_config.json"),
         Client::Gemini => paths.home_dir.join(".gemini/settings.json"),
         Client::Antigravity => paths.home_dir.join(".gemini/config/mcp_config.json"),
-    }
+    })
 }
 
 fn json_client(client: Client) -> bool {
@@ -87,7 +87,12 @@ fn codex_status(path: &Path) -> Result<IntegrationStatus> {
 }
 
 pub fn status(client: Client, paths: &IntegrationPaths) -> Result<IntegrationStatus> {
-    let path = config_path(client, paths);
+    let Some(path) = config_path(client, paths) else {
+        return Ok(IntegrationStatus::ManualAction {
+            message: "Devin MCP integrations are organization-managed; use Settings > MCP Marketplace > Add Your Own"
+                .into(),
+        });
+    };
     if !json_client(client) {
         return codex_status(&path);
     }
@@ -98,8 +103,16 @@ pub fn status(client: Client, paths: &IntegrationPaths) -> Result<IntegrationSta
     })
 }
 
+fn portable_entry_for(is_windows: bool) -> serde_json::Value {
+    if is_windows {
+        json!({ "command": "cmd", "args": ["/c", "npx", "-y", "shelbymcp"] })
+    } else {
+        json!({ "command": "npx", "args": ["-y", "shelbymcp"] })
+    }
+}
+
 fn portable_entry() -> serde_json::Value {
-    json!({ "command": "npx", "args": ["-y", "shelbymcp"] })
+    portable_entry_for(cfg!(windows))
 }
 
 fn setup_command(client: Client) -> Option<(&'static str, &'static [&'static str])> {
@@ -184,7 +197,12 @@ pub fn setup(
     paths: &IntegrationPaths,
     runner: &dyn CommandRunner,
 ) -> Result<Change> {
-    let path = config_path(client, paths);
+    let Some(path) = config_path(client, paths) else {
+        return Ok(Change::ManualAction {
+            message: "Devin MCP integrations are organization-managed; use Settings > MCP Marketplace > Add Your Own"
+                .into(),
+        });
+    };
     match status(client, paths)? {
         IntegrationStatus::Configured { .. } => {
             return Ok(Change::AlreadyConfigured { path });
@@ -223,7 +241,11 @@ pub fn uninstall(
     paths: &IntegrationPaths,
     runner: &dyn CommandRunner,
 ) -> Result<Change> {
-    let path = config_path(client, paths);
+    let Some(path) = config_path(client, paths) else {
+        return Ok(Change::ManualAction {
+            message: "Remove ShelbyMCP from Devin in Settings > MCP Marketplace".into(),
+        });
+    };
     match status(client, paths)? {
         IntegrationStatus::NotConfigured { .. } => return Ok(Change::AlreadyAbsent { path }),
         IntegrationStatus::ManualAction { message } => {
@@ -534,5 +556,39 @@ mod tests {
         ] {
             assert!(!home.0.join(forbidden).exists(), "wrote {forbidden}");
         }
+    }
+
+    #[test]
+    fn devin_requires_its_organization_managed_marketplace() {
+        let home = TempHome::new();
+        let result = setup(Client::Devin, &home.paths(), &FakeRunner::default()).unwrap();
+
+        assert!(matches!(result, Change::ManualAction { .. }));
+        assert!(!home.0.join(".codeium/windsurf/mcp_config.json").exists());
+    }
+
+    #[test]
+    fn windsurf_alias_still_configures_the_legacy_local_client() {
+        let home = TempHome::new();
+        let result = setup(Client::Windsurf, &home.paths(), &FakeRunner::default()).unwrap();
+
+        assert!(matches!(result, Change::Changed { .. }));
+        assert_eq!(
+            read_json(&home.0.join(".codeium/windsurf/mcp_config.json"))["mcpServers"]["shelbymcp"]
+                ["command"],
+            "npx"
+        );
+    }
+
+    #[test]
+    fn windows_json_fallback_wraps_the_npm_shim_without_shell_interpolation() {
+        assert_eq!(
+            portable_entry_for(true),
+            json!({ "command": "cmd", "args": ["/c", "npx", "-y", "shelbymcp"] })
+        );
+        assert_eq!(
+            portable_entry_for(false),
+            json!({ "command": "npx", "args": ["-y", "shelbymcp"] })
+        );
     }
 }
