@@ -1,76 +1,255 @@
-//! `shelby-mcp`: the Shelby memory server binary (stdio by default, streamable HTTP optional).
-mod config;
-mod http;
-mod oauth;
-mod prompts;
-mod schemas;
-mod server;
-
+//! `shelby-mcp`: command dispatcher and MCP server process.
+use std::path::Path;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use rmcp::ServiceExt;
-use shelby_memory::Memory;
+use shelby_integrations::{Change, Client, CommandRunner, IntegrationPaths, setup, uninstall};
+use shelby_mcp::config::{self, Cli, Transport, parse_args};
+use shelby_mcp::{VERSION, commands, http, open_memory, server};
 
-use crate::config::{Cli, parse_args};
+struct SystemCommandRunner;
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[tokio::main]
-async fn main() {
-    let cli = match parse_args(std::env::args().skip(1).collect()) {
-        Ok(cli) => cli,
-        Err(msg) => {
-            eprintln!("[ERROR] {msg}");
-            std::process::exit(1);
+impl CommandRunner for SystemCommandRunner {
+    fn available(&self, program: &str) -> bool {
+        let path = Path::new(program);
+        if path.components().count() > 1 {
+            return path.is_file();
         }
+        let Some(search_path) = std::env::var_os("PATH") else {
+            return false;
+        };
+        std::env::split_paths(&search_path).any(|directory| {
+            if directory.join(program).is_file() {
+                return true;
+            }
+            #[cfg(target_os = "windows")]
+            {
+                return ["exe", "cmd", "bat", "com"]
+                    .iter()
+                    .any(|extension| directory.join(format!("{program}.{extension}")).is_file());
+            }
+            #[cfg(not(target_os = "windows"))]
+            false
+        })
+    }
+
+    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<bool> {
+        Command::new(program)
+            .args(args)
+            .status()
+            .map(|status| status.success())
+    }
+}
+
+fn integration_paths() -> IntegrationPaths {
+    IntegrationPaths {
+        home_dir: config::home_dir(),
+        app_data_dir: std::env::var_os("APPDATA").map(Into::into),
+    }
+}
+
+fn parse_client(value: Option<String>, command: &str) -> Result<Client, i32> {
+    let Some(value) = value else {
+        eprintln!("[ERROR] Missing client.\nUsage: shelby-mcp {command} <client>");
+        return Err(1);
     };
-    match cli {
-        Cli::Version => println!("shelby-mcp v{VERSION}"),
-        Cli::Help => print!("{}", config::HELP),
-        Cli::NotPorted(cmd) => {
-            eprintln!(
-                "[ERROR] `{cmd}` is not available in shelby-mcp yet; use `npx shelbymcp {cmd}` for now."
+    let Some(client) = Client::parse(&value) else {
+        eprintln!(
+            "[ERROR] Unknown client: {value}\nUsage: shelby-mcp {command} <client>\nClients: claude-code, claude-desktop, cursor, codex, devin, gemini, antigravity"
+        );
+        return Err(1);
+    };
+    Ok(client)
+}
+
+fn print_change(client: Client, change: Change) -> i32 {
+    match change {
+        Change::Changed { path, message } => {
+            println!(
+                "{message} for {} at {}",
+                client.info().display_name,
+                path.display()
             );
-            std::process::exit(2);
+            0
         }
-        Cli::Serve(cfg) => {
-            if cfg.verbose {
-                eprintln!("[INFO] Verbose mode enabled");
-                eprintln!("[INFO] Database: {}", cfg.db_path);
-            }
-            let memory = match open_memory(&cfg.db_path) {
-                Ok(m) => Arc::new(Mutex::new(m)),
-                Err(e) => {
-                    eprintln!("[FATAL] {e}");
-                    std::process::exit(1);
-                }
-            };
-            server::seed_registry(&memory);
-            if cfg.transport == config::Transport::Http {
-                if let Err(e) = http::serve(memory, &cfg).await {
-                    eprintln!("[FATAL] {e}");
-                    std::process::exit(1);
-                }
-                return;
-            }
-            let handler = server::ShelbyServer::new(memory);
-            let service = match handler.serve(rmcp::transport::stdio()).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("[FATAL] {e}");
-                    std::process::exit(1);
-                }
-            };
-            eprintln!("[INFO] shelby-mcp running on stdio");
-            let _ = service.waiting().await;
+        Change::AlreadyConfigured { path } => {
+            println!(
+                "ShelbyMCP is already configured for {} at {}",
+                client.info().display_name,
+                path.display()
+            );
+            0
+        }
+        Change::AlreadyAbsent { path } => {
+            println!(
+                "ShelbyMCP is already absent for {} at {}",
+                client.info().display_name,
+                path.display()
+            );
+            0
+        }
+        Change::ManualAction { message } => {
+            eprintln!("[ACTION] Manual action required: {message}");
+            2
         }
     }
 }
 
-fn open_memory(path: &str) -> shelby_memory::Result<Memory> {
-    if path == ":memory:" {
-        Memory::open_in_memory()
-    } else {
-        Memory::open(path)
+fn run_setup(client: Option<String>, forage: bool, onboard: bool) -> i32 {
+    let client = match parse_client(client, "setup") {
+        Ok(client) => client,
+        Err(code) => return code,
+    };
+    let change = match setup(client, &integration_paths(), &SystemCommandRunner) {
+        Ok(change) => change,
+        Err(error) => {
+            eprintln!("[ERROR] {error}");
+            return 1;
+        }
+    };
+    let code = print_change(client, change);
+    if code != 0 {
+        return code;
+    }
+    if forage {
+        println!(
+            "Forage is included in the {}. Run `shelby-mcp forage` for the standalone skill body.",
+            client.info().package_kind
+        );
+    }
+    if onboard {
+        print!("{}", commands::onboard());
+    }
+    0
+}
+
+fn run_uninstall(client: Option<String>) -> i32 {
+    let client = match parse_client(client, "uninstall") {
+        Ok(client) => client,
+        Err(code) => return code,
+    };
+    match uninstall(client, &integration_paths(), &SystemCommandRunner) {
+        Ok(change) => print_change(client, change),
+        Err(error) => {
+            eprintln!("[ERROR] {error}");
+            1
+        }
+    }
+}
+
+fn run_repair(apply: bool) -> i32 {
+    let path = std::env::var("SHELBY_DB_PATH")
+        .map(|path| config::resolve_db_path(&path))
+        .unwrap_or_else(|_| config::default_db_path());
+    let mut memory = match open_memory(&path) {
+        Ok(memory) => memory,
+        Err(error) => {
+            eprintln!("[ERROR] {error}");
+            return 1;
+        }
+    };
+    let seed = shelby_memory::seed::load_seed(&shelby_memory::seed::seed_default_path());
+    match shelby_memory::repair::repair_projects(&mut memory.conn, &seed, apply) {
+        Ok(report) => {
+            eprintln!("{}", commands::format_repair_report(&report, apply));
+            0
+        }
+        Err(error) => {
+            eprintln!("[ERROR] {error}");
+            1
+        }
+    }
+}
+
+async fn run_server(cfg: config::ServeConfig) -> i32 {
+    if cfg.verbose {
+        eprintln!("[INFO] Verbose mode enabled");
+        eprintln!("[INFO] Database: {}", cfg.db_path);
+    }
+    let memory = match open_memory(&cfg.db_path) {
+        Ok(memory) => Arc::new(Mutex::new(memory)),
+        Err(error) => {
+            eprintln!("[FATAL] {error}");
+            return 1;
+        }
+    };
+    server::seed_registry(&memory);
+    if cfg.transport == Transport::Http {
+        if let Err(error) = http::serve(memory, &cfg).await {
+            eprintln!("[FATAL] {error}");
+            return 1;
+        }
+        return 0;
+    }
+    let service = match server::ShelbyServer::new(memory)
+        .serve(rmcp::transport::stdio())
+        .await
+    {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("[FATAL] {error}");
+            return 1;
+        }
+    };
+    eprintln!("[INFO] shelby-mcp running on stdio");
+    let _ = service.waiting().await;
+    0
+}
+
+async fn run() -> i32 {
+    let cli = match parse_args(std::env::args().skip(1).collect()) {
+        Ok(cli) => cli,
+        Err(message) => {
+            eprintln!("[ERROR] {message}\n\n{}", config::HELP);
+            return 1;
+        }
+    };
+    match cli {
+        Cli::Version => {
+            println!("shelby-mcp v{VERSION}");
+            0
+        }
+        Cli::Help => {
+            print!("{}", config::HELP);
+            0
+        }
+        Cli::Setup {
+            client,
+            forage,
+            onboard,
+        } => run_setup(client, forage, onboard),
+        Cli::Uninstall { client } => run_uninstall(client),
+        Cli::Protocol => {
+            print!("{}", commands::protocol());
+            0
+        }
+        Cli::Forage => {
+            eprintln!(
+                "Install the package-native Forage skill, or paste this body into a scheduled task."
+            );
+            print!("{}", commands::forage());
+            0
+        }
+        Cli::Onboard => {
+            eprintln!("Paste this into a conversation with your primary AI tool.");
+            print!("{}", commands::onboard());
+            0
+        }
+        Cli::Migrate => {
+            eprintln!("Paste this into an AI tool that knows you, then import its response.");
+            print!("{}", commands::migrate());
+            0
+        }
+        Cli::RepairProjects { apply } => run_repair(apply),
+        Cli::Serve(cfg) => run_server(cfg).await,
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let code = run().await;
+    if code != 0 {
+        std::process::exit(code);
     }
 }

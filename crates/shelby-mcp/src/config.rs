@@ -24,7 +24,21 @@ pub enum Cli {
     Serve(ServeConfig),
     Version,
     Help,
-    NotPorted(String),
+    Setup {
+        client: Option<String>,
+        forage: bool,
+        onboard: bool,
+    },
+    Uninstall {
+        client: Option<String>,
+    },
+    Protocol,
+    Forage,
+    Onboard,
+    Migrate,
+    RepairProjects {
+        apply: bool,
+    },
 }
 
 pub const HELP: &str = "shelby-mcp — Knowledge-graph memory for AI tools
@@ -32,6 +46,13 @@ pub const HELP: &str = "shelby-mcp — Knowledge-graph memory for AI tools
 Usage:
   shelby-mcp                   Start the MCP server (stdio)
   shelby-mcp --transport http  Start the streamable HTTP server (default 0.0.0.0:3100/mcp)
+  shelby-mcp setup <client>     Configure a client fallback
+  shelby-mcp uninstall <client> Remove the ShelbyMCP client entry
+  shelby-mcp protocol           Print the Memory Protocol
+  shelby-mcp forage             Print the Forage skill
+  shelby-mcp onboard            Print the onboarding skill
+  shelby-mcp migrate            Print the migration prompt
+  shelby-mcp repair-projects    Preview project identity repairs
   shelby-mcp help              Show this help
 
 Flags:
@@ -42,17 +63,25 @@ Flags:
   --verbose          Enable verbose logging
   --version          Print version
 
+Command flags:
+  setup --forage     Explain the package-native Forage integration
+  setup --onboard    Print onboarding after setup
+  repair-projects --apply
+                     Apply high-confidence repairs and flag the rest
+
 Environment:
   SHELBY_API_KEY     Bearer token required on /mcp when set
-
-Not yet ported from `npx shelbymcp`: setup, uninstall, protocol, forage, onboard, migrate, repair-projects.
 ";
 
-pub fn default_db_dir() -> PathBuf {
+pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_default()
-        .join(".shelbymcp")
+}
+
+pub fn default_db_dir() -> PathBuf {
+    home_dir().join(".shelbymcp")
 }
 
 pub fn default_db_path() -> String {
@@ -62,7 +91,7 @@ pub fn default_db_path() -> String {
         .into_owned()
 }
 
-fn resolve(p: &str) -> String {
+pub fn resolve_db_path(p: &str) -> String {
     if p == ":memory:" {
         return p.to_string();
     }
@@ -81,16 +110,36 @@ pub fn parse_with_env(
 ) -> Result<Cli, String> {
     match argv.first().map(String::as_str) {
         Some("help") | Some("--help") | Some("-h") => return Ok(Cli::Help),
-        Some(
-            cmd @ ("setup" | "uninstall" | "protocol" | "forage" | "onboard" | "migrate"
-            | "repair-projects"),
-        ) => return Ok(Cli::NotPorted(cmd.to_string())),
+        Some("setup") => {
+            return Ok(Cli::Setup {
+                client: argv.get(1).filter(|value| !value.starts_with('-')).cloned(),
+                forage: argv.iter().any(|value| value == "--forage"),
+                onboard: argv.iter().any(|value| value == "--onboard"),
+            });
+        }
+        Some("uninstall") => {
+            return Ok(Cli::Uninstall {
+                client: argv.get(1).filter(|value| !value.starts_with('-')).cloned(),
+            });
+        }
+        Some("protocol") => return Ok(Cli::Protocol),
+        Some("forage") => return Ok(Cli::Forage),
+        Some("onboard") => return Ok(Cli::Onboard),
+        Some("migrate") => return Ok(Cli::Migrate),
+        Some("repair-projects") => {
+            return Ok(Cli::RepairProjects {
+                apply: argv.iter().any(|value| value == "--apply"),
+            });
+        }
+        Some(command) if !command.starts_with('-') => {
+            return Err(format!("Unknown command: {command}"));
+        }
         _ => {}
     }
     let env_transport = env("SHELBY_TRANSPORT");
     let mut cfg = ServeConfig {
         db_path: env("SHELBY_DB_PATH")
-            .map(|p| resolve(&p))
+            .map(|p| resolve_db_path(&p))
             .unwrap_or_else(default_db_path),
         verbose: false,
         transport: if env_transport.as_deref() == Some("http") {
@@ -110,7 +159,7 @@ pub fn parse_with_env(
                 i += 1;
                 cfg.db_path = argv
                     .get(i)
-                    .map(|p| resolve(p))
+                    .map(|p| resolve_db_path(p))
                     .unwrap_or_else(default_db_path);
             }
             "--verbose" => cfg.verbose = true,
@@ -197,8 +246,42 @@ mod tests {
             Cli::Version
         );
         assert_eq!(
-            parse_with_env(vec!["setup".into(), "claude-code".into()], &no_env).unwrap(),
-            Cli::NotPorted("setup".into())
+            parse_with_env(
+                vec!["setup".into(), "cursor".into(), "--forage".into()],
+                &no_env
+            )
+            .unwrap(),
+            Cli::Setup {
+                client: Some("cursor".into()),
+                forage: true,
+                onboard: false,
+            }
+        );
+        assert_eq!(
+            parse_with_env(vec!["uninstall".into(), "cursor".into()], &no_env).unwrap(),
+            Cli::Uninstall {
+                client: Some("cursor".into())
+            }
+        );
+        assert_eq!(
+            parse_with_env(vec!["protocol".into()], &no_env).unwrap(),
+            Cli::Protocol
+        );
+        assert_eq!(
+            parse_with_env(vec!["forage".into()], &no_env).unwrap(),
+            Cli::Forage
+        );
+        assert_eq!(
+            parse_with_env(vec!["onboard".into()], &no_env).unwrap(),
+            Cli::Onboard
+        );
+        assert_eq!(
+            parse_with_env(vec!["migrate".into()], &no_env).unwrap(),
+            Cli::Migrate
+        );
+        assert_eq!(
+            parse_with_env(vec!["repair-projects".into(), "--apply".into()], &no_env).unwrap(),
+            Cli::RepairProjects { apply: true }
         );
     }
 

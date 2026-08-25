@@ -56,7 +56,7 @@ async fn bearer_guard(State(auth): State<Auth>, req: Request<Body>, next: Next) 
     next.run(req).await
 }
 
-pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<()> {
+pub fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
     let mut config = StreamableHttpServerConfig::default();
     if cfg.http_host == "0.0.0.0" || cfg.http_host == "::" {
         // Container/remote deployments: the Host header is whatever the operator exposes.
@@ -94,7 +94,7 @@ pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<(
             .route("/authorize", any(oauth_not_configured))
             .route("/token", any(oauth_not_configured)),
     };
-    let app = axum::Router::new()
+    axum::Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/.well-known/mcp.json", get(|| async { Json(discovery()) }))
         .route(
@@ -108,7 +108,11 @@ pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<(
                 .fallback_service(mcp)
                 .layer(middleware::from_fn_with_state(auth, bearer_guard)),
         )
-        .fallback(|| async { (StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))) });
+        .fallback(|| async { (StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))) })
+}
+
+pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<()> {
+    let app = router(memory, cfg);
     let listener = tokio::net::TcpListener::bind((cfg.http_host.as_str(), cfg.http_port)).await?;
     eprintln!(
         "[INFO] shelby-mcp running on http://{}:{}/mcp",
