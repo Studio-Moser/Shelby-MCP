@@ -13,6 +13,6 @@ HTTP endpoints: `/mcp` (MCP streamable HTTP), `/health`, `/.well-known/mcp.json`
 
 Project scope follows the client's MCP `roots` (memoized, refreshed on `roots/list_changed`); with no roots, personal captures are rejected and reads fail safe to shared-only, exactly as the TypeScript server does.
 
-Not yet ported from `npx shelbymcp`: `setup`, `uninstall`, `protocol`, `forage`, `onboard`, `migrate`, `repair-projects`, and server-side Gemini auto-embedding.
+The published TypeScript package still owns `setup`, `uninstall`, `protocol`, `forage`, `onboard`, `migrate`, `repair-projects`, and server-side Gemini auto-embedding. Those commands are not yet part of this binary.
 
-Tests: `cargo test -p shelby-mcp` (unit tests plus a JSON-RPC-over-stdio integration test that spawns the binary).
+Tests: `cargo test --workspace` covers the Rust crates and real JSON-RPC-over-stdio initialization; `npm run test:cross-engine` verifies both engines against a TypeScript-v18 SQLite fixture.
