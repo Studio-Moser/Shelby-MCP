@@ -1,0 +1,16 @@
+{
+  "name": "shelbymcp",
+  "version": "0.4.0",
+  "distribution": "Devin MCP Marketplace",
+  "installation": "Settings > MCP Marketplace > Add Your Own",
+  "defaultConfiguration": {
+    "transport": "STDIO",
+    "command": "npx",
+    "args": ["-y", "shelbymcp"]
+  },
+  "fallback": {
+    "clientAlias": "windsurf",
+    "command": "shelby-mcp setup devin",
+    "note": "The windsurf alias is retained for existing CLI users only."
+  }
+}
