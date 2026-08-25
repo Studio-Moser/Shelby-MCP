@@ -1,5 +1,4 @@
-//! Additive SQLite migrations. The sequence mirrors the TypeScript engine so a
-//! `~/.shelbymcp/memory.db` created by either engine opens in the other.
+//! Additive SQLite migrations, including the complete pre-0.4 database history.
 use rusqlite::{Connection, params};
 
 use crate::error::Result;

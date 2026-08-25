@@ -4,45 +4,21 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20.x, 22.x]
+    runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
         with:
-          node-version: ${{ matrix.node-version }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check + lint
-        run: npm run check
-
-      - name: Run tests
-        run: npm test
-
-      - name: Verify build
-        run: npm run build
-
-  rust:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js 22.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
+          node-version: 22
           cache: npm
 
       - name: Use stable Rust
@@ -53,7 +29,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Install TypeScript dependencies
+      - name: Install package workspace
         run: npm ci
 
       - name: Check Rust formatting
@@ -65,5 +41,23 @@ jobs:
       - name: Test Rust workspace
         run: cargo test --workspace
 
-      - name: Verify TypeScript and Rust database compatibility
-        run: npm run test:cross-engine
+      - name: Test npm launcher and client packages
+        run: npm test
+
+      - name: Audit npm package graph
+        run: npm audit
+
+      - name: Build native server
+        run: cargo build -p shelby-mcp
+
+      - name: Verify installed npm package
+        run: node "scripts/Verify Package.mjs" --binary target/debug/shelby-mcp
+
+      - name: Assemble client packages
+        run: node "scripts/Build Integration Packages.mjs" --all --binary target/debug/shelby-mcp
+
+      - name: Verify release policy
+        run: node "scripts/Verify Release Workflow.mjs"
+
+      - name: Verify documentation links
+        run: node "scripts/Check Documentation Links.mjs"

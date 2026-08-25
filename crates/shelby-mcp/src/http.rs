@@ -1,4 +1,4 @@
-//! Streamable HTTP transport with the discovery and health endpoints the TS server exposes.
+//! Streamable HTTP transport with discovery, health, bearer authentication, and OAuth.
 use std::sync::Arc;
 
 use axum::body::Body;

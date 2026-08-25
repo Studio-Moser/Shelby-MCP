@@ -12,7 +12,7 @@ pub fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     limit.unwrap_or(default).clamp(1, max)
 }
 
-/// Lengths are counted in UTF-16 code units to match the TypeScript engine's
+/// Lengths are counted in UTF-16 code units to preserve the pre-0.4 contract's
 /// `String#length`, so both engines accept and reject identical inputs.
 pub fn js_len(s: &str) -> usize {
     s.encode_utf16().count()

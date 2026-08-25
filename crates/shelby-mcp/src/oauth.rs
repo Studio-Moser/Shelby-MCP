@@ -1,6 +1,6 @@
 //! OAuth 2.1 (authorization code + PKCE, dynamic client registration) in front
 //! of the HTTP transport. The single operator API key authorizes the login form;
-//! access/refresh tokens are HMAC-derived from it, matching the TS server.
+//! access/refresh tokens are HMAC-derived from it, preserving the pre-0.4 token contract.
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};

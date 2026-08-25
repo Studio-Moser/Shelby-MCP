@@ -1,5 +1,5 @@
 //! Tool definitions: names, descriptions, JSON input schemas, and annotations
-//! (ADR 0001 §6 / §6g). Kept byte-compatible with the TypeScript server's zod schemas.
+//! (ADR 0001 §6 / §6g). Kept compatible with the committed pre-0.4 contract fixtures.
 use rmcp::model::{Tool, ToolAnnotations};
 use serde_json::{Map, Value, json};
 use shelby_memory::limits::*;

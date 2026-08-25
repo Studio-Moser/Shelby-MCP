@@ -1,18 +1,16 @@
 # shelby-mcp
 
-The Shelby memory server as a single Rust binary: the 12-tool MCP surface from ADR 0001 over `shelby-memory`, served on stdio (default) or streamable HTTP.
+The Rust MCP service and command line for Shelby memory. The crate exposes the same server as a binary and a reusable library.
 
 ```bash
-cargo run -p shelby-mcp -- --db ~/.shelbymcp/memory.db            # stdio
-cargo run -p shelby-mcp -- --transport http --port 3100           # http://0.0.0.0:3100/mcp
+cargo run -p shelby-mcp -- --db ~/.shelbymcp/memory.db
+cargo run -p shelby-mcp -- --transport http --host 127.0.0.1 --port 3100
 ```
 
-Flags and environment mirror the TypeScript server: `--db` / `SHELBY_DB_PATH`, `--transport` / `SHELBY_TRANSPORT`, `--port` / `PORT`, `--host` / `HOST`, `SHELBY_API_KEY` (bearer token on `/mcp`). `--db :memory:` runs against an in-memory database.
+Public integration points include `open_memory`, `server::ShelbyServer`, and `http::router`. This lets Shelby App embed the service in-process while standalone clients use stdio or Streamable HTTP.
 
-HTTP endpoints: `/mcp` (MCP streamable HTTP), `/health`, `/.well-known/mcp.json`, `/.well-known/mcp/server.json`; with `SHELBY_API_KEY` set, OAuth 2.1 (dynamic client registration, authorization code + PKCE, HMAC-derived access/refresh tokens) is served on `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`; without it those answer 503.
+HTTP serves `/mcp`, `/health`, discovery documents, bearer authentication, and OAuth 2.1 when `SHELBY_API_KEY` is set. The CLI also provides safe client setup/uninstall, prompt printers, and project-identity repair.
 
-Project scope follows the client's MCP `roots` (memoized, refreshed on `roots/list_changed`); with no roots, personal captures are rejected and reads fail safe to shared-only, exactly as the TypeScript server does.
-
-The published TypeScript package still owns `setup`, `uninstall`, `protocol`, `forage`, `onboard`, `migrate`, `repair-projects`, and server-side Gemini auto-embedding. Those commands are not yet part of this binary.
-
-Tests: `cargo test --workspace` covers the Rust crates and real JSON-RPC-over-stdio initialization; `npm run test:cross-engine` verifies both engines against a TypeScript-v18 SQLite fixture.
+```bash
+cargo test -p shelby-mcp
+```

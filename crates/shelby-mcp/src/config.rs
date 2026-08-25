@@ -1,4 +1,4 @@
-//! CLI flags and environment, mirroring the TypeScript `config.ts` so existing
+//! CLI flags and environment, preserving the pre-0.4 CLI contract so existing
 //! launch configs (`SHELBY_DB_PATH`, `--db`, `--transport http`, `PORT`, `HOST`,
 //! `SHELBY_API_KEY`) keep working unchanged.
 use std::path::PathBuf;
