@@ -1,28 +1,62 @@
 //! Cross-engine parity: a database produced by the TypeScript engine must open and
-//! query identically here. Runs only when `SHELBY_TS_DB` points at such a file.
+//! query identically here. The committed fixture is mandatory; `SHELBY_TS_DB` is
+//! reserved for the two-way parity driver, which needs the Rust-written row.
+use std::path::{Path, PathBuf};
+
 use shelby_memory::fts::{SearchOptions, search_thoughts};
-use shelby_memory::thoughts::{
-    ListOptions, ThoughtInput, get_thought, insert_thought, list_thoughts,
-};
+use shelby_memory::thoughts::{ThoughtInput, get_thought, insert_thought};
 use shelby_memory::{Memory, migrations::CURRENT_SCHEMA_VERSION};
+
+const SEED_ID: &str = "018f4c66-7c4e-7a4d-8e7a-6a74af7fd001";
+
+fn fixture_path() -> PathBuf {
+    std::env::var_os("SHELBY_TS_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/TypeScript-v18.sqlite")
+        })
+}
+
+fn remove_sqlite_files(path: &Path) {
+    for candidate in [
+        path.to_path_buf(),
+        PathBuf::from(format!("{}-wal", path.display())),
+        PathBuf::from(format!("{}-shm", path.display())),
+    ] {
+        let _ = std::fs::remove_file(candidate);
+    }
+}
 
 #[test]
 fn reads_and_extends_a_typescript_created_database() {
-    let Ok(path) = std::env::var("SHELBY_TS_DB") else {
-        eprintln!("SHELBY_TS_DB not set; skipping");
-        return;
+    let source = fixture_path();
+    assert!(
+        source.is_file(),
+        "missing TypeScript-v18 compatibility fixture: {}",
+        source.display()
+    );
+    let supplied = std::env::var_os("SHELBY_TS_DB").is_some();
+    let path = if supplied {
+        source
+    } else {
+        let destination = std::env::temp_dir().join(format!(
+            "shelby-typescript-v18-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::copy(&source, &destination).expect("copy TypeScript fixture");
+        destination
     };
+
     let m = Memory::open(&path).unwrap();
     assert_eq!(
         m.schema_version().unwrap(),
         CURRENT_SCHEMA_VERSION,
         "no migration needed on a TS-created db"
     );
-    let listed = list_thoughts(&m.conn, &ListOptions::default()).unwrap();
-    assert!(listed.total_count >= 1, "TS seed row visible");
-    let seed = get_thought(&m.conn, &listed.results.last().unwrap().id)
+    let seed = get_thought(&m.conn, SEED_ID)
         .unwrap()
-        .unwrap();
+        .expect("fixed TS seed row visible");
     assert_eq!(
         seed.topics,
         vec!["knowledge-graph"],
@@ -58,4 +92,9 @@ fn reads_and_extends_a_typescript_created_database() {
     )
     .unwrap();
     println!("RUST_ROW_ID={id}");
+
+    drop(m);
+    if !supplied {
+        remove_sqlite_files(&path);
+    }
 }

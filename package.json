@@ -18,6 +18,8 @@
     "watch": "tsc --watch",
     "dev": "tsx src/index.ts",
     "test": "vitest run --coverage",
+    "test:cross-engine": "npm run build && node \"scripts/Verify Cross Engine.mjs\"",
+    "fixture:typescript": "npm run build && node \"scripts/Create TypeScript Fixture.mjs\"",
     "test:watch": "vitest --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
