@@ -78,6 +78,12 @@ fn full_handshake_tools_prompts_and_scoped_capture() {
     let mut c = Client::spawn();
     let init = c.request("initialize", json!({ "protocolVersion": "2025-06-18", "capabilities": { "roots": { "listChanged": true } }, "clientInfo": { "name": "test", "version": "0" } }));
     assert_eq!(init["serverInfo"]["name"], "shelbymcp");
+    let instructions = init["instructions"].as_str().expect("server instructions");
+    assert!(instructions.chars().count() > 512);
+    let prefix: String = instructions.chars().take(512).collect();
+    assert!(prefix.contains("project scope"), "{prefix}");
+    assert!(prefix.contains("capture_thought"), "{prefix}");
+    assert!(instructions.contains("search_thoughts"));
     assert!(
         init["capabilities"]["tools"].is_object() && init["capabilities"]["prompts"].is_object()
     );

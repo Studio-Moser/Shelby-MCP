@@ -176,6 +176,7 @@ impl ServerHandler for ShelbyServer {
         let mut implementation = Implementation::new("shelbymcp", VERSION);
         implementation.title = Some("Shelby MCP".into());
         info.server_info = implementation;
+        info.instructions = Some(crate::prompts::INITIALIZATION_INSTRUCTIONS.into());
         info
     }
 
