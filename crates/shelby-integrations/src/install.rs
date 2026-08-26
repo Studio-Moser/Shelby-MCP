@@ -30,8 +30,8 @@ pub enum IntegrationStatus {
 }
 
 pub trait CommandRunner {
-    fn available(&self, program: &str) -> bool;
-    fn run(&self, program: &str, args: &[&str]) -> io::Result<bool>;
+    fn resolve(&self, program: &str) -> Option<PathBuf>;
+    fn run(&self, program: &Path, args: &[&str]) -> io::Result<bool>;
 }
 
 fn config_path(client: Client, paths: &IntegrationPaths) -> Option<PathBuf> {
@@ -163,14 +163,13 @@ fn uninstall_command(client: Client) -> Option<(&'static str, &'static [&'static
     }
 }
 
-fn run_command(runner: &dyn CommandRunner, program: &str, args: &[&str]) -> Result<()> {
+fn run_command(runner: &dyn CommandRunner, program: &Path, args: &[&str]) -> Result<()> {
+    let display = program.display().to_string();
     match runner.run(program, args) {
         Ok(true) => Ok(()),
-        Ok(false) => Err(IntegrationError::CommandFailed {
-            program: program.into(),
-        }),
+        Ok(false) => Err(IntegrationError::CommandFailed { program: display }),
         Err(source) => Err(IntegrationError::Command {
-            program: program.into(),
+            program: display,
             source,
         }),
     }
@@ -214,8 +213,8 @@ pub fn setup(
     }
 
     if let Some((program, args)) = setup_command(client) {
-        if runner.available(program) {
-            run_command(runner, program, args)?;
+        if let Some(executable) = runner.resolve(program) {
+            run_command(runner, &executable, args)?;
             return Ok(changed(path, format!("ShelbyMCP added with {program}")));
         }
         if client != Client::Gemini {
@@ -255,8 +254,8 @@ pub fn uninstall(
     }
 
     if let Some((program, args)) = uninstall_command(client) {
-        if runner.available(program) {
-            run_command(runner, program, args)?;
+        if let Some(executable) = runner.resolve(program) {
+            run_command(runner, &executable, args)?;
             return Ok(changed(path, format!("ShelbyMCP removed with {program}")));
         }
         if client != Client::Gemini {
@@ -313,7 +312,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeRunner {
-        available: Vec<String>,
+        resolved: HashMap<String, PathBuf>,
         results: HashMap<String, io::Result<bool>>,
         calls: RefCell<Vec<(String, Vec<String>)>>,
     }
@@ -321,7 +320,10 @@ mod tests {
     impl FakeRunner {
         fn succeeds(programs: &[&str]) -> Self {
             Self {
-                available: programs.iter().map(|value| (*value).into()).collect(),
+                resolved: programs
+                    .iter()
+                    .map(|program| ((*program).into(), PathBuf::from(program)))
+                    .collect(),
                 results: programs
                     .iter()
                     .map(|program| ((*program).into(), Ok(true)))
@@ -332,16 +334,17 @@ mod tests {
     }
 
     impl CommandRunner for FakeRunner {
-        fn available(&self, program: &str) -> bool {
-            self.available.iter().any(|value| value == program)
+        fn resolve(&self, program: &str) -> Option<PathBuf> {
+            self.resolved.get(program).cloned()
         }
 
-        fn run(&self, program: &str, args: &[&str]) -> io::Result<bool> {
+        fn run(&self, program: &Path, args: &[&str]) -> io::Result<bool> {
+            let program = program.to_string_lossy().into_owned();
             self.calls.borrow_mut().push((
-                program.into(),
+                program.clone(),
                 args.iter().map(|value| (*value).into()).collect(),
             ));
-            match self.results.get(program) {
+            match self.results.get(&program) {
                 Some(Ok(result)) => Ok(*result),
                 Some(Err(error)) => Err(io::Error::new(error.kind(), error.to_string())),
                 None => Ok(false),
@@ -524,6 +527,21 @@ mod tests {
                 )]
             );
         }
+    }
+
+    #[test]
+    fn resolved_cmd_shim_is_executed_verbatim() {
+        let home = TempHome::new();
+        let shim = PathBuf::from("C:/npm/gemini.cmd");
+        let mut runner = FakeRunner::default();
+        runner.resolved.insert("gemini".into(), shim.clone());
+        runner.results.insert(shim.display().to_string(), Ok(true));
+
+        assert!(matches!(
+            setup(Client::Gemini, &home.paths(), &runner).unwrap(),
+            Change::Changed { .. }
+        ));
+        assert_eq!(runner.calls.borrow()[0].0, shim.display().to_string());
     }
 
     #[test]

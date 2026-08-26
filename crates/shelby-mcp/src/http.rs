@@ -592,4 +592,23 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn embedded_router_authorizes_without_connect_info() {
+        let app = test_router(Some(API_KEY));
+        let client_id = register_client(&app).await;
+        let mut request = request(
+            Method::POST,
+            "/authorize",
+            Some("application/x-www-form-urlencoded"),
+            authorize_form(&client_id, API_KEY),
+        );
+        request
+            .extensions_mut()
+            .remove::<axum::extract::ConnectInfo<SocketAddr>>();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+    }
 }

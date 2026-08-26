@@ -1,5 +1,6 @@
 //! `shelby-mcp`: command dispatcher and MCP server process.
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -10,31 +11,33 @@ use shelby_mcp::{VERSION, commands, http, open_memory, server};
 
 struct SystemCommandRunner;
 
-impl CommandRunner for SystemCommandRunner {
-    fn available(&self, program: &str) -> bool {
-        let path = Path::new(program);
-        if path.components().count() > 1 {
-            return path.is_file();
+fn resolve_program(program: &str, search_path: Option<&OsStr>, windows: bool) -> Option<PathBuf> {
+    let path = Path::new(program);
+    if path.components().count() > 1 {
+        return path.is_file().then(|| path.to_path_buf());
+    }
+    let search_path = search_path?;
+    std::env::split_paths(search_path).find_map(|directory| {
+        if windows
+            && let Some(executable) = ["exe", "cmd", "bat", "com"]
+                .iter()
+                .map(|extension| directory.join(format!("{program}.{extension}")))
+                .find(|candidate| candidate.is_file())
+        {
+            return Some(executable);
         }
-        let Some(search_path) = std::env::var_os("PATH") else {
-            return false;
-        };
-        std::env::split_paths(&search_path).any(|directory| {
-            if directory.join(program).is_file() {
-                return true;
-            }
-            #[cfg(target_os = "windows")]
-            {
-                return ["exe", "cmd", "bat", "com"]
-                    .iter()
-                    .any(|extension| directory.join(format!("{program}.{extension}")).is_file());
-            }
-            #[cfg(not(target_os = "windows"))]
-            false
-        })
+        let direct = directory.join(program);
+        direct.is_file().then_some(direct)
+    })
+}
+
+impl CommandRunner for SystemCommandRunner {
+    fn resolve(&self, program: &str) -> Option<PathBuf> {
+        let search_path = std::env::var_os("PATH");
+        resolve_program(program, search_path.as_deref(), cfg!(windows))
     }
 
-    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<bool> {
+    fn run(&self, program: &Path, args: &[&str]) -> std::io::Result<bool> {
         Command::new(program)
             .args(args)
             .status()
@@ -251,5 +254,33 @@ async fn main() {
     let code = run().await;
     if code != 0 {
         std::process::exit(code);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_PATH: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn windows_resolution_preserves_the_cmd_shim_path() {
+        let directory = std::env::temp_dir().join(format!(
+            "shelby-command-path-{}-{}",
+            std::process::id(),
+            NEXT_PATH.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("gemini"), "#!/bin/sh\n").unwrap();
+        let shim = directory.join("gemini.cmd");
+        fs::write(&shim, "@echo off\r\n").unwrap();
+        let search_path = std::env::join_paths([&directory]).unwrap();
+
+        let resolved = resolve_program("gemini", Some(&search_path), true);
+
+        assert_eq!(resolved, Some(shim));
+        fs::remove_dir_all(directory).unwrap();
     }
 }
