@@ -6,7 +6,10 @@ use sha2::{Digest, Sha256};
 
 use crate::metrics::RetrievalMetrics;
 
+pub const RESULT_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatasetProvenance {
     pub name: String,
     pub source: String,
@@ -20,12 +23,14 @@ pub struct DatasetProvenance {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Efficiency {
     pub estimated_tokens: u64,
     pub serialized_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeMetadata {
     pub generated_at: String,
     pub duration_ms: u64,
@@ -39,6 +44,7 @@ pub struct RuntimeMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaseResult {
     pub id: String,
     pub suite: String,
@@ -56,6 +62,7 @@ pub struct CaseResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RelevantRank {
     pub id: String,
     pub rank: Option<usize>,
@@ -75,6 +82,7 @@ pub fn relevant_ranks(ranked_ids: &[String], relevant_ids: &[String]) -> Vec<Rel
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResultManifest {
     pub schema_version: u32,
     pub code_sha: String,

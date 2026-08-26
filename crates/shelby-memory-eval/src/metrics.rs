@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CutoffMetrics {
     pub precision_at_k: f64,
     pub recall_at_k: f64,
@@ -12,6 +13,7 @@ pub struct CutoffMetrics {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetrievalMetrics {
     pub precision_at_5: f64,
     pub recall_at_5: f64,

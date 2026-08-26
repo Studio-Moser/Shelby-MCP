@@ -87,3 +87,24 @@ fn finalize_records_the_digest_in_serialized_results() {
         manifest.compute_digest().unwrap()
     );
 }
+
+#[test]
+fn result_manifest_decoding_rejects_unknown_top_level_and_nested_fields() {
+    let mut top_level = serde_json::to_value(sample_manifest()).unwrap();
+    top_level["unknown"] = true.into();
+    assert!(
+        serde_json::from_value::<ResultManifest>(top_level)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field")
+    );
+
+    let mut nested = serde_json::to_value(sample_manifest()).unwrap();
+    nested["cases"][0]["unknown"] = true.into();
+    assert!(
+        serde_json::from_value::<ResultManifest>(nested)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field")
+    );
+}

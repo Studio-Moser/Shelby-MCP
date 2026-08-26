@@ -280,6 +280,19 @@ fn policy_loader_rejects_unsupported_schema_versions() {
 }
 
 #[test]
+fn gate_rejects_a_validly_redigested_unsupported_result_schema() {
+    let mut unsupported = manifest(1.0, 1.0);
+    unsupported.schema_version = 2;
+    unsupported.finalize().unwrap();
+
+    let error = compare(&unsupported, &unsupported, &unsupported, &policy()).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "base result manifest uses unsupported schema version 2"
+    );
+}
+
+#[test]
 fn committed_policy_covers_every_pinned_public_category() {
     let public = load_manifest(include_str!(
         "../../../tests/fixtures/LongMemEval PR-v1.json"

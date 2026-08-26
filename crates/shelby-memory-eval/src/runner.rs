@@ -4,7 +4,9 @@ use thiserror::Error;
 
 use crate::contract::ContractSuiteResult;
 use crate::longmemeval::LongMemEvalSuiteResult;
-use crate::manifest::{DatasetProvenance, Efficiency, ResultManifest, RuntimeMetadata};
+use crate::manifest::{
+    DatasetProvenance, Efficiency, RESULT_SCHEMA_VERSION, ResultManifest, RuntimeMetadata,
+};
 use crate::metrics::RetrievalMetrics;
 
 #[derive(Debug, Clone)]
@@ -113,7 +115,7 @@ pub fn build_result_manifest(
     };
 
     let mut manifest = ResultManifest {
-        schema_version: 1,
+        schema_version: RESULT_SCHEMA_VERSION,
         code_sha: metadata.code_sha,
         suite_version,
         policy_version: metadata.policy_version,

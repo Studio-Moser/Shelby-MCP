@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::manifest::ResultManifest;
+use crate::manifest::{RESULT_SCHEMA_VERSION, ResultManifest};
 
 const FLOAT_EPSILON: f64 = 1e-12;
 
@@ -76,6 +76,11 @@ pub enum ComparisonError {
     },
     #[error("{manifest} result manifest has an invalid deterministic digest")]
     InvalidDigest { manifest: &'static str },
+    #[error("{manifest} result manifest uses unsupported schema version {version}")]
+    UnsupportedSchema {
+        manifest: &'static str,
+        version: u32,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -129,9 +134,9 @@ pub fn compare(
     candidate_repeat: &ResultManifest,
     policy: &GatePolicy,
 ) -> Result<ComparisonReport, ComparisonError> {
-    validate_digest("base", base)?;
-    validate_digest("candidate", candidate)?;
-    validate_digest("candidate repeat", candidate_repeat)?;
+    validate_manifest("base", base)?;
+    validate_manifest("candidate", candidate)?;
+    validate_manifest("candidate repeat", candidate_repeat)?;
 
     let base_overall = aggregate("base", base, "overall")?;
     let candidate_overall = aggregate("candidate", candidate, "overall")?;
@@ -305,7 +310,13 @@ fn rank_of(ranked_ids: &[String], id: &str) -> Option<usize> {
         .map(|index| index + 1)
 }
 
-fn validate_digest(name: &'static str, manifest: &ResultManifest) -> Result<(), ComparisonError> {
+fn validate_manifest(name: &'static str, manifest: &ResultManifest) -> Result<(), ComparisonError> {
+    if manifest.schema_version != RESULT_SCHEMA_VERSION {
+        return Err(ComparisonError::UnsupportedSchema {
+            manifest: name,
+            version: manifest.schema_version,
+        });
+    }
     if manifest.compute_digest().ok().as_ref() != Some(&manifest.deterministic_digest) {
         return Err(ComparisonError::InvalidDigest { manifest: name });
     }

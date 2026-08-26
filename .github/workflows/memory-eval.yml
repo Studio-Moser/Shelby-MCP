@@ -2,6 +2,7 @@ name: Memory evaluation
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -65,6 +66,24 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect evaluation-oracle changes
+        if: steps.changes.outputs.relevant == 'true' && steps.base-evaluator.outputs.available == 'true'
+        id: oracle-changes
+        shell: bash
+        run: |
+          if git -C candidate diff --quiet \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" -- \
+            crates/shelby-memory-eval \
+            "tests/fixtures/Contract Corpus-v1.json" \
+            "tests/fixtures/LongMemEval PR-v1.json" \
+            "tests/fixtures/Memory Eval Policy-v1.json" \
+            .github/workflows/memory-eval.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Prepare base-owned evaluation oracle
@@ -179,6 +198,18 @@ jobs:
           name: memory-evaluation
           path: artifacts/
           if-no-files-found: error
+
+      - name: Enforce explicit re-baseline approval
+        if: >-
+          always() &&
+          steps.changes.outputs.relevant == 'true' &&
+          steps.base-evaluator.outputs.available == 'true' &&
+          steps.oracle-changes.outputs.changed == 'true' &&
+          !contains(github.event.pull_request.labels.*.name, 'memory-eval/rebaseline-approved')
+        shell: bash
+        run: |
+          echo "::error::Evaluation-oracle changes require the memory-eval/rebaseline-approved label from a maintainer."
+          exit 1
 
       - name: Skip unrelated pull request
         if: steps.changes.outputs.relevant != 'true'
