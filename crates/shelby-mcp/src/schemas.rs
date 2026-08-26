@@ -55,7 +55,7 @@ fn string_list(desc: &str, max_len: usize, max_items: usize) -> Value {
 fn thought_fields(with_related: bool) -> Value {
     let mut p = json!({
         "content": { "type": "string", "maxLength": MAX_CONTENT_LENGTH, "description": "The thought content" },
-        "summary": { "type": "string", "maxLength": MAX_SUMMARY_LENGTH, "description": "One-line summary for search results" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": MAX_SUMMARY_LENGTH, "description": "One-line summary for search results" },
         "type": { "type": "string", "enum": TYPES, "description": "Thought type" },
         "source": s("Source tool or context"),
         "source_agent": s("Originating AI agent identifier (e.g. claude-code, cursor, windsurf)"),
@@ -96,14 +96,28 @@ fn merge(mut a: Value, b: Value) -> Value {
 pub fn tools() -> Vec<Tool> {
     let mut capture_item = thought_fields(true);
     capture_item["content"] = json!({ "type": "string", "maxLength": MAX_CONTENT_LENGTH });
+    let mut capture_schema = object(
+        merge(
+            thought_fields(true),
+            json!({
+                "thoughts": { "type": "array", "maxItems": MAX_BULK_THOUGHTS, "description": "Bulk capture: array of thoughts",
+                              "items": { "type": "object", "properties": capture_item, "required": ["content", "summary"] } }
+            }),
+        ),
+        &[],
+    );
+    capture_schema.insert(
+        "anyOf".into(),
+        json!([
+            { "required": ["content", "summary"] },
+            { "required": ["thoughts"] }
+        ]),
+    );
     vec![
         Tool::new(
             "capture_thought",
             "Persist a thought, decision, insight, task, question, or reference to long-term memory. Use whenever something is worth remembering across sessions: architecture choices, user preferences, project goals, bug root causes, or key facts. Supports optional metadata (topics, people, project, source) and bulk capture via the thoughts[] array. Always include a one-line summary so the thought is findable via search_thoughts.",
-            object(merge(thought_fields(true), json!({
-                "thoughts": { "type": "array", "maxItems": MAX_BULK_THOUGHTS, "description": "Bulk capture: array of thoughts",
-                              "items": { "type": "object", "properties": capture_item, "required": ["content"] } }
-            })), &[]),
+            capture_schema,
         )
         .with_annotations(annotations(false, false, false)),
         Tool::new(
@@ -243,6 +257,15 @@ pub fn tools() -> Vec<Tool> {
     ]
 }
 
+pub fn validate_tool_input(name: &str, args: &Value) -> Result<(), String> {
+    let Some(tool) = tools().into_iter().find(|tool| tool.name == name) else {
+        return Ok(());
+    };
+    let schema = Value::Object((*tool.input_schema).clone());
+    jsonschema::validate(&schema, args)
+        .map_err(|validation| format!("arguments do not match the tool schema: {validation}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +317,36 @@ mod tests {
         assert_eq!(by("search_thoughts").read_only_hint, Some(false));
         assert_eq!(by("list_thoughts").read_only_hint, Some(true));
         assert_eq!(by("delete_thought").destructive_hint, Some(true));
+    }
+
+    #[test]
+    fn capture_schema_requires_nonempty_summaries_for_single_and_bulk_items() {
+        let tools = tools();
+        let capture = tools
+            .iter()
+            .find(|tool| tool.name == "capture_thought")
+            .unwrap();
+        let schema = Value::Object((*capture.input_schema).clone());
+
+        assert!(jsonschema::is_valid(
+            &schema,
+            &json!({ "content": "Single", "summary": "Summary" })
+        ));
+        assert!(!jsonschema::is_valid(
+            &schema,
+            &json!({ "content": "Single" })
+        ));
+        assert!(!jsonschema::is_valid(
+            &schema,
+            &json!({ "content": "Single", "summary": "" })
+        ));
+        assert!(jsonschema::is_valid(
+            &schema,
+            &json!({ "thoughts": [{ "content": "Bulk", "summary": "Summary" }] })
+        ));
+        assert!(!jsonschema::is_valid(
+            &schema,
+            &json!({ "thoughts": [{ "content": "Bulk" }] })
+        ));
     }
 }

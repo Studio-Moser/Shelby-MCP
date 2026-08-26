@@ -117,6 +117,14 @@ impl ShelbyServer {
         args: Value,
         ctx: &RequestContext<RoleServer>,
     ) -> ToolResult {
+        if name == "capture_thought"
+            && let Err(error) = tools::validate_capture_thought_input(&args)
+        {
+            return error;
+        }
+        if let Err(message) = schemas::validate_tool_input(name, &args) {
+            return tools::error("invalid_input", message);
+        }
         let needs_roots = matches!(
             name,
             "capture_thought"
