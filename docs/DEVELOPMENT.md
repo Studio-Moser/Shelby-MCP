@@ -46,6 +46,7 @@ Use a temporary database for manual testing. Never point tests at a user's `~/.s
 ```text
 crates/
   shelby-memory/       memory engine and domain handlers
+  shelby-memory-eval/  deterministic contract and retrieval evaluation
   shelby-integrations/ client catalog and safe fallback setup
   shelby-mcp/          MCP library, HTTP/OAuth, and binary CLI
 bin/                   dependency-free npm launcher

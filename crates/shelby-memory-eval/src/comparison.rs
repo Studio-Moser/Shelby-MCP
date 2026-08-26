@@ -39,6 +39,10 @@ pub struct MetricDelta {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ComparisonReport {
     pub passed: bool,
+    pub base_code_sha: String,
+    pub candidate_code_sha: String,
+    pub base_digest: String,
+    pub candidate_digest: String,
     pub failures: Vec<String>,
     pub metric_deltas: BTreeMap<String, MetricDelta>,
     pub case_changes: Vec<String>,
@@ -53,6 +57,51 @@ pub enum ComparisonError {
     },
     #[error("{manifest} result manifest has an invalid deterministic digest")]
     InvalidDigest { manifest: &'static str },
+}
+
+#[derive(Debug, Error)]
+pub enum PolicyError {
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error("unsupported gate policy schema version: {0}")]
+    UnsupportedSchema(u32),
+    #[error("invalid gate policy: {0}")]
+    Invalid(String),
+}
+
+pub fn load_policy(input: &str) -> Result<GatePolicy, PolicyError> {
+    let policy: GatePolicy = serde_json::from_str(input)?;
+    if policy.schema_version != 1 {
+        return Err(PolicyError::UnsupportedSchema(policy.schema_version));
+    }
+    if policy.policy_version == 0 {
+        return Err(PolicyError::Invalid(
+            "policy version must be greater than zero".into(),
+        ));
+    }
+    if policy.category_floors.is_empty() {
+        return Err(PolicyError::Invalid(
+            "at least one category floor is required".into(),
+        ));
+    }
+    for (category, floor) in &policy.category_floors {
+        if !(0.0..=1.0).contains(&floor.recall_at_5) || !(0.0..=1.0).contains(&floor.ndcg_at_10) {
+            return Err(PolicyError::Invalid(format!(
+                "metric floor for {category} must be between zero and one"
+            )));
+        }
+    }
+    let resources = &policy.resources;
+    if resources.max_total_estimated_tokens == 0
+        || resources.max_total_serialized_bytes == 0
+        || resources.max_case_estimated_tokens == 0
+        || resources.max_case_serialized_bytes == 0
+    {
+        return Err(PolicyError::Invalid(
+            "resource budgets must be greater than zero".into(),
+        ));
+    }
+    Ok(policy)
 }
 
 pub fn compare(
@@ -115,12 +164,13 @@ pub fn compare(
         failures.push("candidate deterministic digest changed between repeated runs".into());
     }
 
-    for case in candidate
-        .cases
-        .iter()
-        .filter(|case| case.suite == "shelby-contract" && !case.passed)
-    {
-        failures.push(format!("contract case {} failed", case.id));
+    for case in candidate.cases.iter().filter(|case| !case.passed) {
+        let suite = if case.suite == "shelby-contract" {
+            "contract"
+        } else {
+            "public"
+        };
+        failures.push(format!("{suite} case {} failed", case.id));
     }
 
     for (category, floor) in &policy.category_floors {
@@ -163,6 +213,10 @@ pub fn compare(
 
     Ok(ComparisonReport {
         passed: failures.is_empty(),
+        base_code_sha: base.code_sha.clone(),
+        candidate_code_sha: candidate.code_sha.clone(),
+        base_digest: base.deterministic_digest.clone(),
+        candidate_digest: candidate.deterministic_digest.clone(),
         failures,
         metric_deltas,
         case_changes,

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -125,18 +126,26 @@ struct Expected {
 pub struct ContractSuiteResult {
     pub suite_version: String,
     pub cases: Vec<CaseResult>,
+    pub case_duration_us: BTreeMap<String, u64>,
 }
 
 pub fn run_contract_suite(input: &str) -> Result<ContractSuiteResult, ContractError> {
     let suite: ContractSuite = serde_json::from_str(input)?;
     validate(&suite)?;
     let mut cases = Vec::with_capacity(suite.cases.len());
+    let mut case_duration_us = BTreeMap::new();
     for case in &suite.cases {
+        let started = Instant::now();
         cases.push(run_case(&suite, case)?);
+        case_duration_us.insert(
+            case.id.clone(),
+            u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+        );
     }
     Ok(ContractSuiteResult {
         suite_version: suite.suite_version,
         cases,
+        case_duration_us,
     })
 }
 

@@ -57,8 +57,8 @@ impl MetricAccumulator {
 }
 
 pub fn build_result_manifest(
-    contract: ContractSuiteResult,
-    public: LongMemEvalSuiteResult,
+    mut contract: ContractSuiteResult,
+    mut public: LongMemEvalSuiteResult,
     provenance: Vec<DatasetProvenance>,
     metadata: RunMetadata,
 ) -> Result<ResultManifest, RunnerError> {
@@ -86,6 +86,12 @@ pub fn build_result_manifest(
     aggregates.insert("overall".into(), overall.mean());
 
     let suite_version = format!("{}+{}", contract.suite_version, public.suite_version);
+    let mut case_duration_us = std::mem::take(&mut contract.case_duration_us);
+    case_duration_us.extend(std::mem::take(&mut public.case_duration_us));
+    let mut durations: Vec<u64> = case_duration_us.values().copied().collect();
+    durations.sort_unstable();
+    let median_case_duration_us = median(&durations);
+    let p95_case_duration_us = percentile_95(&durations);
     let mut cases = contract.cases;
     cases.extend(public.cases);
     let efficiency = Efficiency {
@@ -107,9 +113,32 @@ pub fn build_result_manifest(
             generated_at: metadata.generated_at,
             duration_ms: metadata.duration_ms,
             target: metadata.target,
+            case_duration_us,
+            median_case_duration_us,
+            p95_case_duration_us,
         },
         deterministic_digest: String::new(),
     };
     manifest.finalize()?;
     Ok(manifest)
+}
+
+fn median(sorted: &[u64]) -> u64 {
+    match sorted.len() {
+        0 => 0,
+        length if length % 2 == 1 => sorted[length / 2],
+        length => {
+            let lower = sorted[length / 2 - 1];
+            let upper = sorted[length / 2];
+            lower + (upper - lower) / 2
+        }
+    }
+}
+
+fn percentile_95(sorted: &[u64]) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let rank = (sorted.len() * 95).div_ceil(100);
+    sorted[rank.saturating_sub(1)]
 }

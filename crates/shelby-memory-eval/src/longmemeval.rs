@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
+use std::time::Instant;
 
 use chrono::{Duration, SecondsFormat, TimeZone, Utc};
 use serde::de::{Deserializer, SeqAccess, Visitor};
@@ -103,6 +104,7 @@ pub struct Turn {
 pub struct LongMemEvalSuiteResult {
     pub suite_version: String,
     pub cases: Vec<CaseResult>,
+    pub case_duration_us: BTreeMap<String, u64>,
 }
 
 pub fn load_manifest(input: &str) -> Result<LongMemEvalManifest, LongMemEvalError> {
@@ -190,12 +192,19 @@ pub fn run_longmemeval_suite(
 ) -> Result<LongMemEvalSuiteResult, LongMemEvalError> {
     let entries = load_selected_dataset(manifest, path)?;
     let mut cases = Vec::with_capacity(entries.len());
+    let mut case_duration_us = BTreeMap::new();
     for (pinned, entry) in manifest.cases.iter().zip(entries) {
+        let started = Instant::now();
         cases.push(run_case(pinned, &entry)?);
+        case_duration_us.insert(
+            pinned.question_id.clone(),
+            u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+        );
     }
     Ok(LongMemEvalSuiteResult {
         suite_version: manifest.suite_version.clone(),
         cases,
+        case_duration_us,
     })
 }
 

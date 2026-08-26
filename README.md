@@ -77,6 +77,8 @@ npm test
 
 Rust owns the product. Node is used only for the small npm launcher, packaging scripts, and their tests. See [Development](docs/DEVELOPMENT.md) and [Architecture](docs/ARCHITECTURE.md).
 
+Memory-engine pull requests also run a deterministic contract and public retrieval gate. See [Memory evaluation](<docs/Memory Evaluation.md>).
+
 ## Reuse in Shelby App
 
 The workspace is intentionally layered for the cross-platform Shelby App:

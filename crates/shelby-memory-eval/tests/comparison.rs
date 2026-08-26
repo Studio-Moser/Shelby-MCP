@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use shelby_memory_eval::comparison::{GatePolicy, MetricFloor, ResourceBudget, compare};
+use shelby_memory_eval::comparison::{
+    GatePolicy, MetricFloor, ResourceBudget, compare, load_policy,
+};
+use shelby_memory_eval::longmemeval::load_manifest;
 use shelby_memory_eval::manifest::{
     CaseResult, DatasetProvenance, Efficiency, ResultManifest, RuntimeMetadata,
 };
@@ -72,6 +75,9 @@ fn manifest(recall: f64, ndcg: f64) -> ResultManifest {
             generated_at: "now".into(),
             duration_ms: 1,
             target: "test".into(),
+            case_duration_us: BTreeMap::new(),
+            median_case_duration_us: 0,
+            p95_case_duration_us: 0,
         },
         deterministic_digest: String::new(),
     };
@@ -145,6 +151,18 @@ fn gate_rejects_primary_regressions_contract_failures_and_repeat_drift() {
             .any(|failure| failure.contains("contract-1"))
     );
 
+    let mut public_failure = manifest(1.0, 1.0);
+    public_failure.cases[1].passed = false;
+    public_failure.cases[1].failures = vec!["handler error".into()];
+    public_failure.finalize().unwrap();
+    let report = compare(&base, &public_failure, &public_failure, &policy()).unwrap();
+    assert!(
+        report
+            .failures
+            .iter()
+            .any(|failure| failure.contains("public-1"))
+    );
+
     let mut repeat = manifest(1.0, 1.0);
     repeat.cases[1].ranked_ids = vec!["changed".into()];
     repeat.finalize().unwrap();
@@ -200,4 +218,47 @@ fn gate_rejects_policy_floors_resource_budgets_and_configuration_drift() {
             .iter()
             .any(|failure| failure.contains("configuration drift"))
     );
+}
+
+#[test]
+fn policy_loader_rejects_unsupported_schema_versions() {
+    let input = serde_json::to_string(&policy()).unwrap();
+    assert_eq!(load_policy(&input).unwrap(), policy());
+
+    let unsupported = input.replacen("\"schema_version\":1", "\"schema_version\":2", 1);
+    assert!(
+        load_policy(&unsupported)
+            .unwrap_err()
+            .to_string()
+            .contains("schema version")
+    );
+
+    let invalid_floor = input.replacen("\"recall_at_5\":0.0", "\"recall_at_5\":1.5", 1);
+    assert!(
+        load_policy(&invalid_floor)
+            .unwrap_err()
+            .to_string()
+            .contains("metric floor")
+    );
+}
+
+#[test]
+fn committed_policy_covers_every_pinned_public_category() {
+    let public = load_manifest(include_str!(
+        "../../../tests/fixtures/LongMemEval PR-v1.json"
+    ))
+    .unwrap();
+    let policy = load_policy(include_str!(
+        "../../../tests/fixtures/Memory Eval Policy-v1.json"
+    ))
+    .unwrap();
+    let categories: std::collections::BTreeSet<_> = public
+        .cases
+        .iter()
+        .map(|case| case.question_type.as_str())
+        .collect();
+    let policy_categories: std::collections::BTreeSet<_> =
+        policy.category_floors.keys().map(String::as_str).collect();
+
+    assert_eq!(policy_categories, categories);
 }

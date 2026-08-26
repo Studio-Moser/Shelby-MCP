@@ -27,6 +27,12 @@ pub struct RuntimeMetadata {
     pub generated_at: String,
     pub duration_ms: u64,
     pub target: String,
+    #[serde(default)]
+    pub case_duration_us: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub median_case_duration_us: u64,
+    #[serde(default)]
+    pub p95_case_duration_us: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

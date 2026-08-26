@@ -42,6 +42,9 @@ fn sample_manifest() -> ResultManifest {
             generated_at: "2026-08-26T10:00:00Z".into(),
             duration_ms: 12,
             target: "aarch64-apple-darwin".into(),
+            case_duration_us: BTreeMap::new(),
+            median_case_duration_us: 0,
+            p95_case_duration_us: 0,
         },
         deterministic_digest: String::new(),
     }

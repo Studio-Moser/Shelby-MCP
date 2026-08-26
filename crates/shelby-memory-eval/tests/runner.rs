@@ -66,6 +66,7 @@ fn manifest_averages_public_metrics_by_category_and_overall() {
         ContractSuiteResult {
             suite_version: "contract-v1".into(),
             cases: vec![contract_case()],
+            case_duration_us: BTreeMap::from([("contract".into(), 10)]),
         },
         LongMemEvalSuiteResult {
             suite_version: "public-v1".into(),
@@ -74,6 +75,11 @@ fn manifest_averages_public_metrics_by_category_and_overall() {
                 public_case("b", "single", 0.0, 0.5),
                 public_case("c", "multi", 0.5, 0.25),
             ],
+            case_duration_us: BTreeMap::from([
+                ("a".into(), 20),
+                ("b".into(), 30),
+                ("c".into(), 40),
+            ]),
         },
         vec![DatasetProvenance {
             name: "public".into(),
@@ -95,6 +101,8 @@ fn manifest_averages_public_metrics_by_category_and_overall() {
     assert_eq!(manifest.aggregates["overall"].ndcg_at_10, 7.0 / 12.0);
     assert_eq!(manifest.efficiency.estimated_tokens, 70);
     assert_eq!(manifest.efficiency.serialized_bytes, 280);
+    assert_eq!(manifest.runtime.median_case_duration_us, 25);
+    assert_eq!(manifest.runtime.p95_case_duration_us, 40);
     assert_eq!(manifest.deterministic_digest.len(), 64);
 }
 
@@ -105,10 +113,12 @@ fn runtime_and_code_sha_do_not_change_the_deterministic_digest() {
             ContractSuiteResult {
                 suite_version: "contract-v1".into(),
                 cases: vec![contract_case()],
+                case_duration_us: BTreeMap::from([("contract".into(), 10)]),
             },
             LongMemEvalSuiteResult {
                 suite_version: "public-v1".into(),
                 cases: vec![public_case("a", "single", 1.0, 1.0)],
+                case_duration_us: BTreeMap::from([("a".into(), 20)]),
             },
             vec![],
             metadata,
@@ -130,10 +140,12 @@ fn manifest_rejects_public_cases_without_metrics() {
         ContractSuiteResult {
             suite_version: "contract-v1".into(),
             cases: vec![],
+            case_duration_us: BTreeMap::new(),
         },
         LongMemEvalSuiteResult {
             suite_version: "public-v1".into(),
             cases: vec![case],
+            case_duration_us: BTreeMap::from([("a".into(), 20)]),
         },
         vec![],
         metadata("now", "sha"),

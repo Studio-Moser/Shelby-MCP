@@ -1,0 +1,143 @@
+name: Memory evaluation
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/shelby-memory/**"
+      - "crates/shelby-mcp/**"
+      - "crates/shelby-memory-eval/**"
+      - "tests/fixtures/Contract Corpus-v1.json"
+      - "tests/fixtures/LongMemEval PR-v1.json"
+      - "tests/fixtures/Memory Eval Policy-v1.json"
+      - ".github/workflows/memory-eval.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: Deterministic PR gate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+
+      - name: Check out base
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Use stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            candidate -> target
+            base -> target
+
+      - name: Cache pinned public datasets
+        uses: actions/cache@v4
+        with:
+          path: .memory-eval-cache
+          key: memory-eval-${{ runner.os }}-${{ hashFiles('candidate/tests/fixtures/LongMemEval PR-v1.json', 'base/tests/fixtures/LongMemEval PR-v1.json') }}
+
+      - name: Fetch and verify candidate dataset
+        id: candidate-dataset
+        shell: bash
+        run: |
+          mkdir -p .memory-eval-cache artifacts
+          checksum=$(jq -r '.dataset.sha256' "candidate/tests/fixtures/LongMemEval PR-v1.json")
+          dataset=".memory-eval-cache/$checksum.json"
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            fetch longmemeval-pr --cache "$dataset"
+          echo "path=$dataset" >> "$GITHUB_OUTPUT"
+
+      - name: Run candidate twice
+        run: |
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            run --suite pr --dataset "${{ steps.candidate-dataset.outputs.path }}" \
+            --output artifacts/candidate --code-sha "${{ github.event.pull_request.head.sha }}" \
+            > artifacts/candidate.log
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            run --suite pr --dataset "${{ steps.candidate-dataset.outputs.path }}" \
+            --output artifacts/candidate-repeat --code-sha "${{ github.event.pull_request.head.sha }}" \
+            > artifacts/candidate-repeat.log
+
+      - name: Detect base evaluator
+        id: base-evaluator
+        shell: bash
+        run: |
+          if git -C base cat-file -e HEAD:crates/shelby-memory-eval/Cargo.toml 2>/dev/null; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run base
+        if: steps.base-evaluator.outputs.available == 'true'
+        shell: bash
+        run: |
+          checksum=$(jq -r '.dataset.sha256' "base/tests/fixtures/LongMemEval PR-v1.json")
+          dataset=".memory-eval-cache/$checksum.json"
+          cargo run --locked --manifest-path base/Cargo.toml -p shelby-memory-eval -- \
+            fetch longmemeval-pr --cache "$dataset"
+          cargo run --locked --manifest-path base/Cargo.toml -p shelby-memory-eval -- \
+            run --suite pr --dataset "$dataset" \
+            --output artifacts/base --code-sha "${{ github.event.pull_request.base.sha }}" \
+            > artifacts/base.log
+
+      - name: Bootstrap base for the evaluator's first merge
+        if: steps.base-evaluator.outputs.available == 'false'
+        run: |
+          mkdir -p artifacts/base
+          cp artifacts/candidate/results.json artifacts/base/results.json
+          cp artifacts/candidate/report.md artifacts/base/report.md
+          echo "Base does not yet contain the evaluator; candidate policy floors are the bootstrap gate." \
+            > artifacts/base/BOOTSTRAP.txt
+
+      - name: Select base policy
+        id: gate-policy
+        shell: bash
+        run: |
+          if [ "${{ steps.base-evaluator.outputs.available }}" = "true" ]; then
+            echo "path=base/tests/fixtures/Memory Eval Policy-v1.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=candidate/tests/fixtures/Memory Eval Policy-v1.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare base and candidate
+        shell: bash
+        run: |
+          set +e
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            compare --base artifacts/base/results.json \
+            --candidate artifacts/candidate/results.json \
+            --candidate-repeat artifacts/candidate-repeat/results.json \
+            --policy "${{ steps.gate-policy.outputs.path }}" \
+            --output artifacts/comparison
+          status=$?
+          if [ -f artifacts/comparison/comparison.md ]; then
+            cat artifacts/comparison/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: memory-evaluation
+          path: artifacts/
+          if-no-files-found: error
