@@ -182,4 +182,18 @@ fn tool_calls_reject_schema_violations_before_domain_handlers() {
         assert!(is_error, "{body}");
         assert_eq!(body["error"], "invalid_input", "{body}");
     }
+
+    let (is_error, body) = c.call(
+        "capture_thought",
+        json!({
+            "thoughts": [{
+                "content": "Bulk custom type",
+                "summary": "Bulk custom type",
+                "type": "custom",
+                "visibility": "shared"
+            }]
+        }),
+    );
+    assert!(!is_error, "{body}");
+    assert_eq!(body["captured"], 1);
 }

@@ -96,6 +96,7 @@ fn merge(mut a: Value, b: Value) -> Value {
 pub fn tools() -> Vec<Tool> {
     let mut capture_item = thought_fields(true);
     capture_item["content"] = json!({ "type": "string", "maxLength": MAX_CONTENT_LENGTH });
+    capture_item["type"] = s("Thought type");
     let mut capture_schema = object(
         merge(
             thought_fields(true),
@@ -343,6 +344,10 @@ mod tests {
         assert!(jsonschema::is_valid(
             &schema,
             &json!({ "thoughts": [{ "content": "Bulk", "summary": "Summary" }] })
+        ));
+        assert!(jsonschema::is_valid(
+            &schema,
+            &json!({ "thoughts": [{ "content": "Bulk", "summary": "Summary", "type": "custom" }] })
         ));
         assert!(!jsonschema::is_valid(
             &schema,
