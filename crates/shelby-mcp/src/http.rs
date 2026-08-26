@@ -1,4 +1,4 @@
-//! Streamable HTTP transport with the discovery and health endpoints the TS server exposes.
+//! Streamable HTTP transport with discovery, health, bearer authentication, and OAuth.
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -66,7 +66,7 @@ async fn bearer_guard(State(auth): State<Auth>, req: Request<Body>, next: Next) 
     next.run(req).await
 }
 
-pub(crate) fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
+pub fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
     let mut config = StreamableHttpServerConfig::default();
     if cfg.http_host == "0.0.0.0" || cfg.http_host == "::" {
         // Container/remote deployments: the Host header is whatever the operator exposes.
@@ -591,5 +591,24 @@ mod tests {
                 assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn embedded_router_authorizes_without_connect_info() {
+        let app = test_router(Some(API_KEY));
+        let client_id = register_client(&app).await;
+        let mut request = request(
+            Method::POST,
+            "/authorize",
+            Some("application/x-www-form-urlencoded"),
+            authorize_form(&client_id, API_KEY),
+        );
+        request
+            .extensions_mut()
+            .remove::<axum::extract::ConnectInfo<SocketAddr>>();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
     }
 }

@@ -1,6 +1,6 @@
 //! The 12 MCP tool handlers (ADR 0001 §6 plus `expand_neighbors`). Each takes
-//! JSON args and returns the same `{content:[{type:"text",text}], isError}`
-//! envelope as the TypeScript server so clients see identical results.
+//! JSON args and returns the stable `{content:[{type:"text",text}], isError}`
+//! envelope used by existing clients.
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;

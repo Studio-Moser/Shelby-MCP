@@ -16,6 +16,7 @@ pub mod limits;
 pub mod migrations;
 pub mod projects;
 pub mod reconcile;
+pub mod repair;
 pub mod resolve;
 pub mod seed;
 pub mod telemetry;

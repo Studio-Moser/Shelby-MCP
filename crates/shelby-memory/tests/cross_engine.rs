@@ -1,6 +1,5 @@
-//! Cross-engine parity: a database produced by the TypeScript engine must open and
-//! query identically here. The committed fixture is mandatory; `SHELBY_TS_DB` is
-//! reserved for the two-way parity driver, which needs the Rust-written row.
+//! Cutover compatibility: the mandatory pre-0.4 database fixture must open,
+//! query, and accept new Rust-written rows without migration or conversion.
 use std::path::{Path, PathBuf};
 
 use shelby_memory::fts::{SearchOptions, search_thoughts};
@@ -10,12 +9,7 @@ use shelby_memory::{Memory, migrations::CURRENT_SCHEMA_VERSION};
 const SEED_ID: &str = "018f4c66-7c4e-7a4d-8e7a-6a74af7fd001";
 
 fn fixture_path() -> PathBuf {
-    std::env::var_os("SHELBY_TS_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../tests/fixtures/TypeScript-v18.sqlite")
-        })
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/TypeScript-v18.sqlite")
 }
 
 fn remove_sqlite_files(path: &Path) {
@@ -36,17 +30,11 @@ fn reads_and_extends_a_typescript_created_database() {
         "missing TypeScript-v18 compatibility fixture: {}",
         source.display()
     );
-    let supplied = std::env::var_os("SHELBY_TS_DB").is_some();
-    let path = if supplied {
-        source
-    } else {
-        let destination = std::env::temp_dir().join(format!(
-            "shelby-typescript-v18-{}.sqlite",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::copy(&source, &destination).expect("copy TypeScript fixture");
-        destination
-    };
+    let path = std::env::temp_dir().join(format!(
+        "shelby-typescript-v18-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::copy(&source, &path).expect("copy compatibility fixture");
 
     let m = Memory::open(&path).unwrap();
     assert_eq!(
@@ -79,7 +67,6 @@ fn reads_and_extends_a_typescript_created_database() {
         found.total_count, 1,
         "FTS index written by TS triggers is queryable"
     );
-    // Write back a row the TS engine will read in the second half of the check.
     let id = insert_thought(
         &m.conn,
         &ThoughtInput {
@@ -91,10 +78,17 @@ fn reads_and_extends_a_typescript_created_database() {
         },
     )
     .unwrap();
-    println!("RUST_ROW_ID={id}");
 
     drop(m);
-    if !supplied {
-        remove_sqlite_files(&path);
-    }
+    let reopened = Memory::open(&path).unwrap();
+    assert_eq!(
+        get_thought(&reopened.conn, &id)
+            .unwrap()
+            .expect("Rust-written row survives reopen")
+            .summary
+            .as_deref(),
+        Some("rust row")
+    );
+    drop(reopened);
+    remove_sqlite_files(&path);
 }

@@ -1426,6 +1426,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shelby-integrations"
+version = "0.4.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+ "windows-sys",
+]
+
+[[package]]
 name = "shelby-mcp"
 version = "0.4.0"
 dependencies = [
@@ -1437,6 +1446,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "shelby-integrations",
  "shelby-memory",
  "tokio",
  "tower",

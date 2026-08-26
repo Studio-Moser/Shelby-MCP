@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::extract::{ConnectInfo, Query, State};
+use axum::extract::{ConnectInfo, Extension, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::{Form, Router, routing::get};
@@ -399,11 +399,15 @@ async fn authorize_get(
 
 async fn authorize_post(
     State(st): State<OAuthState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Form(f): Form<AuthorizeForm>,
 ) -> Response {
-    if !st.check_rate_limit(&addr.ip().to_string()) {
+    let rate_limit_key = connect_info.map_or_else(
+        || "embedded-router".to_string(),
+        |Extension(ConnectInfo(addr))| addr.ip().to_string(),
+    );
+    if !st.check_rate_limit(&rate_limit_key) {
         return json_error(
             StatusCode::TOO_MANY_REQUESTS,
             "too_many_requests",

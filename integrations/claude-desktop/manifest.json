@@ -1,0 +1,22 @@
+{
+  "manifest_version": "0.4",
+  "name": "shelbymcp",
+  "display_name": "ShelbyMCP",
+  "version": "0.4.0",
+  "description": "Local knowledge-graph memory for Claude Desktop",
+  "author": {
+    "name": "Studio Moser",
+    "url": "https://github.com/Studio-Moser"
+  },
+  "homepage": "https://github.com/Studio-Moser/shelbymcp",
+  "documentation": "https://github.com/Studio-Moser/shelbymcp#readme",
+  "support": "https://github.com/Studio-Moser/shelbymcp/issues",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/shelby-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/shelby-mcp",
+      "args": []
+    }
+  }
+}

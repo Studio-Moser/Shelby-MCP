@@ -1,4 +1,4 @@
-//! The three MCP prompts that teach agents how to use the server (verbatim from the TS server).
+//! The three stable MCP prompts that teach agents how to use the server.
 pub struct PromptDef {
     pub name: &'static str,
     pub title: &'static str,
