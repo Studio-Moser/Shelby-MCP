@@ -2,16 +2,6 @@ name: Memory evaluation
 
 on:
   pull_request:
-    paths:
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/shelby-memory/**"
-      - "crates/shelby-mcp/**"
-      - "crates/shelby-memory-eval/**"
-      - "tests/fixtures/Contract Corpus-v1.json"
-      - "tests/fixtures/LongMemEval PR-v1.json"
-      - "tests/fixtures/Memory Eval Policy-v1.json"
-      - ".github/workflows/memory-eval.yml"
 
 permissions:
   contents: read
@@ -29,54 +19,45 @@ jobs:
       - name: Check out candidate
         uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate
 
+      - name: Detect memory-impacting changes
+        id: changes
+        shell: bash
+        run: |
+          relevant=false
+          while IFS= read -r path; do
+            case "$path" in
+              Cargo.lock | Cargo.toml | \
+              crates/shelby-memory/* | crates/shelby-mcp/* | crates/shelby-memory-eval/* | \
+              tests/fixtures/Contract\ Corpus-v1.json | \
+              tests/fixtures/LongMemEval\ PR-v1.json | \
+              tests/fixtures/Memory\ Eval\ Policy-v1.json | \
+              .github/workflows/memory-eval.yml)
+                relevant=true
+                break
+                ;;
+            esac
+          done < <(git -C candidate diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}")
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+
       - name: Check out base
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
 
       - name: Use stable Rust
+        if: steps.changes.outputs.relevant == 'true'
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust builds
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            candidate -> target
-            base -> target
-
-      - name: Cache pinned public datasets
-        uses: actions/cache@v4
-        with:
-          path: .memory-eval-cache
-          key: memory-eval-${{ runner.os }}-${{ hashFiles('candidate/tests/fixtures/LongMemEval PR-v1.json', 'base/tests/fixtures/LongMemEval PR-v1.json') }}
-
-      - name: Fetch and verify candidate dataset
-        id: candidate-dataset
-        shell: bash
-        run: |
-          mkdir -p .memory-eval-cache artifacts
-          checksum=$(jq -r '.dataset.sha256' "candidate/tests/fixtures/LongMemEval PR-v1.json")
-          dataset=".memory-eval-cache/$checksum.json"
-          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
-            fetch longmemeval-pr --cache "$dataset"
-          echo "path=$dataset" >> "$GITHUB_OUTPUT"
-
-      - name: Run candidate twice
-        run: |
-          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
-            run --suite pr --dataset "${{ steps.candidate-dataset.outputs.path }}" \
-            --output artifacts/candidate --code-sha "${{ github.event.pull_request.head.sha }}" \
-            > artifacts/candidate.log
-          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
-            run --suite pr --dataset "${{ steps.candidate-dataset.outputs.path }}" \
-            --output artifacts/candidate-repeat --code-sha "${{ github.event.pull_request.head.sha }}" \
-            > artifacts/candidate-repeat.log
-
       - name: Detect base evaluator
+        if: steps.changes.outputs.relevant == 'true'
         id: base-evaluator
         shell: bash
         run: |
@@ -86,8 +67,73 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Prepare base-owned evaluation oracle
+        if: steps.changes.outputs.relevant == 'true'
+        id: oracle
+        shell: bash
+        run: |
+          git clone --local --no-hardlinks candidate candidate-evaluated
+          if [ "${{ steps.base-evaluator.outputs.available }}" = "true" ]; then
+            rm -rf candidate-evaluated/crates/shelby-memory-eval
+            cp -R base/crates/shelby-memory-eval candidate-evaluated/crates/shelby-memory-eval
+            cp "base/tests/fixtures/Contract Corpus-v1.json" "candidate-evaluated/tests/fixtures/Contract Corpus-v1.json"
+            cp "base/tests/fixtures/LongMemEval PR-v1.json" "candidate-evaluated/tests/fixtures/LongMemEval PR-v1.json"
+            cp "base/tests/fixtures/Memory Eval Policy-v1.json" "candidate-evaluated/tests/fixtures/Memory Eval Policy-v1.json"
+            echo "candidate_manifest=candidate-evaluated/Cargo.toml" >> "$GITHUB_OUTPUT"
+            echo "oracle_manifest=base/Cargo.toml" >> "$GITHUB_OUTPUT"
+            echo "dataset_manifest=base/tests/fixtures/LongMemEval PR-v1.json" >> "$GITHUB_OUTPUT"
+            echo "policy=base/tests/fixtures/Memory Eval Policy-v1.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "candidate_manifest=candidate-evaluated/Cargo.toml" >> "$GITHUB_OUTPUT"
+            echo "oracle_manifest=candidate/Cargo.toml" >> "$GITHUB_OUTPUT"
+            echo "dataset_manifest=candidate/tests/fixtures/LongMemEval PR-v1.json" >> "$GITHUB_OUTPUT"
+            echo "policy=candidate/tests/fixtures/Memory Eval Policy-v1.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache Rust builds
+        if: steps.changes.outputs.relevant == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            candidate -> target
+            candidate-evaluated -> target
+            base -> target
+
+      - name: Cache pinned public datasets
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .memory-eval-cache
+          key: memory-eval-${{ runner.os }}-${{ hashFiles('candidate/tests/fixtures/LongMemEval PR-v1.json', 'base/tests/fixtures/LongMemEval PR-v1.json') }}
+
+      - name: Fetch and verify candidate dataset
+        if: steps.changes.outputs.relevant == 'true'
+        id: candidate-dataset
+        shell: bash
+        run: |
+          mkdir -p .memory-eval-cache artifacts
+          checksum=$(jq -r '.dataset.sha256' "${{ steps.oracle.outputs.dataset_manifest }}")
+          dataset=".memory-eval-cache/$checksum.json"
+          cargo run --locked --manifest-path "${{ steps.oracle.outputs.oracle_manifest }}" -p shelby-memory-eval -- \
+            fetch longmemeval-pr --cache "$dataset"
+          echo "path=$dataset" >> "$GITHUB_OUTPUT"
+
+      - name: Run candidate twice
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          cargo run --locked --manifest-path "${{ steps.oracle.outputs.candidate_manifest }}" -p shelby-memory-eval -- \
+            run --suite pr --dataset "${{ steps.candidate-dataset.outputs.path }}" \
+            --policy "${{ steps.oracle.outputs.policy }}" \
+            --output artifacts/candidate --code-sha "${{ github.event.pull_request.head.sha }}" \
+            > artifacts/candidate.log 2>&1
+          cargo run --locked --manifest-path "${{ steps.oracle.outputs.candidate_manifest }}" -p shelby-memory-eval -- \
+            run --suite pr --dataset "${{ steps.candidate-dataset.outputs.path }}" \
+            --policy "${{ steps.oracle.outputs.policy }}" \
+            --output artifacts/candidate-repeat --code-sha "${{ github.event.pull_request.head.sha }}" \
+            > artifacts/candidate-repeat.log 2>&1
+
       - name: Run base
-        if: steps.base-evaluator.outputs.available == 'true'
+        if: steps.changes.outputs.relevant == 'true' && steps.base-evaluator.outputs.available == 'true'
         shell: bash
         run: |
           checksum=$(jq -r '.dataset.sha256' "base/tests/fixtures/LongMemEval PR-v1.json")
@@ -96,11 +142,12 @@ jobs:
             fetch longmemeval-pr --cache "$dataset"
           cargo run --locked --manifest-path base/Cargo.toml -p shelby-memory-eval -- \
             run --suite pr --dataset "$dataset" \
+            --policy "${{ steps.oracle.outputs.policy }}" \
             --output artifacts/base --code-sha "${{ github.event.pull_request.base.sha }}" \
-            > artifacts/base.log
+            > artifacts/base.log 2>&1
 
       - name: Bootstrap base for the evaluator's first merge
-        if: steps.base-evaluator.outputs.available == 'false'
+        if: steps.changes.outputs.relevant == 'true' && steps.base-evaluator.outputs.available == 'false'
         run: |
           mkdir -p artifacts/base
           cp artifacts/candidate/results.json artifacts/base/results.json
@@ -108,25 +155,16 @@ jobs:
           echo "Base does not yet contain the evaluator; candidate policy floors are the bootstrap gate." \
             > artifacts/base/BOOTSTRAP.txt
 
-      - name: Select base policy
-        id: gate-policy
-        shell: bash
-        run: |
-          if [ "${{ steps.base-evaluator.outputs.available }}" = "true" ]; then
-            echo "path=base/tests/fixtures/Memory Eval Policy-v1.json" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=candidate/tests/fixtures/Memory Eval Policy-v1.json" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Compare base and candidate
+        if: steps.changes.outputs.relevant == 'true'
         shell: bash
         run: |
           set +e
-          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+          cargo run --locked --manifest-path "${{ steps.oracle.outputs.oracle_manifest }}" -p shelby-memory-eval -- \
             compare --base artifacts/base/results.json \
             --candidate artifacts/candidate/results.json \
             --candidate-repeat artifacts/candidate-repeat/results.json \
-            --policy "${{ steps.gate-policy.outputs.path }}" \
+            --policy "${{ steps.oracle.outputs.policy }}" \
             --output artifacts/comparison
           status=$?
           if [ -f artifacts/comparison/comparison.md ]; then
@@ -135,9 +173,13 @@ jobs:
           exit "$status"
 
       - name: Upload evaluation evidence
-        if: always()
+        if: always() && steps.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: memory-evaluation
           path: artifacts/
           if-no-files-found: error
+
+      - name: Skip unrelated pull request
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No memory-impacting files changed."

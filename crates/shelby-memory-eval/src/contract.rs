@@ -10,8 +10,10 @@ use shelby_memory::tools::{get_brief_tool, search_thoughts_tool, select_context_
 use shelby_memory::vectors::embedding_to_bytes;
 use shelby_memory::{Memory, identity::derive_existing_project_id};
 use thiserror::Error;
+use uuid::Uuid;
 
-use crate::manifest::CaseResult;
+use crate::manifest::{CaseResult, relevant_ranks};
+use crate::metrics::score_pr_ranking;
 
 #[derive(Debug, Error)]
 pub enum ContractError {
@@ -21,6 +23,8 @@ pub enum ContractError {
     Memory(#[from] shelby_memory::Error),
     #[error(transparent)]
     Sqlite(#[from] shelby_memory::rusqlite::Error),
+    #[error(transparent)]
+    Metric(#[from] crate::metrics::MetricError),
     #[error("unsupported contract schema version: {0}")]
     UnsupportedSchema(u32),
     #[error("duplicate project slug: {0}")]
@@ -41,9 +45,12 @@ pub enum ContractError {
     InvalidTimestamp { entity: String, value: String },
     #[error("case {case_id} expects unknown thought ID: {thought_id}")]
     UnknownExpectedThought { case_id: String, thought_id: String },
+    #[error("hard-confuser case {0} contains an empty required field")]
+    EmptyHardConfuser(String),
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ContractSuite {
     schema_version: u32,
     suite_version: String,
@@ -51,10 +58,43 @@ struct ContractSuite {
     thoughts: Vec<FixtureThought>,
     #[serde(default)]
     edges: Vec<FixtureEdge>,
+    #[serde(default)]
+    hard_confusers: Vec<HardConfuserCase>,
     cases: Vec<ContractCase>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HardConfuserCase {
+    id: String,
+    scenario: HardConfuserScenario,
+    query: String,
+    relevant_content: String,
+    confuser_content: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum HardConfuserScenario {
+    SameTopicWrongProject,
+    SamePersonWrongEvent,
+    StaleFactCurrentFact,
+    NearDuplicateDecision,
+}
+
+impl HardConfuserScenario {
+    fn category(self) -> &'static str {
+        match self {
+            Self::SameTopicWrongProject => "same-topic-wrong-project",
+            Self::SamePersonWrongEvent => "same-person-wrong-event",
+            Self::StaleFactCurrentFact => "stale-fact-current-fact",
+            Self::NearDuplicateDecision => "near-duplicate-decision",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FixtureThought {
     id: String,
     content: String,
@@ -77,6 +117,7 @@ struct FixtureThought {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FixtureEdge {
     id: String,
     source_id: String,
@@ -98,6 +139,7 @@ enum Handler {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ContractCase {
     id: String,
     category: String,
@@ -107,6 +149,7 @@ struct ContractCase {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Expected {
     ranked_ids: Option<Vec<String>>,
     #[serde(default)]
@@ -120,6 +163,7 @@ struct Expected {
     #[serde(default)]
     forbidden_text: Vec<String>,
     max_estimated_tokens: Option<u64>,
+    error_category: Option<String>,
 }
 
 #[derive(Debug)]
@@ -132,11 +176,19 @@ pub struct ContractSuiteResult {
 pub fn run_contract_suite(input: &str) -> Result<ContractSuiteResult, ContractError> {
     let suite: ContractSuite = serde_json::from_str(input)?;
     validate(&suite)?;
-    let mut cases = Vec::with_capacity(suite.cases.len());
+    let mut cases = Vec::with_capacity(suite.cases.len() + suite.hard_confusers.len());
     let mut case_duration_us = BTreeMap::new();
     for case in &suite.cases {
         let started = Instant::now();
         cases.push(run_case(&suite, case)?);
+        case_duration_us.insert(
+            case.id.clone(),
+            u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+        );
+    }
+    for case in &suite.hard_confusers {
+        let started = Instant::now();
+        cases.push(run_hard_confuser_case(case)?);
         case_duration_us.insert(
             case.id.clone(),
             u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
@@ -166,9 +218,21 @@ fn validate(suite: &ContractSuite) -> Result<(), ContractError> {
         ContractError::DuplicateEdge,
     )?;
     reject_duplicate(
-        suite.cases.iter().map(|case| case.id.as_str()),
+        suite
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .chain(suite.hard_confusers.iter().map(|case| case.id.as_str())),
         ContractError::DuplicateCase,
     )?;
+    for case in &suite.hard_confusers {
+        if case.query.trim().is_empty()
+            || case.relevant_content.trim().is_empty()
+            || case.confuser_content.trim().is_empty()
+        {
+            return Err(ContractError::EmptyHardConfuser(case.id.clone()));
+        }
+    }
 
     let projects: BTreeSet<&str> = suite.projects.iter().map(String::as_str).collect();
     let thoughts: BTreeSet<&str> = suite
@@ -328,8 +392,16 @@ fn run_case(suite: &ContractSuite, case: &ContractCase) -> Result<CaseResult, Co
         .as_u64()
         .unwrap_or_else(|| estimate_brief_tokens(&result.text).max(0) as u64);
     let mut failures = Vec::new();
-    if result.is_error {
+    if result.is_error && case.expected.error_category.is_none() {
         failures.push(format!("handler returned an error: {}", result.text));
+    }
+    if let Some(expected) = case.expected.error_category.as_deref()
+        && output["error"].as_str() != Some(expected)
+    {
+        failures.push(format!(
+            "error category differs: expected {expected}, got {:?}",
+            output["error"].as_str()
+        ));
     }
     if let Some(expected) = &case.expected.ranked_ids
         && &ranked_ids != expected
@@ -377,13 +449,16 @@ fn run_case(suite: &ContractSuite, case: &ContractCase) -> Result<CaseResult, Co
         ));
     }
 
+    let relevant_ids = case.expected.ranked_ids.clone().unwrap_or_default();
+    let ranks = relevant_ranks(&ranked_ids, &relevant_ids);
     Ok(CaseResult {
         id: case.id.clone(),
         suite: "shelby-contract".into(),
         category: case.category.clone(),
         passed: failures.is_empty(),
         ranked_ids,
-        relevant_ids: case.expected.ranked_ids.clone().unwrap_or_default(),
+        relevant_ranks: ranks,
+        relevant_ids,
         forbidden_ids: case.expected.forbidden_ids.clone(),
         metrics: None,
         estimated_tokens,
@@ -391,6 +466,140 @@ fn run_case(suite: &ContractSuite, case: &ContractCase) -> Result<CaseResult, Co
         failures,
         output,
     })
+}
+
+fn run_hard_confuser_case(case: &HardConfuserCase) -> Result<CaseResult, ContractError> {
+    let memory = Memory::open_in_memory()?;
+    let target_project = format!("hc-{}", case.id);
+    let confuser_project = match case.scenario {
+        HardConfuserScenario::SameTopicWrongProject => format!("{target_project}-other"),
+        _ => target_project.clone(),
+    };
+    for slug in [&target_project, &confuser_project] {
+        upsert_project(
+            &memory.conn,
+            &ProjectSeed {
+                slug: slug.clone(),
+                display_name: slug.clone(),
+                ..Default::default()
+            },
+        )?;
+    }
+
+    let relevant_id = stable_hard_confuser_id(&case.id, "relevant");
+    let confuser_id = stable_hard_confuser_id(&case.id, "confuser");
+    insert_hard_confuser_thought(
+        &memory,
+        &relevant_id,
+        &case.relevant_content,
+        &target_project,
+        "2026-08-26T10:00:00Z",
+        None,
+    )?;
+    insert_hard_confuser_thought(
+        &memory,
+        &confuser_id,
+        &case.confuser_content,
+        &confuser_project,
+        "2025-08-26T10:00:00Z",
+        matches!(case.scenario, HardConfuserScenario::StaleFactCurrentFact)
+            .then_some(relevant_id.as_str()),
+    )?;
+
+    let (handler, result) = match case.scenario {
+        HardConfuserScenario::StaleFactCurrentFact => (
+            Handler::GetBrief,
+            get_brief_tool(
+                &memory,
+                &serde_json::json!({
+                    "project_identifier": target_project,
+                    "scope": "full",
+                    "now": "2026-08-26T12:00:00Z",
+                    "token_budget": 900,
+                }),
+            ),
+        ),
+        _ => (
+            Handler::SearchThoughts,
+            search_thoughts_tool(
+                &memory,
+                &serde_json::json!({
+                    "query": case.query,
+                    "project_identifier": target_project,
+                    "limit": 10,
+                }),
+            ),
+        ),
+    };
+    let production_output = result.json();
+    let ranked_ids = ranked_ids(&handler, &production_output);
+    let expected_ids = vec![relevant_id.clone()];
+    let mut failures = Vec::new();
+    if result.is_error {
+        failures.push(format!("handler returned an error: {}", result.text));
+    }
+    if ranked_ids != expected_ids {
+        failures.push(format!(
+            "ranked IDs differ: expected {expected_ids:?}, got {ranked_ids:?}"
+        ));
+    }
+    if ranked_ids.contains(&confuser_id) {
+        failures.push(format!("forbidden confuser returned: {confuser_id}"));
+    }
+    let relevant = BTreeSet::from([relevant_id.clone()]);
+    let metrics = score_pr_ranking(&ranked_ids, &relevant)?;
+
+    Ok(CaseResult {
+        id: case.id.clone(),
+        suite: "shelby-hard-confuser".into(),
+        category: case.scenario.category().into(),
+        passed: failures.is_empty(),
+        ranked_ids: ranked_ids.clone(),
+        relevant_ranks: relevant_ranks(&ranked_ids, &expected_ids),
+        relevant_ids: vec![relevant_id],
+        forbidden_ids: vec![confuser_id],
+        metrics: Some(metrics),
+        estimated_tokens: estimate_brief_tokens(&result.text).max(0) as u64,
+        serialized_bytes: result.text.len() as u64,
+        failures,
+        output: serde_json::json!({
+            "mode": production_output["mode"],
+            "ranked_ids": ranked_ids,
+        }),
+    })
+}
+
+fn insert_hard_confuser_thought(
+    memory: &Memory,
+    id: &str,
+    content: &str,
+    project_identifier: &str,
+    timestamp: &str,
+    consolidated_into: Option<&str>,
+) -> Result<(), ContractError> {
+    let project_id = derive_existing_project_id(project_identifier);
+    memory.conn.execute(
+        "INSERT INTO thoughts (id, content, summary, type, source, trust_level, project_id, project_identifier,
+           visibility, metadata, created_at, updated_at, consolidated_into)
+         VALUES (?1, ?2, ?2, 'decision', 'hard-confuser', 'trusted', ?3, ?4, 'personal', '{}', ?5, ?5, ?6)",
+        params![
+            id,
+            content,
+            project_id,
+            project_identifier,
+            timestamp,
+            consolidated_into,
+        ],
+    )?;
+    Ok(())
+}
+
+fn stable_hard_confuser_id(case_id: &str, role: &str) -> String {
+    Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("shelby:{case_id}:{role}").as_bytes(),
+    )
+    .to_string()
 }
 
 fn ranked_ids(handler: &Handler, output: &Value) -> Vec<String> {

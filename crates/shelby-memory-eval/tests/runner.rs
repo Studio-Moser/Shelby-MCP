@@ -15,6 +15,7 @@ fn public_case(id: &str, category: &str, recall: f64, ndcg: f64) -> CaseResult {
         passed: true,
         ranked_ids: vec!["ranked".into()],
         relevant_ids: vec!["ranked".into()],
+        relevant_ranks: vec![],
         forbidden_ids: vec![],
         metrics: Some(RetrievalMetrics {
             precision_at_5: 0.2,
@@ -37,6 +38,7 @@ fn contract_case() -> CaseResult {
         passed: true,
         ranked_ids: vec!["thought".into()],
         relevant_ids: vec!["thought".into()],
+        relevant_ranks: vec![],
         forbidden_ids: vec![],
         metrics: None,
         estimated_tokens: 10,
@@ -44,6 +46,12 @@ fn contract_case() -> CaseResult {
         failures: vec![],
         output: json!({"ids": ["thought"]}),
     }
+}
+
+fn hard_confuser_case() -> CaseResult {
+    let mut case = public_case("hard", "same-topic-wrong-project", 1.0, 1.0);
+    case.suite = "shelby-hard-confuser".into();
+    case
 }
 
 fn metadata(generated_at: &str, code_sha: &str) -> RunMetadata {
@@ -65,8 +73,8 @@ fn manifest_averages_public_metrics_by_category_and_overall() {
     let manifest = build_result_manifest(
         ContractSuiteResult {
             suite_version: "contract-v1".into(),
-            cases: vec![contract_case()],
-            case_duration_us: BTreeMap::from([("contract".into(), 10)]),
+            cases: vec![contract_case(), hard_confuser_case()],
+            case_duration_us: BTreeMap::from([("contract".into(), 10), ("hard".into(), 15)]),
         },
         LongMemEvalSuiteResult {
             suite_version: "public-v1".into(),
@@ -87,6 +95,9 @@ fn manifest_averages_public_metrics_by_category_and_overall() {
             revision: "rev".into(),
             sha256: "hash".into(),
             license: "MIT".into(),
+            license_url: None,
+            selection_method: None,
+            manifest_sha256: "manifest".into(),
             selected_ids: vec!["a".into(), "b".into(), "c".into()],
         }],
         metadata("2026-01-01T00:00:00Z", "sha-a"),
@@ -94,14 +105,18 @@ fn manifest_averages_public_metrics_by_category_and_overall() {
     .unwrap();
 
     assert_eq!(manifest.suite_version, "contract-v1+public-v1");
-    assert_eq!(manifest.cases.len(), 4);
+    assert_eq!(manifest.cases.len(), 5);
     assert_eq!(manifest.aggregates["single"].recall_at_5, 0.5);
     assert_eq!(manifest.aggregates["multi"].ndcg_at_10, 0.25);
     assert_eq!(manifest.aggregates["overall"].recall_at_5, 0.5);
     assert_eq!(manifest.aggregates["overall"].ndcg_at_10, 7.0 / 12.0);
-    assert_eq!(manifest.efficiency.estimated_tokens, 70);
-    assert_eq!(manifest.efficiency.serialized_bytes, 280);
-    assert_eq!(manifest.runtime.median_case_duration_us, 25);
+    assert_eq!(
+        manifest.aggregates["same-topic-wrong-project"].recall_at_5,
+        1.0
+    );
+    assert_eq!(manifest.efficiency.estimated_tokens, 90);
+    assert_eq!(manifest.efficiency.serialized_bytes, 360);
+    assert_eq!(manifest.runtime.median_case_duration_us, 20);
     assert_eq!(manifest.runtime.p95_case_duration_us, 40);
     assert_eq!(manifest.deterministic_digest.len(), 64);
 }

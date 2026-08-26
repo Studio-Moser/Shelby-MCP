@@ -8,12 +8,14 @@ use crate::manifest::ResultManifest;
 const FLOAT_EPSILON: f64 = 1e-12;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MetricFloor {
     pub recall_at_5: f64,
     pub ndcg_at_10: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResourceBudget {
     pub max_total_estimated_tokens: u64,
     pub max_total_serialized_bytes: u64,
@@ -22,6 +24,7 @@ pub struct ResourceBudget {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GatePolicy {
     pub schema_version: u32,
     pub policy_version: u32,
@@ -46,6 +49,22 @@ pub struct ComparisonReport {
     pub failures: Vec<String>,
     pub metric_deltas: BTreeMap<String, MetricDelta>,
     pub case_changes: Vec<String>,
+    pub case_diffs: Vec<CaseRankingDiff>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelevantRankDelta {
+    pub id: String,
+    pub base_rank: Option<usize>,
+    pub candidate_rank: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaseRankingDiff {
+    pub id: String,
+    pub base_ranked_ids: Vec<String>,
+    pub candidate_ranked_ids: Vec<String>,
+    pub relevant_rank_deltas: Vec<RelevantRankDelta>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -173,6 +192,42 @@ pub fn compare(
         failures.push(format!("{suite} case {} failed", case.id));
     }
 
+    let base_contracts: BTreeMap<_, _> = base
+        .cases
+        .iter()
+        .filter(|case| case.suite.starts_with("shelby-"))
+        .map(|case| (case.id.as_str(), case))
+        .collect();
+    let candidate_contracts: BTreeMap<_, _> = candidate
+        .cases
+        .iter()
+        .filter(|case| case.suite.starts_with("shelby-"))
+        .map(|case| (case.id.as_str(), case))
+        .collect();
+    for id in base_contracts
+        .keys()
+        .chain(candidate_contracts.keys())
+        .copied()
+        .collect::<BTreeSet<_>>()
+    {
+        let unchanged = base_contracts
+            .get(id)
+            .zip(candidate_contracts.get(id))
+            .is_some_and(|(base_case, candidate_case)| {
+                base_case.suite == candidate_case.suite
+                    && base_case.category == candidate_case.category
+                    && base_case.passed == candidate_case.passed
+                    && base_case.ranked_ids == candidate_case.ranked_ids
+                    && base_case.relevant_ids == candidate_case.relevant_ids
+                    && base_case.forbidden_ids == candidate_case.forbidden_ids
+                    && base_case.metrics == candidate_case.metrics
+                    && base_case.output == candidate_case.output
+            });
+        if !unchanged {
+            failures.push(format!("contract output drift for {id}"));
+        }
+    }
+
     for (category, floor) in &policy.category_floors {
         let metrics = aggregate("candidate", candidate, category)?;
         if metrics.recall_at_5 + FLOAT_EPSILON < floor.recall_at_5 {
@@ -195,21 +250,40 @@ pub fn compare(
         .cases
         .iter()
         .filter(|case| case.suite == "longmemeval-pr")
-        .map(|case| (&case.id, &case.ranked_ids))
+        .map(|case| (&case.id, case))
         .collect();
-    let case_changes = candidate
+    let case_diffs: Vec<CaseRankingDiff> = candidate
         .cases
         .iter()
         .filter(|case| case.suite == "longmemeval-pr")
         .filter_map(|case| {
             base_public
                 .get(&case.id)
-                .filter(|base_ids| **base_ids != &case.ranked_ids)
-                .map(|_| case.id.clone())
+                .filter(|base_case| base_case.ranked_ids != case.ranked_ids)
+                .map(|base_case| {
+                    let relevant_ids: BTreeSet<_> = base_case
+                        .relevant_ids
+                        .iter()
+                        .chain(&case.relevant_ids)
+                        .cloned()
+                        .collect();
+                    CaseRankingDiff {
+                        id: case.id.clone(),
+                        base_ranked_ids: base_case.ranked_ids.clone(),
+                        candidate_ranked_ids: case.ranked_ids.clone(),
+                        relevant_rank_deltas: relevant_ids
+                            .into_iter()
+                            .map(|id| RelevantRankDelta {
+                                base_rank: rank_of(&base_case.ranked_ids, &id),
+                                candidate_rank: rank_of(&case.ranked_ids, &id),
+                                id,
+                            })
+                            .collect(),
+                    }
+                })
         })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
         .collect();
+    let case_changes = case_diffs.iter().map(|change| change.id.clone()).collect();
 
     Ok(ComparisonReport {
         passed: failures.is_empty(),
@@ -220,7 +294,15 @@ pub fn compare(
         failures,
         metric_deltas,
         case_changes,
+        case_diffs,
     })
+}
+
+fn rank_of(ranked_ids: &[String], id: &str) -> Option<usize> {
+    ranked_ids
+        .iter()
+        .position(|ranked| ranked == id)
+        .map(|index| index + 1)
 }
 
 fn validate_digest(name: &'static str, manifest: &ResultManifest) -> Result<(), ComparisonError> {

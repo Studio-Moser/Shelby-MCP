@@ -78,6 +78,19 @@ pub fn build_result_manifest(
             .or_default()
             .push(metrics);
     }
+    for case in contract
+        .cases
+        .iter()
+        .filter(|case| case.suite == "shelby-hard-confuser")
+    {
+        let metrics = case
+            .metrics
+            .ok_or_else(|| RunnerError::MissingMetrics(case.id.clone()))?;
+        categories
+            .entry(case.category.clone())
+            .or_default()
+            .push(metrics);
+    }
 
     let mut aggregates: BTreeMap<String, RetrievalMetrics> = categories
         .into_iter()

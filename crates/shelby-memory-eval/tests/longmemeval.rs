@@ -17,12 +17,14 @@ fn manifest(license: &str, sha: &str, question_id: &str) -> String {
         r#"{{
           "schema_version": 1,
           "suite_version": "longmemeval-pr-v1",
+          "selection_method": "test fixture",
           "dataset": {{
             "name": "LongMemEval-S cleaned",
             "source": "https://example.test/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/data.json",
             "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "sha256": "{sha}",
-            "license": "{license}"
+            "license": "{license}",
+            "license_url": "https://example.test/license"
           }},
           "cases": [{{
             "question_id": "{question_id}",
@@ -90,6 +92,31 @@ fn manifest_validation_rejects_mutable_or_duplicate_selection() {
 }
 
 #[test]
+fn manifest_validation_rejects_unsupported_schemas_and_unknown_fields() {
+    let unsupported = manifest("MIT", DATASET_SHA, "q1").replacen(
+        "\"schema_version\": 1",
+        "\"schema_version\": 2",
+        1,
+    );
+    assert_eq!(
+        load_manifest(&unsupported).unwrap_err().to_string(),
+        "unsupported LongMemEval manifest schema version: 2"
+    );
+
+    let unknown = manifest("MIT", DATASET_SHA, "q1").replacen(
+        "\"suite_version\":",
+        "\"unexpected\": true, \"suite_version\":",
+        1,
+    );
+    assert!(
+        load_manifest(&unknown)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field")
+    );
+}
+
+#[test]
 fn adapter_streams_selected_cases_through_the_production_search_handler() {
     let path = dataset_file();
     let pinned = load_manifest(&manifest("MIT", DATASET_SHA, "q1")).unwrap();
@@ -133,6 +160,16 @@ fn adapter_handles_repeated_upstream_session_ids_without_storage_collisions() {
 #[test]
 fn pinned_manifest_has_six_evidence_bearing_cases_per_question_type() {
     let manifest = load_manifest(PINNED_MANIFEST).unwrap();
+    assert!(
+        manifest
+            .selection_method
+            .to_lowercase()
+            .contains("six evidence-bearing cases")
+    );
+    assert_eq!(
+        manifest.dataset.license_url,
+        "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+    );
     let mut counts = BTreeMap::new();
     for case in &manifest.cases {
         *counts.entry(case.question_type.as_str()).or_insert(0) += 1;

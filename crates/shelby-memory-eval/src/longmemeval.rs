@@ -16,7 +16,7 @@ use shelby_memory::rusqlite::params;
 use shelby_memory::tools::search_thoughts_tool;
 use thiserror::Error;
 
-use crate::manifest::CaseResult;
+use crate::manifest::{CaseResult, relevant_ranks};
 use crate::metrics::score_pr_ranking;
 
 #[derive(Debug, Error)]
@@ -58,23 +58,28 @@ pub enum LongMemEvalError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LongMemEvalManifest {
     pub schema_version: u32,
     pub suite_version: String,
+    pub selection_method: String,
     pub dataset: Dataset,
     pub cases: Vec<PinnedCase>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Dataset {
     pub name: String,
     pub source: String,
     pub revision: String,
     pub sha256: String,
     pub license: String,
+    pub license_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PinnedCase {
     pub question_id: String,
     pub question_type: String,
@@ -367,6 +372,7 @@ fn run_case(pinned: &PinnedCase, entry: &LongMemEvalEntry) -> Result<CaseResult,
         passed: failures.is_empty(),
         ranked_ids: ranked_session_ids.clone(),
         relevant_ids: pinned.evidence_session_ids.clone(),
+        relevant_ranks: relevant_ranks(&ranked_session_ids, &pinned.evidence_session_ids),
         forbidden_ids: Vec::new(),
         metrics: Some(metrics),
         estimated_tokens: estimate_brief_tokens(&result.text).max(0) as u64,

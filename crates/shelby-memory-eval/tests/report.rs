@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use serde_json::json;
-use shelby_memory_eval::comparison::{ComparisonReport, MetricDelta};
+use shelby_memory_eval::comparison::{
+    CaseRankingDiff, ComparisonReport, MetricDelta, RelevantRankDelta,
+};
 use shelby_memory_eval::manifest::{CaseResult, Efficiency, ResultManifest, RuntimeMetadata};
 use shelby_memory_eval::metrics::RetrievalMetrics;
 use shelby_memory_eval::report::{render_comparison_report, render_run_report};
@@ -27,6 +29,7 @@ fn manifest() -> ResultManifest {
             passed: false,
             ranked_ids: vec![],
             relevant_ids: vec![],
+            relevant_ranks: vec![],
             forbidden_ids: vec![],
             metrics: None,
             estimated_tokens: 10,
@@ -83,6 +86,16 @@ fn comparison_report_surfaces_gate_failures_deltas_and_case_changes() {
             },
         )]),
         case_changes: vec!["public-1".into()],
+        case_diffs: vec![CaseRankingDiff {
+            id: "public-1".into(),
+            base_ranked_ids: vec!["evidence".into()],
+            candidate_ranked_ids: vec!["distractor".into(), "evidence".into()],
+            relevant_rank_deltas: vec![RelevantRankDelta {
+                id: "evidence".into(),
+                base_rank: Some(1),
+                candidate_rank: Some(2),
+            }],
+        }],
     });
 
     assert!(report.contains("Status: **FAIL**"));
@@ -91,4 +104,5 @@ fn comparison_report_surfaces_gate_failures_deltas_and_case_changes() {
     assert!(report.contains("Recall@5 regressed"));
     assert!(report.contains("0.750000 | 0.500000 | -0.250000"));
     assert!(report.contains("public-1"));
+    assert!(report.contains("candidate rank Some(2)"));
 }

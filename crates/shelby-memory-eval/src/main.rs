@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -89,6 +90,11 @@ fn run_command(args: &[String]) -> Result<bool, Box<dyn Error>> {
             revision: contract.suite_version.clone(),
             sha256: sha256(CONTRACT_FIXTURE.as_bytes()),
             license: "MIT".into(),
+            license_url: None,
+            selection_method: Some(
+                "Repository-owned exact contracts and curated hard-confuser slices".into(),
+            ),
+            manifest_sha256: sha256(CONTRACT_FIXTURE.as_bytes()),
             selected_ids: contract.cases.iter().map(|case| case.id.clone()).collect(),
         },
         DatasetProvenance {
@@ -97,6 +103,9 @@ fn run_command(args: &[String]) -> Result<bool, Box<dyn Error>> {
             revision: public_manifest.dataset.revision.clone(),
             sha256: public_manifest.dataset.sha256.clone(),
             license: public_manifest.dataset.license.clone(),
+            license_url: Some(public_manifest.dataset.license_url.clone()),
+            selection_method: Some(public_manifest.selection_method.clone()),
+            manifest_sha256: sha256(PUBLIC_MANIFEST.as_bytes()),
             selected_ids: public_manifest
                 .cases
                 .iter()
@@ -106,6 +115,20 @@ fn run_command(args: &[String]) -> Result<bool, Box<dyn Error>> {
     ];
     let configuration = BTreeMap::from([
         ("evaluator_version".into(), env!("CARGO_PKG_VERSION").into()),
+        ("rustc_version".into(), rustc_version()),
+        ("metric_version".into(), "retrieval-v1".into()),
+        (
+            "contract_manifest_sha256".into(),
+            sha256(CONTRACT_FIXTURE.as_bytes()),
+        ),
+        (
+            "public_manifest_sha256".into(),
+            sha256(PUBLIC_MANIFEST.as_bytes()),
+        ),
+        (
+            "gate_policy_sha256".into(),
+            sha256(policy_text(options.get("--policy"))?.as_bytes()),
+        ),
         (
             "memory_schema_version".into(),
             CURRENT_SCHEMA_VERSION.to_string(),
@@ -220,11 +243,15 @@ fn required_path(options: &BTreeMap<String, String>, name: &str) -> Result<PathB
 fn load_policy_text(
     path: Option<&String>,
 ) -> Result<shelby_memory_eval::comparison::GatePolicy, Box<dyn Error>> {
-    let text = match path {
-        Some(path) => fs::read_to_string(path)?,
-        None => DEFAULT_POLICY.into(),
-    };
+    let text = policy_text(path)?;
     Ok(load_policy(&text)?)
+}
+
+fn policy_text(path: Option<&String>) -> Result<String, io::Error> {
+    match path {
+        Some(path) => fs::read_to_string(path),
+        None => Ok(DEFAULT_POLICY.into()),
+    }
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Box<dyn Error>> {
@@ -247,6 +274,17 @@ fn write_pretty_json(path: &Path, value: &impl serde::Serialize) -> Result<(), B
 
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn rustc_version() -> String {
+    Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|version| version.trim().to_string())
+        .unwrap_or_else(|| "unknown".into())
 }
 
 fn input_error(message: impl Into<String>) -> io::Error {

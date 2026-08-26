@@ -30,6 +30,9 @@ fn manifest(recall: f64, ndcg: f64) -> ResultManifest {
             revision: "v1".into(),
             sha256: "abc".into(),
             license: "MIT".into(),
+            license_url: None,
+            selection_method: None,
+            manifest_sha256: "manifest".into(),
             selected_ids: vec!["public-1".into()],
         }],
         configuration: BTreeMap::from([("recall_cutoff".into(), "5".into())]),
@@ -41,6 +44,7 @@ fn manifest(recall: f64, ndcg: f64) -> ResultManifest {
                 passed: true,
                 ranked_ids: vec!["a".into()],
                 relevant_ids: vec!["a".into()],
+                relevant_ranks: vec![],
                 forbidden_ids: vec![],
                 metrics: None,
                 estimated_tokens: 10,
@@ -55,6 +59,7 @@ fn manifest(recall: f64, ndcg: f64) -> ResultManifest {
                 passed: true,
                 ranked_ids: vec!["evidence".into()],
                 relevant_ids: vec!["evidence".into()],
+                relevant_ranks: vec![],
                 forbidden_ids: vec![],
                 metrics: Some(metrics(recall, ndcg)),
                 estimated_tokens: 20,
@@ -117,6 +122,15 @@ fn public_case_movement_is_reported_but_does_not_fail_equal_aggregate_quality() 
 
     assert!(report.passed, "{:?}", report.failures);
     assert_eq!(report.case_changes, vec!["public-1"]);
+    assert_eq!(report.case_diffs[0].base_ranked_ids, vec!["evidence"]);
+    assert_eq!(
+        report.case_diffs[0].candidate_ranked_ids,
+        vec!["distractor", "evidence"]
+    );
+    assert_eq!(
+        report.case_diffs[0].relevant_rank_deltas[0].candidate_rank,
+        Some(2)
+    );
 }
 
 #[test]
@@ -149,6 +163,17 @@ fn gate_rejects_primary_regressions_contract_failures_and_repeat_drift() {
             .failures
             .iter()
             .any(|failure| failure.contains("contract-1"))
+    );
+
+    let mut contract_drift = manifest(1.0, 1.0);
+    contract_drift.cases[0].output = serde_json::json!({"ids": ["changed"]});
+    contract_drift.finalize().unwrap();
+    let report = compare(&base, &contract_drift, &contract_drift, &policy()).unwrap();
+    assert!(
+        report
+            .failures
+            .iter()
+            .any(|failure| failure.contains("contract output drift"))
     );
 
     let mut public_failure = manifest(1.0, 1.0);
@@ -240,6 +265,18 @@ fn policy_loader_rejects_unsupported_schema_versions() {
             .to_string()
             .contains("metric floor")
     );
+
+    let unknown = input.replacen(
+        "\"policy_version\":1",
+        "\"unknown\":true,\"policy_version\":1",
+        1,
+    );
+    assert!(
+        load_policy(&unknown)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field")
+    );
 }
 
 #[test]
@@ -260,5 +297,17 @@ fn committed_policy_covers_every_pinned_public_category() {
     let policy_categories: std::collections::BTreeSet<_> =
         policy.category_floors.keys().map(String::as_str).collect();
 
-    assert_eq!(policy_categories, categories);
+    assert!(categories.is_subset(&policy_categories));
+    assert_eq!(
+        policy_categories
+            .difference(&categories)
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![
+            "near-duplicate-decision",
+            "same-person-wrong-event",
+            "same-topic-wrong-project",
+            "stale-fact-current-fact",
+        ]
+    );
 }

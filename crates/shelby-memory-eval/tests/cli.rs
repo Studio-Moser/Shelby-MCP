@@ -28,6 +28,9 @@ fn manifest() -> ResultManifest {
             revision: "v1".into(),
             sha256: "abc".into(),
             license: "MIT".into(),
+            license_url: None,
+            selection_method: None,
+            manifest_sha256: "manifest".into(),
             selected_ids: vec!["public".into()],
         }],
         configuration: BTreeMap::new(),
@@ -38,6 +41,7 @@ fn manifest() -> ResultManifest {
             passed: true,
             ranked_ids: vec!["evidence".into()],
             relevant_ids: vec!["evidence".into()],
+            relevant_ranks: vec![],
             forbidden_ids: vec![],
             metrics: Some(metrics),
             estimated_tokens: 10,
@@ -139,6 +143,35 @@ fn compare_command_writes_machine_and_human_readable_artifacts() {
         fs::read_to_string(output_directory.join("comparison.md"))
             .unwrap()
             .contains("Status: **PASS**")
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn run_with_a_missing_cache_fails_offline_without_creating_dataset_data() {
+    let directory = std::env::temp_dir().join(format!("shelby-eval-offline-{}", Uuid::new_v4()));
+    fs::create_dir(&directory).unwrap();
+    let missing = directory.join("missing.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_shelby-memory-eval"))
+        .args([
+            "run",
+            "--suite",
+            "pr",
+            "--dataset",
+            missing.to_str().unwrap(),
+            "--output",
+            directory.join("output").to_str().unwrap(),
+        ])
+        .env("PATH", "/definitely-not-a-real-bin")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(!missing.exists(), "run must not download a missing dataset");
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("No such file")
     );
     fs::remove_dir_all(directory).unwrap();
 }

@@ -6,7 +6,7 @@ Shelby's PR memory gate is deterministic, model-free, and tied directly to the R
 
 The `shelby-memory-eval` crate runs two suites against a fresh in-memory Shelby database for every case:
 
-1. The five-case Shelby contract corpus calls the production `search_thoughts`, `get_brief`, and `select_context` handlers. It checks exact IDs, project isolation, trust fencing, lifecycle exclusions, and token-budget behavior.
+1. The 58-case Shelby corpus calls the production `search_thoughts`, `get_brief`, and `select_context` handlers. Six exact contracts check IDs, error categories, project isolation, trust fencing, lifecycle exclusions, and token-budget behavior. Another 52 curated hard confusers—13 per slice—cover same-topic/wrong-project, same-person/wrong-event, stale/current fact, and near-duplicate decisions with different outcomes.
 2. The 36-case LongMemEval-S subset calls the production `search_thoughts` handler. It contains six evidence-bearing cases from each of the six upstream question types and measures session retrieval with Precision@5, Recall@5, NDCG@10, and MRR@10.
 
 The public source is pinned to an immutable dataset commit, SHA-256 checksum, and MIT license in `tests/fixtures/LongMemEval PR-v1.json`. The 265 MB dataset stays in an external cache; it is never committed. Result artifacts contain case IDs, evidence IDs, ranked IDs, metrics, and resource counts—not question, answer, or conversation text.
@@ -18,13 +18,14 @@ The public source is pinned to an immutable dataset commit, SHA-256 checksum, an
 - A Shelby contract case fails.
 - Overall Recall@5 or NDCG@10 falls below the base revision.
 - A public category falls below its absolute policy floor.
+- A hard-confuser slice falls below its Recall@5 or NDCG@10 floor.
 - The two candidate runs produce different deterministic digests.
 - Dataset provenance, suite version, policy version, or retrieval configuration drifts from the base revision.
 - Total or per-case estimated tokens or serialized bytes exceed policy ceilings.
 
 There is deliberately no composite quality score. The comparison report lists the two primary deltas and every public case whose ranking changed, even when the gate passes.
 
-The public suite is a retrieval proxy, not a complete measure of memory quality or answer quality. Its initial FTS baseline is low outside the knowledge-update category; that is visible rather than normalized away. Future retrieval work should raise the category metrics, while the contract corpus protects Shelby-specific correctness that LongMemEval does not cover.
+The public suite is a retrieval proxy, not a complete measure of memory quality or answer quality. Its initial FTS baseline is low outside the knowledge-update category; that is visible rather than normalized away. Future retrieval work should raise the category metrics, while the exact contracts and four hard-confuser slices protect Shelby-specific correctness that LongMemEval does not cover.
 
 ## Run locally
 
@@ -63,4 +64,4 @@ cargo run -p shelby-memory-eval -- \
 
 Each run writes `results.json` and `report.md`; comparison writes `comparison.json` and `comparison.md`. CI uploads all four directories as the `memory-evaluation` artifact and places the comparison report in the workflow summary.
 
-On the evaluator's first merge only, the base branch cannot run a crate it does not contain. CI therefore compares the repeated candidate runs against the reviewed absolute floors. After that bootstrap, every affected pull request runs the base and candidate implementations separately and applies the full regression gate.
+On the evaluator's first merge only, the base branch cannot run a crate it does not contain. CI therefore compares the repeated candidate runs against the reviewed absolute floors. After that bootstrap, CI overlays the base evaluator and base fixtures onto the candidate memory engine, runs that base-owned oracle twice against the candidate code, runs the base code once, and performs comparison with the base binary and policy. An ordinary pull request therefore cannot weaken its own evaluator, corpus, public manifest, or gate policy. The check appears on every pull request so it can be required by branch protection; it exits immediately when no memory-impacting path changed.

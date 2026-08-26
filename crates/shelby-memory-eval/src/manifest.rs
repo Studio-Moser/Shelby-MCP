@@ -13,6 +13,9 @@ pub struct DatasetProvenance {
     pub revision: String,
     pub sha256: String,
     pub license: String,
+    pub license_url: Option<String>,
+    pub selection_method: Option<String>,
+    pub manifest_sha256: String,
     pub selected_ids: Vec<String>,
 }
 
@@ -43,12 +46,32 @@ pub struct CaseResult {
     pub passed: bool,
     pub ranked_ids: Vec<String>,
     pub relevant_ids: Vec<String>,
+    pub relevant_ranks: Vec<RelevantRank>,
     pub forbidden_ids: Vec<String>,
     pub metrics: Option<RetrievalMetrics>,
     pub estimated_tokens: u64,
     pub serialized_bytes: u64,
     pub failures: Vec<String>,
     pub output: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelevantRank {
+    pub id: String,
+    pub rank: Option<usize>,
+}
+
+pub fn relevant_ranks(ranked_ids: &[String], relevant_ids: &[String]) -> Vec<RelevantRank> {
+    relevant_ids
+        .iter()
+        .map(|id| RelevantRank {
+            id: id.clone(),
+            rank: ranked_ids
+                .iter()
+                .position(|ranked| ranked == id)
+                .map(|index| index + 1),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

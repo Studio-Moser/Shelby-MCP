@@ -88,8 +88,19 @@ pub fn render_comparison_report(comparison: &ComparisonReport) -> String {
     if comparison.case_changes.is_empty() {
         report.push_str("None.\n");
     } else {
-        for case in &comparison.case_changes {
-            let _ = writeln!(report, "- {case}");
+        for case in &comparison.case_diffs {
+            let _ = writeln!(
+                report,
+                "- {}: base {:?}; candidate {:?}",
+                case.id, case.base_ranked_ids, case.candidate_ranked_ids
+            );
+            for relevant in &case.relevant_rank_deltas {
+                let _ = writeln!(
+                    report,
+                    "  - relevant {}: base rank {:?}; candidate rank {:?}",
+                    relevant.id, relevant.base_rank, relevant.candidate_rank
+                );
+            }
         }
     }
     report
