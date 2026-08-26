@@ -7,10 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 shelby-memory = { path = "../shelby-memory" }
 thiserror.workspace = true
 uuid.workspace = true
-
