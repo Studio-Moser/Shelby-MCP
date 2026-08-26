@@ -6,28 +6,17 @@
     "url": "https://github.com/Studio-Moser/shelbymcp.git",
     "source": "github"
   },
-  "version": "0.2.4",
+  "version": "0.4.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "shelbymcp",
-      "version": "0.2.4",
+      "version": "0.4.0",
       "runtimeHint": "npx",
       "runtimeArguments": [
         { "type": "positional", "value": "shelbymcp" }
       ],
       "transport": { "type": "stdio" }
-    },
-    {
-      "registryType": "npm",
-      "identifier": "shelbymcp",
-      "version": "0.1.0",
-      "runtimeHint": "npx",
-      "runtimeArguments": [
-        { "type": "positional", "value": "shelbymcp" },
-        { "type": "flag", "name": "--transport", "value": "http" }
-      ],
-      "transport": { "type": "streamableHttp" }
     }
   ]
 }

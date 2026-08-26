@@ -1,39 +1,35 @@
-# Security
+# Security Policy
 
-This document describes the security controls ShelbyMCP currently enforces and the limits callers must account for.
+This policy describes the Rust implementation audited at commit [`d78c0ab`](https://github.com/Studio-Moser/Shelby-MCP/tree/d78c0ab0ed0e828ca5c409a906136af012c2e225). Pinned links identify the code supporting each claim.
 
-## Reporting a vulnerability
+## Report a vulnerability
 
-**Do not open a public issue.** Email security@studiomoser.com with a description, reproduction steps, and impact. We acknowledge reports within 48 hours, provide a status assessment within 7 days, and aim to fix critical issues within 14 days of triage. Please give us a chance to ship a fix before publishing details.
+Do not publish exploit details in an issue. Email [hello@studiomoser.com](mailto:hello@studiomoser.com), the contact address published on the [Studio Moser GitHub organization](https://github.com/Studio-Moser), with the affected version, reproduction steps, impact, and any suggested mitigation. Receipt and response time are not guaranteed.
 
-## What is enforced
+## Supported versions
 
-**Stdio is the default transport and exposes no network listener.** Without `--transport http` or `SHELBY_TRANSPORT=http`, the server connects only to its parent process over stdio (`src/index.ts:64-72`, `src/config.ts:67-75`).
+Security fixes are provided for the latest published release and the current `main` branch.
 
-**Bearer-token verification is constant-time.** When HTTP auth is enabled, `/mcp` accepts the configured API key or its derived access token and compares it with `crypto.timingSafeEqual` (`src/mcp/oauth.ts:28-52`, `src/mcp/http-transport.ts:129-141`).
+## Deployment boundaries
 
-**OAuth authorization validates registered redirect URIs and token exchange requires PKCE.** The authorization flow rejects unknown clients and redirect URI mismatches (`src/mcp/oauth.ts:278-288,318-323`). Authorization codes expire after 10 minutes, are single-use, and require an S256 verifier (`src/mcp/oauth.ts:339-345,373-399`). The authorization form accepts at most five POST submissions per 15 minutes per source IP; successful and failed submissions both count (`src/mcp/oauth.ts:160-173,302-308`).
+ShelbyMCP is a local, single-user memory service by default. Its SQLite database contains user-provided text and is not encrypted by ShelbyMCP. The process creates its directory and database through ordinary filesystem calls without setting an explicit restrictive mode, so operators must use operating-system account, file-permission, backup, and disk-encryption controls ([`db.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/db.rs#L15-L25)).
 
-**Specific memory fields have size limits.** Capture and update schemas cap content at 50,000 characters, summaries at 200, topics and people at 20 entries of 100 characters each, and bulk capture at 50 thoughts (`src/tools/helpers.ts:7-13`, `src/mcp/server.ts:161-199,366-374`). These are field limits, not a whole-request or storage quota. Fields such as metadata, source, project identifiers, and relationship arrays are not covered by a total input budget.
+- **Stdio is the default transport and has no listening socket.** Stdio has no per-caller authentication; any process able to launch and communicate with that server instance has the same tool access ([`config.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/config.rs#L139-L152)).
+- **HTTP is an explicit remote-capable mode.** Selecting HTTP without `HOST` or `--host` binds `0.0.0.0:3100`. Bind `127.0.0.1` for local-only use, and terminate TLS at a trusted proxy before exposing it to an untrusted network ([`config.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/config.rs#L180-L196)).
+- **HTTP authentication is opt-in.** Without `SHELBY_API_KEY`, `/mcp` is unauthenticated and OAuth endpoints return `503`; the server only emits a startup warning ([`http.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/http.rs#L91-L128), [startup](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/http.rs#L132-L143)).
+- **Allowed-host validation depends on the bind address.** Loopback/narrow-host configurations install an allowed-host list. Binding `0.0.0.0` or `::` disables that guard so operator-selected external hostnames work; do not treat it as a DNS-rebinding boundary in remote mode ([`http.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/http.rs#L69-L89)).
+- **Configured bearer authentication fails closed.** `/mcp` accepts the raw API key or its resource-bound derived access token. Equal-length values are compared without content-dependent early exit; different lengths are rejected immediately, so the helper is not constant-time across unequal lengths ([`http.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/http.rs#L39-L66), [`oauth.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/oauth.rs#L60-L70)).
+- **OAuth uses protected-resource discovery, S256 PKCE, registered redirect URIs, and resource-bound HMAC-derived tokens.** Dynamic client registration is open to callers that can reach `/register`; entering `SHELBY_API_KEY` at authorization is the approval gate. Client registrations persist in SQLite, while authorization codes and rate-limit state are process-local ([`oauth.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/oauth.rs#L21-L88), [routes](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/oauth.rs#L589-L602)). Access and refresh tokens do not expire or rotate; rotate `SHELBY_API_KEY` to revoke them.
+- **The server performs no inference and stores no model-provider credentials.** Embeddings, summaries, trust labels, and source labels are caller-supplied data.
+- **The npm launcher starts the native binary without a shell.** Client fallback installers preserve unrelated configuration, reject malformed structured files, and use atomic replacement for supported edits ([`bin/shelbymcp.js`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/bin/shelbymcp.js), [`config.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-integrations/src/config.rs)).
 
-**Non-trusted memories never reach `get_brief`.** The brief policy omits every candidate whose `trust_level` is not `trusted`, as well as wrong-project, consolidated, refuted, and non-normal-sensitivity candidates (`src/tools/brief-policy.ts:149-165`). Eligible summaries pass a heuristic gate for injection markers, secrets, personal data, and Markdown controls before rendering (`src/tools/brief-policy.ts:76-99`).
+## Memory poisoning and data limits
 
-**Non-trusted memory reads are fenced as data.** Full content and summaries from `get_thought`, graph reads, and selected context are wrapped in an `untrusted_memory` block with a caution preamble; list and search summaries receive the same treatment (`src/tools/trust-boundary.ts:4-45`, `src/tools/get.ts:29-38`, `src/tools/graph.ts:150-172`, `src/tools/context.ts:203-226`, `src/tools/list.ts:53-56`, `src/tools/search.ts:255-268`). Delimiter characters in untrusted text are escaped before the wrapper is constructed (`src/tools/trust-boundary.ts:19-38`).
+Multiple agents can write to the same database. A compromised client or prompt-injected workflow can capture adversarial text, modify trusted memories, or delete data. Per-caller authorization is outside the local single-user threat model; hosted operators must isolate databases and credentials per tenant.
 
-## What is not guaranteed
-
-**HTTP auth is opt-in and off by default.** Without `SHELBY_API_KEY`, `/mcp` accepts requests without authentication and emits only a startup warning (`src/mcp/http-transport.ts:129-141,178-185`).
-
-**HTTP mode binds `0.0.0.0` by default.** Starting HTTP transport without `HOST` or `--host` listens on all interfaces (`src/config.ts:100-114`). On a bare machine, bind `127.0.0.1` and set `SHELBY_API_KEY`.
-
-**There is no DNS-rebinding guard.** The HTTP transport does not validate `Host` or `Origin` before routing requests (`src/mcp/http-transport.ts:110-176`).
-
-**Captured thoughts default to `trusted`.** When a caller omits `trust_level`, the database write path stores `trusted` (`src/mcp/server.ts:168-176`, `src/db/thoughts.ts:187-205`). A compromised or prompt-injected client can therefore create memories eligible for future briefs unless it explicitly marks them `unverified` or `external`.
-
-**OAuth tokens are static and do not expire.** Access and refresh tokens are deterministic HMACs of the API key (`src/mcp/oauth.ts:28-34`). Revocation requires changing `SHELBY_API_KEY`. Dynamic client registration is open to callers that can reach `/register`; the API key entered at `/authorize` remains the authorization gate (`src/mcp/oauth.ts:232-267,302-353`).
-
-**Database file permissions are not explicitly restricted.** The server creates the database directory and SQLite file using the process umask (`src/db/database.ts:10-18`). Set restrictive filesystem permissions if other local users are in your threat model.
-
-**There is no semantic filtering on capture.** Stored content is not classified or rewritten for prompt injection. Trust levels control where content flows, not what the content says.
-
-**Stdio has no per-caller authorization.** All processes able to launch and communicate with the local stdio server have the same access.
+- **Trust and source labels are caller-asserted.** `capture_thought` accepts `trust_level` and `source_agent`, and omitted trust defaults to `trusted`. Any caller with tool access can therefore create content eligible for future briefs; trust labels are not source authentication ([`schemas.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-mcp/src/schemas.rs#L45-L66), [`tools.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/tools.rs#L476-L490)).
+- **Automatic briefs exclude non-trusted and sensitive candidates.** The deterministic policy also rejects out-of-scope, consolidated, refuted, ineligible, and missing-summary records before rendering ([`brief.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/brief.rs#L350-L402)). This limits amplification but does not protect against a caller that labels adversarial content trusted.
+- **Untrusted text and summaries are fenced and delimiter-escaped on retrieval.** Structured fields such as topics, people, source, and metadata remain ordinary JSON fields; callers must treat the whole record as data when its trust level is not trusted ([`trust.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/trust.rs#L9-L43), [`tools.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/tools.rs#L1180-L1193)). Fencing is a client-facing warning and encoding boundary, not semantic classification.
+- **Common memory fields are bounded.** Content is capped at 50,000 UTF-16 code units, summaries at 200, topics and people at 20 entries of 100, and bulk capture at 50 thoughts ([`limits.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/limits.rs#L1-L18), [`tools.rs`](https://github.com/Studio-Moser/Shelby-MCP/blob/d78c0ab0ed0e828ca5c409a906136af012c2e225/crates/shelby-memory/src/tools.rs#L68-L130)). These are field limits, not a whole-request, metadata, relationship-array, rate, or storage quota.
+- **Project scoping and pagination reduce accidental amplification.** They do not stop an authorized caller from using explicit cross-project modes or destructive tools. Tool annotations inform clients; they do not enforce human approval.
+- **There is no semantic filtering on capture.** The server does not classify or rewrite stored natural language for prompt injection. Users and agents must review trusted captures, destructive operations, and backups.

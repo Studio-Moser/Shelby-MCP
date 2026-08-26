@@ -1,55 +1,38 @@
 # Contributing to ShelbyMCP
 
-Thanks for your interest in contributing! ShelbyMCP is an open-source project and we welcome contributions from the community.
+Open an issue before a substantial change so the behavior and compatibility contract can be agreed before implementation.
 
-## How to Contribute
+## Development setup
 
-### Issues First
-
-Before writing code, open an issue describing what you want to do. This lets us discuss the approach before you invest time.
-
-- **Bug reports**: Include steps to reproduce, expected vs. actual behavior, and your environment (OS, Node version, AI tool).
-- **Feature requests**: Describe the use case, not just the solution. What problem are you trying to solve?
-- **New Forage tasks**: Propose new scheduled enrichment tasks with a clear description of what they do and why they're valuable.
-
-### Pull Request Process
-
-1. Fork the repo and create a branch from `main`
-2. Write your code with tests
-3. Run `npm test` and ensure all tests pass
-4. Run `npm run lint` and fix any warnings
-5. Open a PR that references the issue (`Closes #N`)
-6. Fill out the PR template
-
-### What We're Looking For
-
-- **New MCP tools** — Additional ways to query and manipulate the memory graph
-- **Forage skill improvements** — Better enrichment tasks, smarter consolidation
-- **Agent setup guides** — Documentation for connecting new AI tools
-- **Bug fixes** — With tests that demonstrate the fix
-- **Performance improvements** — With benchmarks showing the improvement
-
-### Code Style
-
-- TypeScript strict mode
-- ESM modules
-- Zod schemas for tool input validation
-- Descriptive variable and function names
-- Comments for non-obvious logic
-- Table-driven tests where appropriate
-
-## Development Setup
+Install stable Rust and Node.js 20 or newer, then run:
 
 ```bash
 git clone https://github.com/Studio-Moser/shelbymcp.git
 cd shelbymcp
-npm install
-npm run build
+npm ci
+cargo test --workspace
 npm test
 ```
 
-Requires Node.js 20+.
+Rust is the product implementation. Node is used only for the npm launcher and packaging checks.
 
-## License
+## Pull requests
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+1. Branch from `main` and keep the change focused.
+2. Add a test that demonstrates new behavior or the fixed failure.
+3. Preserve schema-v18 and MCP contract compatibility unless the change explicitly includes a migration and contract update.
+4. Run `cargo fmt --check`, clippy with warnings denied, all Rust tests, `npm test`, and `npm audit`.
+5. Update user-facing documentation when commands, packages, or behavior change.
+6. Fill out the pull request template and link the issue.
+
+See [Development](docs/DEVELOPMENT.md) for package-specific commands and repository structure.
+
+## Code style
+
+- Follow `rustfmt` and keep clippy clean with `-D warnings`.
+- Use explicit error types and preserve context without exposing secrets.
+- Keep stdout protocol-safe; send operational logs to stderr.
+- Prefer table-driven tests for contracts and fixtures for cross-client behavior.
+- Do not add inference, model authentication, or implicit writes to global agent instructions.
+
+Contributions are licensed under the [MIT License](LICENSE).

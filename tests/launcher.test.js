@@ -1,0 +1,80 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { launch, resolveBinary, selectPackage } from "../bin/shelbymcp.js";
+
+const mappings = [
+  ["darwin", "arm64", "shelbymcp-darwin-arm64", "shelby-mcp"],
+  ["darwin", "x64", "shelbymcp-darwin-x64", "shelby-mcp"],
+  ["linux", "arm64", "shelbymcp-linux-arm64", "shelby-mcp"],
+  ["linux", "x64", "shelbymcp-linux-x64", "shelby-mcp"],
+  ["win32", "x64", "shelbymcp-win32-x64", "shelby-mcp.exe"],
+];
+
+test("maps every supported platform and architecture", () => {
+  for (const [platform, arch, packageName] of mappings) {
+    assert.equal(selectPackage(platform, arch), packageName);
+  }
+  assert.throws(() => selectPackage("freebsd", "x64"), /Unsupported platform/);
+  assert.throws(() => selectPackage("darwin", "ia32"), /Unsupported platform/);
+});
+
+test("resolves the executable beside the platform package manifest", () => {
+  for (const [platform, , packageName, executable] of mappings) {
+    assert.equal(
+      resolveBinary(packageName, () => `/modules/${packageName}/package.json`, platform),
+      `/modules/${packageName}/bin/${executable}`,
+    );
+  }
+});
+
+test("reports a missing optional platform package", () => {
+  assert.throws(
+    () => resolveBinary("shelbymcp-linux-x64", () => {
+      throw Object.assign(new Error("not found"), { code: "MODULE_NOT_FOUND" });
+    }, "linux"),
+    /npm install did not include shelbymcp-linux-x64/,
+  );
+});
+
+test("forwards arguments without a shell and propagates the exit status", () => {
+  let spawnCall;
+  const status = launch(["serve", "--verbose"], {
+    platform: "darwin",
+    arch: "arm64",
+    resolve: () => "/modules/shelbymcp-darwin-arm64/package.json",
+    spawnSync(binary, argv, options) {
+      spawnCall = { binary, argv, options };
+      return { status: 7, signal: null };
+    },
+  });
+
+  assert.deepEqual(spawnCall, {
+    binary: "/modules/shelbymcp-darwin-arm64/bin/shelby-mcp",
+    argv: ["serve", "--verbose"],
+    options: { stdio: "inherit", shell: false },
+  });
+  assert.equal(status, 7);
+});
+
+test("converts a terminating signal to the conventional exit status", () => {
+  assert.equal(launch([], {
+    platform: "linux",
+    arch: "x64",
+    resolve: () => "/modules/shelbymcp-linux-x64/package.json",
+    spawnSync: () => ({ status: null, signal: "SIGTERM" }),
+    signalNumbers: { SIGTERM: 15 },
+  }), 143);
+});
+
+test("reports spawn failures and returns one", () => {
+  const errors = [];
+  assert.equal(launch([], {
+    platform: "linux",
+    arch: "x64",
+    resolve: () => "/modules/shelbymcp-linux-x64/package.json",
+    spawnSync: () => ({ error: new Error("cannot execute"), status: null, signal: null }),
+    writeError: (message) => errors.push(message),
+  }), 1);
+  assert.match(errors.join(""), /cannot execute/);
+});
