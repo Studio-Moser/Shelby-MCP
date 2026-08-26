@@ -62,7 +62,7 @@ SHELBY_API_KEY="replace-with-a-long-random-secret" \
   npx -y shelbymcp --transport http --host 127.0.0.1 --port 3100
 ```
 
-Endpoints include `/mcp`, `/health`, and MCP discovery documents. Setting `SHELBY_API_KEY` enables bearer authentication and the OAuth 2.1 authorization-code flow with PKCE, dynamic client registration, and refresh tokens. Without it, HTTP runs unauthenticated and the OAuth endpoints return `503`; do not bind an unauthenticated server to an untrusted network.
+Endpoints include `/mcp`, `/health`, and MCP discovery documents. Setting `SHELBY_API_KEY` enables bearer authentication and an OAuth authorization-code flow with protected-resource discovery, S256 PKCE, dynamic client registration, and resource-bound access and refresh tokens. Tokens do not expire or rotate; rotate `SHELBY_API_KEY` to revoke them. Without it, HTTP runs unauthenticated and the OAuth endpoints return `503`; do not bind an unauthenticated server to an untrusted network.
 
 ## Build from source
 

@@ -49,7 +49,7 @@ Canonical project IDs are stable UUIDv5 values derived from normalized repositor
 
 Stdio is the default and reserves stdout for JSON-RPC. Streamable HTTP exposes `/mcp`, `/health`, and discovery endpoints. Local sessions are managed in-process by `rmcp`.
 
-When `SHELBY_API_KEY` is configured, every `/mcp` request requires a valid bearer token. The same secret enables OAuth 2.1 metadata, dynamic client registration, authorization code with PKCE, short-lived access tokens, and refresh-token rotation. Token state is stored in SQLite. When no secret is configured, OAuth endpoints return `503` and HTTP is unauthenticated.
+When `SHELBY_API_KEY` is configured, every `/mcp` request requires a valid bearer token. The same secret enables OAuth authorization-server and protected-resource metadata, dynamic client registration, authorization code with S256 PKCE, and resource-bound HMAC-derived access and refresh tokens. Client registrations are stored in SQLite; authorization codes and rate-limit state are in memory. Tokens do not expire or rotate, so rotating `SHELBY_API_KEY` revokes them. When no secret is configured, OAuth endpoints return `503` and HTTP is unauthenticated.
 
 ## Distribution
 

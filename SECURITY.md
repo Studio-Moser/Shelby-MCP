@@ -10,7 +10,8 @@ ShelbyMCP is a local, single-user memory service by default. Its SQLite database
 
 - Stdio is the default transport and has no listening socket.
 - Streamable HTTP may be exposed deliberately. Set `SHELBY_API_KEY`, bind to the narrowest interface, and terminate TLS at a trusted proxy for remote use.
-- With `SHELBY_API_KEY` set, `/mcp` requires a bearer token and the OAuth 2.1 flow uses authorization code with PKCE, dynamic client registration, HMAC-derived tokens, and refresh-token rotation.
+- With `SHELBY_API_KEY` set, `/mcp` requires a bearer token. The OAuth authorization-code flow uses protected-resource discovery, S256 PKCE, dynamic client registration, and resource-bound HMAC-derived access and refresh tokens.
+- OAuth client registrations are stored in SQLite. Authorization codes and rate-limit state are held in memory. Tokens do not expire or rotate; rotate `SHELBY_API_KEY` to revoke them.
 - Without `SHELBY_API_KEY`, HTTP is unauthenticated and OAuth endpoints return `503`.
 - The server performs no inference and stores no model-provider credentials.
 - npm launches the native binary without a shell. Client fallback installers preserve unrelated configuration and refuse to overwrite malformed JSON.
