@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use shelby_memory_eval::metrics::score_ranking;
+use shelby_memory_eval::metrics::{score_pr_ranking, score_ranking};
 
 #[test]
 fn scores_a_hand_checked_multi_evidence_ranking() {
@@ -13,6 +13,19 @@ fn scores_a_hand_checked_multi_evidence_ranking() {
     assert!((score.recall_at_k - 0.5).abs() < 1e-12);
     assert!((score.ndcg_at_k - 0.386_852_807_234_541_63).abs() < 1e-12);
     assert!((score.mrr_at_k - 0.5).abs() < 1e-12);
+}
+
+#[test]
+fn pr_metrics_use_the_declared_cutoffs_independently() {
+    let ranked = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map(str::to_owned);
+    let relevant = ["b", "g"].map(str::to_owned).into_iter().collect();
+
+    let score = score_pr_ranking(&ranked, &relevant).expect("valid ranking");
+
+    assert!((score.precision_at_5 - 0.2).abs() < 1e-12);
+    assert!((score.recall_at_5 - 0.5).abs() < 1e-12);
+    assert!((score.ndcg_at_10 - 0.591_235_204_823_027_7).abs() < 1e-12);
+    assert!((score.mrr_at_10 - 0.5).abs() < 1e-12);
 }
 
 #[test]
