@@ -35,3 +35,6 @@ coverage/
 *.tgz
 /.mcpregistry_registry_token
 /.mcpregistry_github_token
+
+# Rust
+target/
