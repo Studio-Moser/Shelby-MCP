@@ -1,14 +1,14 @@
-//! OAuth 2.1 (authorization code + PKCE, dynamic client registration) in front
-//! of the HTTP transport. The single operator API key authorizes the login form;
-//! access/refresh tokens are HMAC-derived from it, matching the TS server.
+//! OAuth authorization code + PKCE, dynamic client registration, and MCP OAuth
+//! discovery in front of the HTTP transport. The operator API key authorizes
+//! the login form; resource-bound access/refresh tokens are HMAC-derived from it.
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{Html, IntoResponse, Json, Redirect, Response};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{Html, IntoResponse, Json, Response};
 use axum::{Form, Router, routing::get};
 use base64::Engine;
 use hmac::{Hmac, Mac};
@@ -18,25 +18,43 @@ use sha2::{Digest, Sha256};
 
 use crate::server::SharedMemory;
 
-pub fn derive_access_token(api_key: &str) -> String {
-    derive(api_key, b"access")
+pub fn derive_access_token(api_key: &str, resource: &str) -> String {
+    derive(api_key, b"access", &[resource])
 }
 
-pub fn derive_refresh_token(api_key: &str) -> String {
-    derive(api_key, b"refresh")
+pub fn derive_refresh_token(api_key: &str, client_id: &str, resource: &str) -> String {
+    derive(api_key, b"refresh", &[client_id, resource])
 }
 
-fn derive(api_key: &str, label: &[u8]) -> String {
+fn derive(api_key: &str, label: &[u8], values: &[&str]) -> String {
     let mut mac =
         Hmac::<Sha256>::new_from_slice(api_key.as_bytes()).expect("hmac accepts any key length");
     mac.update(label);
+    for value in values {
+        mac.update(&[0]);
+        mac.update(value.as_bytes());
+    }
     format!("{:x}", mac.finalize().into_bytes())
 }
 
 pub fn verify_pkce(code_verifier: &str, code_challenge: &str) -> bool {
+    if !(43..=128).contains(&code_verifier.len())
+        || !code_verifier
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
+    {
+        return false;
+    }
     let computed = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(Sha256::digest(code_verifier.as_bytes()));
-    computed == code_challenge
+    safe_equal(&computed, code_challenge)
+}
+
+fn valid_code_challenge(value: &str) -> bool {
+    value.len() == 43
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 pub fn safe_equal(a: &str, b: &str) -> bool {
@@ -47,15 +65,16 @@ pub fn safe_equal(a: &str, b: &str) -> bool {
             == 0
 }
 
-/// A bearer is valid when it is the API key itself or the derived access token.
-pub fn verify_bearer_token(token: &str, api_key: &str) -> bool {
-    safe_equal(token, api_key) || safe_equal(token, &derive_access_token(api_key))
+/// A bearer is valid when it is the API key itself or the resource-bound access token.
+pub fn verify_bearer_token(token: &str, api_key: &str, resource: &str) -> bool {
+    safe_equal(token, api_key) || safe_equal(token, &derive_access_token(api_key, resource))
 }
 
 struct AuthCode {
     client_id: String,
     code_challenge: String,
     redirect_uri: String,
+    resource: String,
     expires_at: Instant,
 }
 
@@ -120,7 +139,7 @@ fn json_error(status: StatusCode, error: &str, description: Option<&str>) -> Res
     (status, Json(body)).into_response()
 }
 
-fn base_url(headers: &HeaderMap) -> String {
+pub(crate) fn base_url(headers: &HeaderMap) -> String {
     let proto = headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
@@ -130,6 +149,17 @@ fn base_url(headers: &HeaderMap) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("localhost");
     format!("{proto}://{host}")
+}
+
+pub(crate) fn mcp_resource(headers: &HeaderMap) -> String {
+    format!("{}/mcp", base_url(headers))
+}
+
+pub(crate) fn protected_resource_metadata_url(headers: &HeaderMap) -> String {
+    format!(
+        "{}/.well-known/oauth-protected-resource/mcp",
+        base_url(headers)
+    )
 }
 
 async fn metadata(headers: HeaderMap) -> Response {
@@ -143,6 +173,16 @@ async fn metadata(headers: HeaderMap) -> Response {
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
+    }))
+    .into_response()
+}
+
+async fn protected_resource_metadata(headers: HeaderMap) -> Response {
+    let base = base_url(&headers);
+    Json(json!({
+        "resource": mcp_resource(&headers),
+        "authorization_servers": [base],
+        "bearer_methods_supported": ["header"],
     }))
     .into_response()
 }
@@ -202,11 +242,17 @@ async fn register(State(st): State<OAuthState>, body: String) -> Response {
 #[derive(Deserialize, Default)]
 struct AuthorizeQuery {
     #[serde(default)]
+    response_type: String,
+    #[serde(default)]
     client_id: String,
     #[serde(default)]
     redirect_uri: String,
     #[serde(default)]
     code_challenge: String,
+    #[serde(default)]
+    code_challenge_method: String,
+    #[serde(default)]
+    resource: String,
     #[serde(default)]
     state: String,
 }
@@ -214,11 +260,17 @@ struct AuthorizeQuery {
 #[derive(Deserialize, Default)]
 struct AuthorizeForm {
     #[serde(default)]
+    response_type: String,
+    #[serde(default)]
     client_id: String,
     #[serde(default)]
     redirect_uri: String,
     #[serde(default)]
     code_challenge: String,
+    #[serde(default)]
+    code_challenge_method: String,
+    #[serde(default)]
+    resource: String,
     #[serde(default)]
     state: String,
     #[serde(default)]
@@ -265,7 +317,10 @@ fn render_form(client_name: &str, q: &AuthorizeQuery, error: Option<&str>) -> St
     <div class="tagline"><span class="client">{client}</span> is requesting access to your memory.</div>
     <form method="POST">
       <input type="hidden" name="client_id" value="{client_id}">
+      <input type="hidden" name="response_type" value="{response_type}">
       <input type="hidden" name="code_challenge" value="{code_challenge}">
+      <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
+      <input type="hidden" name="resource" value="{resource}">
       <input type="hidden" name="redirect_uri" value="{redirect_uri}">
       <input type="hidden" name="state" value="{state}">
       <label for="api_key">API Key</label>
@@ -278,13 +333,48 @@ fn render_form(client_name: &str, q: &AuthorizeQuery, error: Option<&str>) -> St
 </html>"#,
         client = esc(client_name),
         client_id = esc(&q.client_id),
+        response_type = esc(&q.response_type),
         code_challenge = esc(&q.code_challenge),
+        code_challenge_method = esc(&q.code_challenge_method),
+        resource = esc(&q.resource),
         redirect_uri = esc(&q.redirect_uri),
         state = esc(&q.state),
     )
 }
 
-async fn authorize_get(State(st): State<OAuthState>, Query(q): Query<AuthorizeQuery>) -> Response {
+fn validate_authorize_request(q: &AuthorizeQuery, headers: &HeaderMap) -> Option<Response> {
+    if q.response_type != "code" {
+        return Some(json_error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_response_type",
+            Some("response_type must be code"),
+        ));
+    }
+    if q.code_challenge_method != "S256" || !valid_code_challenge(&q.code_challenge) {
+        return Some(json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            Some("A valid S256 code_challenge is required"),
+        ));
+    }
+    if q.resource != mcp_resource(headers) {
+        return Some(json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_target",
+            Some("resource must identify this MCP endpoint"),
+        ));
+    }
+    None
+}
+
+async fn authorize_get(
+    State(st): State<OAuthState>,
+    headers: HeaderMap,
+    Query(q): Query<AuthorizeQuery>,
+) -> Response {
+    if let Some(error) = validate_authorize_request(&q, &headers) {
+        return error;
+    }
     let Some((name, uris)) = st.client(&q.client_id) else {
         return json_error(
             StatusCode::BAD_REQUEST,
@@ -310,6 +400,7 @@ async fn authorize_get(State(st): State<OAuthState>, Query(q): Query<AuthorizeQu
 async fn authorize_post(
     State(st): State<OAuthState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Form(f): Form<AuthorizeForm>,
 ) -> Response {
     if !st.check_rate_limit(&addr.ip().to_string()) {
@@ -326,11 +417,17 @@ async fn authorize_post(
         return json_error(StatusCode::BAD_REQUEST, "invalid_request", None);
     }
     let q = AuthorizeQuery {
+        response_type: f.response_type.clone(),
         client_id: f.client_id.clone(),
         redirect_uri: f.redirect_uri.clone(),
         code_challenge: f.code_challenge.clone(),
+        code_challenge_method: f.code_challenge_method.clone(),
+        resource: f.resource.clone(),
         state: f.state.clone(),
     };
+    if let Some(error) = validate_authorize_request(&q, &headers) {
+        return error;
+    }
     if !safe_equal(&f.api_key, &st.api_key) {
         return Html(render_form(
             name.as_deref().unwrap_or("Unknown Client"),
@@ -346,6 +443,7 @@ async fn authorize_post(
             client_id: f.client_id,
             code_challenge: f.code_challenge,
             redirect_uri: f.redirect_uri.clone(),
+            resource: f.resource,
             expires_at: Instant::now() + CODE_TTL,
         },
     );
@@ -361,7 +459,16 @@ async fn authorize_post(
         url_encode(&code),
         url_encode(&f.state)
     );
-    Redirect::to(&location).into_response()
+    let Ok(location) = HeaderValue::from_str(&location) else {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            Some("redirect_uri cannot be represented as a Location header"),
+        );
+    };
+    let mut response = StatusCode::FOUND.into_response();
+    response.headers_mut().insert(header::LOCATION, location);
+    response
 }
 
 fn url_encode(s: &str) -> String {
@@ -391,11 +498,30 @@ struct TokenForm {
     redirect_uri: String,
     #[serde(default)]
     refresh_token: String,
+    #[serde(default)]
+    resource: String,
 }
 
-async fn token(State(st): State<OAuthState>, Form(f): Form<TokenForm>) -> Response {
-    let issue = || {
-        Json(json!({ "access_token": derive_access_token(&st.api_key), "token_type": "Bearer", "refresh_token": derive_refresh_token(&st.api_key) })).into_response()
+async fn token(
+    State(st): State<OAuthState>,
+    headers: HeaderMap,
+    Form(f): Form<TokenForm>,
+) -> Response {
+    let expected_resource = mcp_resource(&headers);
+    if f.resource != expected_resource {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_target",
+            Some("resource must identify this MCP endpoint"),
+        );
+    }
+    let issue = |client_id: &str| {
+        Json(json!({
+            "access_token": derive_access_token(&st.api_key, &expected_resource),
+            "token_type": "Bearer",
+            "refresh_token": derive_refresh_token(&st.api_key, client_id, &expected_resource)
+        }))
+        .into_response()
     };
     match f.grant_type.as_str() {
         "authorization_code" => {
@@ -407,7 +533,10 @@ async fn token(State(st): State<OAuthState>, Form(f): Form<TokenForm>) -> Respon
                     Some("Invalid or expired code"),
                 );
             };
-            if stored.client_id != f.client_id || stored.redirect_uri != f.redirect_uri {
+            if stored.client_id != f.client_id
+                || stored.redirect_uri != f.redirect_uri
+                || stored.resource != f.resource
+            {
                 return json_error(
                     StatusCode::BAD_REQUEST,
                     "invalid_grant",
@@ -431,10 +560,13 @@ async fn token(State(st): State<OAuthState>, Form(f): Form<TokenForm>) -> Respon
                 );
             }
             codes.remove(&f.code);
-            issue()
+            issue(&f.client_id)
         }
         "refresh_token" => {
-            if !safe_equal(&f.refresh_token, &derive_refresh_token(&st.api_key)) {
+            if !safe_equal(
+                &f.refresh_token,
+                &derive_refresh_token(&st.api_key, &f.client_id, &expected_resource),
+            ) {
                 return json_error(
                     StatusCode::BAD_REQUEST,
                     "invalid_grant",
@@ -444,7 +576,7 @@ async fn token(State(st): State<OAuthState>, Form(f): Form<TokenForm>) -> Respon
             if st.client(&f.client_id).is_none() {
                 return json_error(StatusCode::BAD_REQUEST, "invalid_client", None);
             }
-            issue()
+            issue(&f.client_id)
         }
         _ => json_error(StatusCode::BAD_REQUEST, "unsupported_grant_type", None),
     }
@@ -454,6 +586,14 @@ async fn token(State(st): State<OAuthState>, Form(f): Form<TokenForm>) -> Respon
 pub fn router(state: OAuthState) -> Router {
     Router::new()
         .route("/.well-known/oauth-authorization-server", get(metadata))
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/mcp",
+            get(protected_resource_metadata),
+        )
         .route("/register", axum::routing::post(register))
         .route("/authorize", get(authorize_get).post(authorize_post))
         .route("/token", axum::routing::post(token))
@@ -467,16 +607,29 @@ mod tests {
     #[test]
     fn tokens_pkce_and_bearer_match_the_ts_engine() {
         // Values computed with node: crypto.createHmac('sha256','k').update('access').digest('hex')
-        assert_eq!(derive_access_token("k").len(), 64);
-        assert_ne!(derive_access_token("k"), derive_refresh_token("k"));
+        let resource = "https://example.com/mcp";
+        assert_eq!(derive_access_token("k", resource).len(), 64);
+        assert_ne!(
+            derive_access_token("k", resource),
+            derive_refresh_token("k", "client", resource)
+        );
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
         let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(Sha256::digest(verifier.as_bytes()));
         assert!(verify_pkce(verifier, &challenge));
         assert!(!verify_pkce("nope", &challenge));
-        assert!(verify_bearer_token("k", "k"));
-        assert!(verify_bearer_token(&derive_access_token("k"), "k"));
-        assert!(!verify_bearer_token("kk", "k"));
+        assert!(verify_bearer_token("k", "k", resource));
+        assert!(verify_bearer_token(
+            &derive_access_token("k", resource),
+            "k",
+            resource
+        ));
+        assert!(!verify_bearer_token("kk", "k", resource));
+        assert!(!verify_bearer_token(
+            &derive_access_token("k", "https://other.example/mcp"),
+            "k",
+            resource
+        ));
         assert_eq!(url_encode("a b/c"), "a%20b%2Fc");
     }
 }
