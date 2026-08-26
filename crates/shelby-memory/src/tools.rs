@@ -157,6 +157,116 @@ pub struct CaptureArgs {
     pub thoughts: Option<Vec<CaptureItem>>,
 }
 
+pub fn validate_capture_thought_input(args: &Value) -> Result<CaptureArgs, ToolResult> {
+    let bulk = args.get("thoughts").and_then(Value::as_array);
+    if let Some(thoughts) = bulk {
+        if thoughts.is_empty() {
+            return Err(error("invalid_input", "thoughts array is empty"));
+        }
+        if thoughts.len() > MAX_BULK_THOUGHTS {
+            return Err(error(
+                "invalid_input",
+                format!(
+                    "bulk capture exceeds maximum of {MAX_BULK_THOUGHTS} thoughts per call (got {})",
+                    thoughts.len()
+                ),
+            ));
+        }
+        for (index, thought) in thoughts.iter().enumerate() {
+            if thought
+                .get("content")
+                .and_then(Value::as_str)
+                .filter(|content| !content.is_empty())
+                .is_none()
+            {
+                return Err(error(
+                    "invalid_input",
+                    format!("thoughts[{index}].content is required and must be a string"),
+                ));
+            }
+            if thought
+                .get("summary")
+                .and_then(Value::as_str)
+                .filter(|summary| !summary.trim().is_empty())
+                .is_none()
+            {
+                return Err(error(
+                    "invalid_input",
+                    format!("thoughts[{index}].summary is required and must be a non-empty string"),
+                ));
+            }
+        }
+    } else {
+        if args
+            .get("content")
+            .and_then(Value::as_str)
+            .filter(|content| !content.is_empty())
+            .is_none()
+        {
+            return Err(error(
+                "invalid_input",
+                "content is required and must be a string. For bulk capture, provide a thoughts array.",
+            ));
+        }
+        if args
+            .get("summary")
+            .and_then(Value::as_str)
+            .filter(|summary| !summary.trim().is_empty())
+            .is_none()
+        {
+            return Err(error(
+                "invalid_input",
+                "summary is required and must be a non-empty string",
+            ));
+        }
+    }
+
+    let mut parsed: CaptureArgs = parse_args(args)?;
+    if let Some(thoughts) = parsed.thoughts.as_mut() {
+        for (index, thought) in thoughts.iter_mut().enumerate() {
+            let summary = thought
+                .summary
+                .as_mut()
+                .expect("preflight requires summary");
+            *summary = summary.trim().to_string();
+            if let Some(message) = validate_lengths(
+                thought
+                    .content
+                    .as_deref()
+                    .expect("preflight requires content"),
+                Some(summary),
+                thought.topics.as_deref(),
+                thought.people.as_deref(),
+            ) {
+                return Err(error(
+                    "invalid_input",
+                    format!("thoughts[{index}].{message}"),
+                ));
+            }
+        }
+    } else {
+        let summary = parsed
+            .single
+            .summary
+            .as_mut()
+            .expect("preflight requires summary");
+        *summary = summary.trim().to_string();
+        if let Some(message) = validate_lengths(
+            parsed
+                .single
+                .content
+                .as_deref()
+                .expect("preflight requires content"),
+            Some(summary),
+            parsed.single.topics.as_deref(),
+            parsed.single.people.as_deref(),
+        ) {
+            return Err(error("invalid_input", message));
+        }
+    }
+    Ok(parsed)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct ResolvedRef {
     project_id: String,
@@ -559,40 +669,12 @@ fn in_transaction<T>(m: &Memory, f: impl FnOnce() -> crate::Result<T>) -> crate:
 }
 
 pub fn capture_thought(m: &Memory, args: &Value, detected: &ScopeResolution) -> ToolResult {
-    let a: CaptureArgs = match parse_args(args) {
+    let a = match validate_capture_thought_input(args) {
         Ok(a) => a,
         Err(e) => return e,
     };
     if let Some(thoughts) = &a.thoughts {
-        if thoughts.is_empty() {
-            return error("invalid_input", "thoughts array is empty");
-        }
-        if thoughts.len() > MAX_BULK_THOUGHTS {
-            return error(
-                "invalid_input",
-                format!(
-                    "bulk capture exceeds maximum of {MAX_BULK_THOUGHTS} thoughts per call (got {})",
-                    thoughts.len()
-                ),
-            );
-        }
         let mut scopes = Vec::with_capacity(thoughts.len());
-        for t in thoughts {
-            let Some(content) = t.content.as_deref().filter(|c| !c.is_empty()) else {
-                return error(
-                    "invalid_input",
-                    "Each thought in bulk capture must have a content string",
-                );
-            };
-            if let Some(msg) = validate_lengths(
-                content,
-                t.summary.as_deref(),
-                t.topics.as_deref(),
-                t.people.as_deref(),
-            ) {
-                return error("invalid_input", msg);
-            }
-        }
         for t in thoughts {
             match capture_scope(m, t, detected) {
                 Ok(s) => scopes.push(s),
@@ -609,20 +691,6 @@ pub fn capture_thought(m: &Memory, args: &Value, detected: &ScopeResolution) -> 
         return success(json!({ "captured": results.len(), "thoughts": results }));
     }
     let item = &a.single;
-    let Some(content) = item.content.as_deref().filter(|c| !c.is_empty()) else {
-        return error(
-            "invalid_input",
-            "content is required and must be a string. For bulk capture, provide a thoughts array.",
-        );
-    };
-    if let Some(msg) = validate_lengths(
-        content,
-        item.summary.as_deref(),
-        item.topics.as_deref(),
-        item.people.as_deref(),
-    ) {
-        return error("invalid_input", msg);
-    }
     let scope = match capture_scope(m, item, detected) {
         Ok(s) => s,
         Err(e) => return e,
@@ -1712,7 +1780,12 @@ mod tests {
             Some(pid.as_str())
         );
 
-        let r = capture_thought(&m, &json!({ "content": content }), &detected).json();
+        let r = capture_thought(
+            &m,
+            &json!({ "content": content, "summary": "tabs" }),
+            &detected,
+        )
+        .json();
         assert_eq!(r["action"], "reinforced");
         assert_eq!(r["id"], id);
         assert_eq!(
@@ -1723,7 +1796,7 @@ mod tests {
             1
         );
 
-        let r = capture_thought(&m, &json!({ "content": content, "topics": ["Style"], "metadata": { "extra": { "sensitivity": "private" } } }), &detected).json();
+        let r = capture_thought(&m, &json!({ "content": content, "summary": "tabs", "topics": ["Style"], "metadata": { "extra": { "sensitivity": "private" } } }), &detected).json();
         assert_eq!(r["action"], "merged");
         let t = get_thought(&m.conn, &id).unwrap().unwrap();
         assert_eq!(t.topics, vec!["style"]);
@@ -1731,7 +1804,7 @@ mod tests {
 
         let r = capture_thought(
             &m,
-            &json!({ "content": "in this repo we always prefer spaces over tabs" }),
+            &json!({ "content": "in this repo we always prefer spaces over tabs", "summary": "spaces" }),
             &detected,
         )
         .json();
@@ -1743,13 +1816,82 @@ mod tests {
     }
 
     #[test]
+    fn capture_requires_and_normalizes_summaries_before_writing() {
+        let m = Memory::open_in_memory().unwrap();
+
+        for args in [
+            json!({ "content": "Missing summary", "visibility": "shared" }),
+            json!({ "content": "Blank summary", "summary": "   ", "visibility": "shared" }),
+            json!({ "content": "Non-string summary", "summary": 42, "visibility": "shared" }),
+        ] {
+            let result = capture_thought(&m, &args, &ScopeResolution::Unresolved);
+            assert!(result.is_error, "{args}");
+            assert_eq!(result.json()["error"], "invalid_input");
+        }
+
+        for thought in [
+            json!({ "content": "Missing summary", "visibility": "shared" }),
+            json!({ "content": "Blank summary", "summary": "   ", "visibility": "shared" }),
+            json!({ "content": "Non-string summary", "summary": 42, "visibility": "shared" }),
+        ] {
+            let result = capture_thought(
+                &m,
+                &json!({ "thoughts": [thought] }),
+                &ScopeResolution::Unresolved,
+            );
+            assert!(result.is_error);
+            assert_eq!(result.json()["error"], "invalid_input");
+        }
+        assert_eq!(count_thoughts(&m.conn).unwrap(), 0);
+
+        let result = capture_thought(
+            &m,
+            &json!({ "content": "Normalized", "summary": "  Searchable summary  ", "visibility": "shared" }),
+            &ScopeResolution::Unresolved,
+        );
+        assert!(!result.is_error, "{}", result.text);
+        let id = result.json()["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            get_thought(&m.conn, &id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .as_deref(),
+            Some("Searchable summary")
+        );
+    }
+
+    #[test]
+    fn bulk_capture_validates_every_summary_before_writing() {
+        let m = Memory::open_in_memory().unwrap();
+        let result = capture_thought(
+            &m,
+            &json!({
+                "thoughts": [
+                    { "content": "Valid first item", "summary": "First", "visibility": "shared" },
+                    { "content": "Invalid second item", "summary": "   ", "visibility": "shared" }
+                ]
+            }),
+            &ScopeResolution::Unresolved,
+        );
+
+        assert!(result.is_error);
+        assert_eq!(result.json()["error"], "invalid_input");
+        assert_eq!(count_thoughts(&m.conn).unwrap(), 0);
+    }
+
+    #[test]
     fn trust_gate_stores_unverified_separately() {
         let (m, detected, _) = with_project();
         let content = "the deploy pipeline requires a signed manifest before release";
-        capture_thought(&m, &json!({ "content": content }), &detected);
+        capture_thought(
+            &m,
+            &json!({ "content": content, "summary": "signed manifest" }),
+            &detected,
+        );
         let r = capture_thought(
             &m,
-            &json!({ "content": content, "trust_level": "external" }),
+            &json!({ "content": content, "summary": "signed manifest", "trust_level": "external" }),
             &detected,
         )
         .json();
@@ -1762,20 +1904,20 @@ mod tests {
         let m = Memory::open_in_memory().unwrap();
         let r = capture_thought(
             &m,
-            &json!({ "content": "personal needs a project" }),
+            &json!({ "content": "personal needs a project", "summary": "Personal scope" }),
             &ScopeResolution::Unresolved,
         );
         assert!(r.is_error);
         assert_eq!(r.json()["error"], "project_scope_unresolved");
         let r = capture_thought(
             &m,
-            &json!({ "content": "shared is fine", "visibility": "shared" }),
+            &json!({ "content": "shared is fine", "summary": "Shared capture", "visibility": "shared" }),
             &ScopeResolution::Unresolved,
         );
         assert!(!r.is_error, "{}", r.text);
         let r = capture_thought(
             &m,
-            &json!({ "content": "x", "project_identifier": "ghost" }),
+            &json!({ "content": "x", "summary": "Unknown project", "project_identifier": "ghost" }),
             &ScopeResolution::Unresolved,
         );
         assert_eq!(r.json()["error"], "project_scope_invalid");
@@ -1787,7 +1929,7 @@ mod tests {
             member_paths: vec!["/w/newproj".into()],
             member_repos: vec![],
         };
-        let r = capture_thought(&m, &json!({ "thoughts": [{ "content": "one" }, { "content": "two", "related_to": ["nope"] }] }), &derived).json();
+        let r = capture_thought(&m, &json!({ "thoughts": [{ "content": "one", "summary": "One" }, { "content": "two", "summary": "Two", "related_to": ["nope"] }] }), &derived).json();
         assert_eq!(r["captured"], 2);
         assert_eq!(r["thoughts"][1]["skipped"], json!(["nope"]));
         assert!(
@@ -1798,7 +1940,7 @@ mod tests {
         );
         let r = capture_thought(
             &m,
-            &json!({ "content": "x".repeat(50_001), "visibility": "shared" }),
+            &json!({ "content": "x".repeat(50_001), "summary": "Too long", "visibility": "shared" }),
             &ScopeResolution::Unresolved,
         );
         assert_eq!(r.json()["error"], "invalid_input");

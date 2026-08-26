@@ -129,7 +129,7 @@ fn full_handshake_tools_prompts_and_scoped_capture() {
     // No roots → personal capture is rejected; shared capture succeeds; reads fail safe to shared-only.
     let (err, body) = c.call(
         "capture_thought",
-        json!({ "content": "needs a project scope here" }),
+        json!({ "content": "needs a project scope here", "summary": "Needs project scope" }),
     );
     assert!(err, "{body}");
     assert_eq!(body["error"], "project_scope_unresolved");
@@ -153,4 +153,47 @@ fn full_handshake_tools_prompts_and_scoped_capture() {
     assert_eq!(stats["thought_count"], 1);
     let comp = c.request("completion/complete", json!({ "ref": { "type": "ref/prompt", "name": "memory-protocol" }, "argument": { "name": "type", "value": "de" } }));
     assert_eq!(comp["completion"]["values"], json!(["decision"]));
+}
+
+#[test]
+fn tool_calls_reject_schema_violations_before_domain_handlers() {
+    let mut c = Client::spawn();
+    c.request("initialize", json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }));
+    c.notify("notifications/initialized", json!({}));
+
+    for (name, args) in [
+        (
+            "capture_thought",
+            json!({ "content": "Missing summary", "visibility": "shared" }),
+        ),
+        (
+            "capture_thought",
+            json!({ "content": "Invalid type", "summary": "Invalid type", "type": "memo", "visibility": "shared" }),
+        ),
+        (
+            "capture_thought",
+            json!({ "content": "Invalid visibility", "summary": "Invalid visibility", "visibility": "public" }),
+        ),
+        ("list_thoughts", json!({ "trust_level": "unknown" })),
+        ("get_brief", json!({ "scope": "everything" })),
+        ("manage_edges", json!({ "action": "archive" })),
+    ] {
+        let (is_error, body) = c.call(name, args);
+        assert!(is_error, "{body}");
+        assert_eq!(body["error"], "invalid_input", "{body}");
+    }
+
+    let (is_error, body) = c.call(
+        "capture_thought",
+        json!({
+            "thoughts": [{
+                "content": "Bulk custom type",
+                "summary": "Bulk custom type",
+                "type": "custom",
+                "visibility": "shared"
+            }]
+        }),
+    );
+    assert!(!is_error, "{body}");
+    assert_eq!(body["captured"], 1);
 }
