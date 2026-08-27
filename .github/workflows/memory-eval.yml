@@ -191,6 +191,60 @@ jobs:
           fi
           exit "$status"
 
+      - name: Fetch approved rebaseline dataset
+        if: >-
+          steps.changes.outputs.relevant == 'true' &&
+          steps.base-evaluator.outputs.available == 'true' &&
+          steps.oracle-changes.outputs.changed == 'true' &&
+          contains(github.event.pull_request.labels.*.name, 'memory-eval/rebaseline-approved')
+        id: rebaseline-dataset
+        shell: bash
+        run: |
+          checksum=$(jq -r '.dataset.sha256' "candidate/tests/fixtures/LongMemEval PR-v1.json")
+          dataset=".memory-eval-cache/$checksum.json"
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            fetch longmemeval-pr --cache "$dataset"
+          echo "path=$dataset" >> "$GITHUB_OUTPUT"
+
+      - name: Run approved candidate rebaseline twice
+        if: >-
+          steps.changes.outputs.relevant == 'true' &&
+          steps.base-evaluator.outputs.available == 'true' &&
+          steps.oracle-changes.outputs.changed == 'true' &&
+          contains(github.event.pull_request.labels.*.name, 'memory-eval/rebaseline-approved')
+        run: |
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            run --suite pr --dataset "${{ steps.rebaseline-dataset.outputs.path }}" \
+            --policy "candidate/tests/fixtures/Memory Eval Policy-v1.json" \
+            --output artifacts/rebaseline-candidate --code-sha "${{ github.event.pull_request.head.sha }}" \
+            > artifacts/rebaseline-candidate.log 2>&1
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            run --suite pr --dataset "${{ steps.rebaseline-dataset.outputs.path }}" \
+            --policy "candidate/tests/fixtures/Memory Eval Policy-v1.json" \
+            --output artifacts/rebaseline-candidate-repeat --code-sha "${{ github.event.pull_request.head.sha }}" \
+            > artifacts/rebaseline-candidate-repeat.log 2>&1
+
+      - name: Validate approved candidate rebaseline
+        if: >-
+          steps.changes.outputs.relevant == 'true' &&
+          steps.base-evaluator.outputs.available == 'true' &&
+          steps.oracle-changes.outputs.changed == 'true' &&
+          contains(github.event.pull_request.labels.*.name, 'memory-eval/rebaseline-approved')
+        shell: bash
+        run: |
+          set +e
+          cargo run --locked --manifest-path candidate/Cargo.toml -p shelby-memory-eval -- \
+            compare --base artifacts/rebaseline-candidate/results.json \
+            --candidate artifacts/rebaseline-candidate/results.json \
+            --candidate-repeat artifacts/rebaseline-candidate-repeat/results.json \
+            --policy "candidate/tests/fixtures/Memory Eval Policy-v1.json" \
+            --output artifacts/rebaseline-comparison
+          status=$?
+          if [ -f artifacts/rebaseline-comparison/comparison.md ]; then
+            cat artifacts/rebaseline-comparison/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
       - name: Upload evaluation evidence
         if: always() && steps.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@v7
