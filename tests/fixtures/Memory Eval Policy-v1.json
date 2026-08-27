@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "category_floors": {
+    "near-duplicate-decision": {
+      "recall_at_5": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    "same-person-wrong-event": {
+      "recall_at_5": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    "same-topic-wrong-project": {
+      "recall_at_5": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    "stale-fact-current-fact": {
+      "recall_at_5": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    "knowledge-update": {
+      "recall_at_5": 0.08333333333333333,
+      "ndcg_at_10": 0.10219119879424306
+    },
+    "multi-session": {
+      "recall_at_5": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    "single-session-assistant": {
+      "recall_at_5": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    "single-session-preference": {
+      "recall_at_5": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    "single-session-user": {
+      "recall_at_5": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    "temporal-reasoning": {
+      "recall_at_5": 0.0,
+      "ndcg_at_10": 0.0
+    }
+  },
+  "resources": {
+    "max_total_estimated_tokens": 12000,
+    "max_total_serialized_bytes": 55000,
+    "max_case_estimated_tokens": 1000,
+    "max_case_serialized_bytes": 10000
+  }
+}
