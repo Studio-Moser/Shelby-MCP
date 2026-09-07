@@ -2,6 +2,7 @@
 //!
 //! This API only consumes JSON bytes. It never opens a Swift database, enables
 //! automation, merges authored content, or registers a model-accessible tool.
+mod chats;
 mod tasks;
 mod wire;
 use crate::{identity, temporal, topics};
@@ -13,6 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 pub use tasks::{
     PreparedLocalTask, PreparedTaskExcluded, PreparedTaskOmissions, PreparedTaskPolicy,
     PreparedTaskSelection, inspect_local_task_source,
+};
+
+pub use chats::{
+    PreparedChatArchive, PreparedChatConversation, PreparedChatDate, PreparedChatImage,
+    PreparedChatItem, PreparedChatItemSource, PreparedChatOmissions, PreparedChatPolicy,
+    PreparedChatSelection, PreparedImageDisclosure, inspect_chat_conversation_source,
+    inspect_chat_image_source, inspect_chat_item_source, validate_chat_archive_rows,
 };
 
 const MAX_BYTES: usize = 50 * 1024 * 1024;
@@ -88,6 +96,7 @@ pub struct PreparedProject {
 #[derive(Debug)]
 pub struct PreparedImport {
     wire_version: u32,
+    chat_archive: Option<PreparedChatArchive>,
     local_tasks: Vec<PreparedLocalTask>,
     task_selection: Option<PreparedTaskSelection>,
     preview: ImportPreview,
@@ -97,6 +106,9 @@ pub struct PreparedImport {
     manifest: String,
 }
 impl PreparedImport {
+    pub fn chat_archive(&self) -> Option<&PreparedChatArchive> {
+        self.chat_archive.as_ref()
+    }
     pub fn wire_version(&self) -> u32 {
         self.wire_version
     }
@@ -289,16 +301,19 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
     if bytes.len() > MAX_BYTES {
         return Err(invalid("package size"));
     }
-    let package: wire::Package =
+    let mut package: wire::Package =
         serde_json::from_slice(bytes).map_err(|_| invalid("JSON shape or bounds"))?;
     if &*package.format != "shelby-swift-migration"
-        || !matches!(package.version, 1 | 2)
+        || !matches!(package.version, 1..=3)
         || &*package.source_product != PRODUCT
         || package.source_schema != 18
     {
         return Err(invalid("format version"));
     }
     uuid(&package.export_id)?;
+    if package.version == 3 {
+        chats::source_size(&package)?;
+    }
     date(&package.exported_at)?;
     if package.adapter_reference.is_empty() {
         return Err(invalid("adapter reference"));
@@ -667,13 +682,13 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
             },
         ),
         (&categories.edges, package.edges.len(), "complete"),
-        (&categories.conversations, 0, "notSelected"),
     ] {
         if category.count as usize != count || &*category.status != status {
             return Err(invalid("category completeness"));
         }
     }
     let (local_tasks, task_selection) = tasks::prepare(&package, &project_slugs, &alias_owners)?;
+    let chat_archive = chats::prepare(&mut package, &project_slugs)?;
     // Two separately bounded projections are retained: source provenance and
     // canonical rows. Each stays <=50 MiB; wire parsing also has a 50 MiB ceiling.
     let mut source_bytes = 0usize;
@@ -692,6 +707,12 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
             return Err(invalid("prepared size"));
         }
     }
+    if let Some(archive) = &chat_archive {
+        let bytes = archive.prepared_bytes()?;
+        if source_bytes + bytes > MAX_BYTES || target_bytes + bytes > MAX_BYTES {
+            return Err(invalid("prepared size"));
+        }
+    }
     let fingerprints: BTreeMap<_, _> = entities
         .iter()
         .map(|e| ((e.kind, e.id.as_str()), e.fingerprint.as_str()))
@@ -702,7 +723,7 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
         .collect::<Vec<_>>();
     let batch_fingerprint = if package.version == 1 {
         hash(&json!([PRODUCT, POLICY_VERSION, fingerprints]))?
-    } else {
+    } else if package.version == 2 {
         let task_fingerprints: BTreeMap<_, _> = local_tasks
             .iter()
             .map(|t| (&t.source_key, &t.fingerprint))
@@ -715,11 +736,31 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
             task_fingerprints.into_iter().collect::<Vec<_>>(),
             task_selection
         ]))?
+    } else {
+        let task_fingerprints: BTreeMap<_, _> = local_tasks
+            .iter()
+            .map(|t| (&t.source_key, &t.fingerprint))
+            .collect();
+        hash(&json!([
+            "shelby-swift-batch-v3",
+            PRODUCT,
+            POLICY_VERSION,
+            fingerprints,
+            task_fingerprints.into_iter().collect::<Vec<_>>(),
+            task_selection,
+            chat_archive
+                .as_ref()
+                .ok_or_else(|| invalid("chat archive"))?
+                .binding()
+        ]))?
     };
     let mut manifest = json!({"format":package.format,"version":package.version,"sourceProduct":package.source_product,"sourceSchema":package.source_schema,"sourceAppVersion":package.source_app_version,"adapterReference":package.adapter_reference,"exportId":package.export_id,"exportedAt":package.exported_at,"selectedScopes":package.selected_scopes,"categories":package.categories,"policy":package.policy});
     if let Some(selection) = &task_selection {
         manifest["taskPolicy"] =
             serde_json::to_value(&selection.task_policy).map_err(|_| invalid("serialization"))?;
+    }
+    if let Some(archive) = &chat_archive {
+        manifest["chatArchive"] = archive.manifest();
     }
     let manifest = encoded(&manifest)?;
     if manifest.len() > 32 * 1024 {
@@ -727,6 +768,7 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
     }
     Ok(PreparedImport {
         wire_version: package.version,
+        chat_archive,
         local_tasks,
         task_selection,
         preview,

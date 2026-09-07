@@ -1339,3 +1339,6 @@ fn v1_committed_fixture_preserves_pre_s3_exact_source_manifest_and_batch_identit
     );
     assert_eq!(POLICY_VERSION, 1);
 }
+
+#[path = "chats/tests.rs"]
+mod chat_tests;

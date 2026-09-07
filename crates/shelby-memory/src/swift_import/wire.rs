@@ -79,10 +79,14 @@ pub(super) type Label = Text<4096>;
 pub(super) type Id = Text<512>;
 pub(super) type Date = Text<64>;
 pub(super) type Labels = List<Label, 256>;
-fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+pub(super) fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
     Option::deserialize(d)
 }
-fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+pub(super) fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
     T::deserialize(d).map(Some)
 }
 
@@ -117,6 +121,12 @@ pub(super) struct Package {
         skip_serializing_if = "Option::is_none"
     )]
     pub task_policy: Option<TaskPolicy>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub chat_archive: Option<super::chats::wire::Archive>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -278,7 +288,7 @@ pub(super) struct Categories {
     pub memories: Category,
     pub edges: Category,
     pub tasks: TaskCategory,
-    pub conversations: Category,
+    pub conversations: ChatCategory,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -346,4 +356,29 @@ pub(super) struct LocalTask {
     #[serde(deserialize_with = "nullable")]
     pub parent_external_id: Option<Id>,
     pub omissions: super::PreparedTaskOmissions,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ChatCategory {
+    pub count: u32,
+    pub status: Label,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub catalog_count: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unselected_count: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub item_count: Option<u32>,
 }
