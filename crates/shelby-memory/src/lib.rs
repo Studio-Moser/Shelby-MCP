@@ -19,6 +19,7 @@ pub mod reconcile;
 pub mod repair;
 pub mod resolve;
 pub mod seed;
+pub mod swift_import;
 pub mod telemetry;
 mod temporal;
 pub mod thoughts;

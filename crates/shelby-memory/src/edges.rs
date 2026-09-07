@@ -16,6 +16,10 @@ pub const VALID_EDGE_TYPES: [&str; 6] = [
     "follows",
 ];
 
+/// UTF-8 byte bound shared by accepted import identities and graph cursors.
+/// Historical full-record readers retain their existing unconstrained ID API.
+pub const MAX_EDGE_ID_BYTES: usize = 512;
+
 pub fn is_valid_edge_type(t: &str) -> bool {
     VALID_EDGE_TYPES.contains(&t)
 }
@@ -472,11 +476,11 @@ pub fn active_edges_page(
     temporal::parse_now(now)?;
     if !(1..=200).contains(&page_size)
         || !is_valid_edge_type(edge_type)
-        || after_id.is_some_and(|id| id.len() > 256)
+        || after_id.is_some_and(|id| id.len() > MAX_EDGE_ID_BYTES)
     {
-        return Err(Error::InvalidInput(
-            "Use a valid edge type, page size 1–200 and cursor up to 256 bytes".into(),
-        ));
+        return Err(Error::InvalidInput(format!(
+            "Use a valid edge type, page size 1–200 and cursor up to {MAX_EDGE_ID_BYTES} bytes"
+        )));
     }
     let mut stmt = conn.prepare("SELECT * FROM edges WHERE edge_type=?1 AND (?2 IS NULL OR id > ?2 COLLATE BINARY) ORDER BY id COLLATE BINARY LIMIT ?3")?;
     let rows = stmt.query_map(params![edge_type, after_id, page_size as i64], row_to_edge)?;
@@ -967,7 +971,7 @@ mod tests {
         }
         assert!(active_edges_page(&m.conn, "bad", AT, None, 1).is_err());
         assert!(active_edges_page(&m.conn, "refuted_by", "bad", None, 1).is_err());
-        assert!(active_edges_page(&m.conn, "refuted_by", AT, Some(&"x".repeat(257)), 1).is_err());
+        assert!(active_edges_page(&m.conn, "refuted_by", AT, Some(&"x".repeat(513)), 1).is_err());
         assert!(active_edges_page(&m.conn, "refuted_by", AT, Some("' OR 1=1 --"), 1).is_ok());
         m.conn
             .execute("UPDATE edges SET valid_until='bad' WHERE id='edge-2'", [])
