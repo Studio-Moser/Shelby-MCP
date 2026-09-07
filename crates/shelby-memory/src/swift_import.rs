@@ -2,6 +2,7 @@
 //!
 //! This API only consumes JSON bytes. It never opens a Swift database, enables
 //! automation, merges authored content, or registers a model-accessible tool.
+mod tasks;
 mod wire;
 use crate::{identity, temporal, topics};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -9,6 +10,10 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+pub use tasks::{
+    PreparedLocalTask, PreparedTaskExcluded, PreparedTaskOmissions, PreparedTaskPolicy,
+    PreparedTaskSelection, inspect_local_task_source,
+};
 
 const MAX_BYTES: usize = 50 * 1024 * 1024;
 const POLICY_VERSION: i64 = 1;
@@ -82,6 +87,9 @@ pub struct PreparedProject {
 }
 #[derive(Debug)]
 pub struct PreparedImport {
+    wire_version: u32,
+    local_tasks: Vec<PreparedLocalTask>,
+    task_selection: Option<PreparedTaskSelection>,
     preview: ImportPreview,
     projects: Vec<PreparedProject>,
     entities: Vec<Entity>,
@@ -89,6 +97,19 @@ pub struct PreparedImport {
     manifest: String,
 }
 impl PreparedImport {
+    pub fn wire_version(&self) -> u32 {
+        self.wire_version
+    }
+    pub fn batch_fingerprint(&self) -> &str {
+        &self.batch_fingerprint
+    }
+    pub fn local_tasks(&self) -> &[PreparedLocalTask] {
+        &self.local_tasks
+    }
+    pub fn task_selection(&self) -> Option<&PreparedTaskSelection> {
+        self.task_selection.as_ref()
+    }
+
     pub fn preview(&self) -> &ImportPreview {
         &self.preview
     }
@@ -271,7 +292,7 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
     let package: wire::Package =
         serde_json::from_slice(bytes).map_err(|_| invalid("JSON shape or bounds"))?;
     if &*package.format != "shelby-swift-migration"
-        || package.version != 1
+        || !matches!(package.version, 1 | 2)
         || &*package.source_product != PRODUCT
         || package.source_schema != 18
     {
@@ -646,13 +667,13 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
             },
         ),
         (&categories.edges, package.edges.len(), "complete"),
-        (&categories.tasks, 0, "notSelected"),
         (&categories.conversations, 0, "notSelected"),
     ] {
         if category.count as usize != count || &*category.status != status {
             return Err(invalid("category completeness"));
         }
     }
+    let (local_tasks, task_selection) = tasks::prepare(&package, &project_slugs, &alias_owners)?;
     // Two separately bounded projections are retained: source provenance and
     // canonical rows. Each stays <=50 MiB; wire parsing also has a 50 MiB ceiling.
     let mut source_bytes = 0usize;
@@ -664,25 +685,50 @@ pub fn prepare(bytes: &[u8]) -> Result<PreparedImport> {
             return Err(invalid("prepared size"));
         }
     }
+    for task in &local_tasks {
+        source_bytes += task.source_payload.len();
+        target_bytes += encoded(task)?.len();
+        if source_bytes > MAX_BYTES || target_bytes > MAX_BYTES {
+            return Err(invalid("prepared size"));
+        }
+    }
     let fingerprints: BTreeMap<_, _> = entities
         .iter()
         .map(|e| ((e.kind, e.id.as_str()), e.fingerprint.as_str()))
         .collect();
-    let batch_fingerprint = hash(&json!([
-        PRODUCT,
-        POLICY_VERSION,
-        fingerprints
-            .into_iter()
-            .map(|((kind, id), fingerprint)| json!([kind, id, fingerprint]))
-            .collect::<Vec<_>>()
-    ]))?;
-    let manifest = encoded(
-        &json!({"format":package.format,"version":package.version,"sourceProduct":package.source_product,"sourceSchema":package.source_schema,"sourceAppVersion":package.source_app_version,"adapterReference":package.adapter_reference,"exportId":package.export_id,"exportedAt":package.exported_at,"selectedScopes":package.selected_scopes,"categories":package.categories,"policy":package.policy}),
-    )?;
+    let fingerprints = fingerprints
+        .into_iter()
+        .map(|((kind, id), fingerprint)| json!([kind, id, fingerprint]))
+        .collect::<Vec<_>>();
+    let batch_fingerprint = if package.version == 1 {
+        hash(&json!([PRODUCT, POLICY_VERSION, fingerprints]))?
+    } else {
+        let task_fingerprints: BTreeMap<_, _> = local_tasks
+            .iter()
+            .map(|t| (&t.source_key, &t.fingerprint))
+            .collect();
+        hash(&json!([
+            "shelby-swift-batch-v2",
+            PRODUCT,
+            POLICY_VERSION,
+            fingerprints,
+            task_fingerprints.into_iter().collect::<Vec<_>>(),
+            task_selection
+        ]))?
+    };
+    let mut manifest = json!({"format":package.format,"version":package.version,"sourceProduct":package.source_product,"sourceSchema":package.source_schema,"sourceAppVersion":package.source_app_version,"adapterReference":package.adapter_reference,"exportId":package.export_id,"exportedAt":package.exported_at,"selectedScopes":package.selected_scopes,"categories":package.categories,"policy":package.policy});
+    if let Some(selection) = &task_selection {
+        manifest["taskPolicy"] =
+            serde_json::to_value(&selection.task_policy).map_err(|_| invalid("serialization"))?;
+    }
+    let manifest = encoded(&manifest)?;
     if manifest.len() > 32 * 1024 {
         return Err(invalid("manifest size"));
     }
     Ok(PreparedImport {
+        wire_version: package.version,
+        local_tasks,
+        task_selection,
         preview,
         projects,
         entities,

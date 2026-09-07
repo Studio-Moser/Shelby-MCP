@@ -931,3 +931,411 @@ fn imported_maximum_byte_edge_ids_remain_pageable_and_addressable() {
         );
     }
 }
+
+fn v2_package() -> Value {
+    let mut v: Value = serde_json::from_slice(SWIFT_FIXTURE).unwrap();
+    v["version"] = json!(2);
+    v["localTasks"] = json!([{"sourceKey":"workItem:local:44444444-4444-4444-8444-444444444444","tracker":"local","externalId":"44444444-4444-4444-8444-444444444444","projectId":"33333333-3333-4333-8333-333333333333","projectAlias":"lantern","kind":"todo","title":"Review the launch agenda","state":"open","origin":"manual","triageState":"accepted","updatedAt":"2026-01-02 00:00:00","snoozeUntil":null,"labels":[],"relations":[],"parentExternalId":null,"omissions":{"url":0,"originSessionId":1,"lastSeenAt":0}}]);
+    v["taskPolicy"] = json!({"dueDates":"notInferred","sessions":"notRead","omittedSourceFields":["url","originSessionId","lastSeenAt","sessionLinks"]});
+    v["categories"]["tasks"] = json!({"count":1,"status":"selectedSubset","supportedCount":2,"unselectedCount":1,"excluded":{"externalTracker":0,"epic":0,"dismissed":0,"snoozed":0,"parent":0,"dependencies":0,"labels":0,"externalOrigin":0}});
+    v
+}
+#[test]
+fn v2_tasks_are_validated_projections_and_receipt_bound_without_canonical_rows() {
+    let p = prepare(&serde_json::to_vec(&v2_package()).unwrap()).unwrap();
+    assert_eq!(p.wire_version(), 2);
+    assert_eq!(p.local_tasks().len(), 1);
+    assert_eq!(
+        p.local_tasks()[0].task_id,
+        "44444444-4444-4444-8444-444444444444"
+    );
+    assert_eq!(p.task_selection().unwrap().omissions.origin_session_id, 1);
+    let mut memory = crate::Memory::open_in_memory().unwrap();
+    apply(&mut memory.conn, &p).unwrap();
+    let mut changed = v2_package();
+    changed["localTasks"][0]["title"] = json!("Changed");
+    let changed = prepare(&serde_json::to_vec(&changed).unwrap()).unwrap();
+    assert!(inspect_target(&memory.conn, &changed).is_err());
+    assert_eq!(
+        memory
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE name='app_tasks'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn task_version_presence_shape_and_count_boundaries_are_closed() {
+    let original = v2_package();
+    for field in ["localTasks", "taskPolicy"] {
+        let mut v = original.clone();
+        v.as_object_mut().unwrap().remove(field);
+        assert!(
+            prepare(&serde_json::to_vec(&v).unwrap()).is_err(),
+            "missing {field}"
+        );
+        v = original.clone();
+        v[field] = Value::Null;
+        assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+        v = original.clone();
+        v["version"] = json!(1);
+        assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+    for (field, value) in [
+        ("count", json!(0)),
+        ("count", json!(-1)),
+        ("count", json!(1.0)),
+        ("supportedCount", json!(2001)),
+        ("unselectedCount", json!(2)),
+        ("status", json!("complete")),
+        ("extra", json!(0)),
+    ] {
+        let mut v = original.clone();
+        v["categories"]["tasks"][field] = value;
+        assert!(
+            prepare(&serde_json::to_vec(&v).unwrap()).is_err(),
+            "{field}"
+        );
+    }
+    let mut v = original.clone();
+    v["categories"]["tasks"]["excluded"]["epic"] = json!(2000);
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+    for field in ["supportedCount", "unselectedCount", "excluded"] {
+        let mut v = original.clone();
+        v["categories"]["tasks"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+    let mut v = original.clone();
+    v["localTasks"] = json!([]);
+    v["categories"]["tasks"]["count"] = json!(0);
+    v["categories"]["tasks"]["unselectedCount"] = json!(2);
+    let empty = prepare(&serde_json::to_vec(&v).unwrap()).unwrap();
+    assert_eq!(empty.local_tasks().len(), 0);
+    assert_ne!(
+        empty.batch_fingerprint(),
+        prepare(SWIFT_FIXTURE).unwrap().batch_fingerprint()
+    );
+}
+#[test]
+fn task_intrinsic_validation_rejects_unsupported_or_ambiguous_values() {
+    let base = v2_package()["localTasks"][0].clone();
+    for (field, value) in [
+        ("title", json!(" \n")),
+        ("title", json!("é".repeat(501))),
+        ("title", json!("😀".repeat(501))),
+        ("state", json!("running")),
+        ("state", json!("ópen")),
+        ("origin", json!("external")),
+        ("triageState", json!("dismissed")),
+        ("tracker", json!("github")),
+        ("kind", json!("epic")),
+        ("externalId", json!("not-uuid")),
+        ("sourceKey", json!("workItem:local:wrong")),
+        ("snoozeUntil", json!("")),
+        ("parentExternalId", json!("")),
+        ("labels", Value::Null),
+        ("labels", json!(["a"])),
+        ("relations", json!([{}])),
+        ("updatedAt", json!("2026-02-30")),
+        ("unknown", json!(true)),
+    ] {
+        let mut t = base.clone();
+        t[field] = value;
+        assert!(
+            inspect_local_task_source(&t.to_string()).is_err(),
+            "{field}"
+        );
+    }
+    for field in base.as_object().unwrap().keys() {
+        let mut t = base.clone();
+        t.as_object_mut().unwrap().remove(field);
+        assert!(
+            inspect_local_task_source(&t.to_string()).is_err(),
+            "missing {field}"
+        );
+    }
+    for value in [json!(2), json!(-1), json!(1.0), json!("1"), Value::Null] {
+        let mut t = base.clone();
+        t["omissions"]["url"] = value;
+        assert!(inspect_local_task_source(&t.to_string()).is_err());
+    }
+    for t in [
+        base.to_string()
+            .replacen("\"title\":", "\"title\":\"first\",\"tit\\u006ce\":", 1),
+        base.to_string()
+            .replacen("\"url\":0", "\"url\":0,\"u\\u0072l\":1", 1),
+    ] {
+        assert!(inspect_local_task_source(&t).is_err());
+    }
+    let mut accepted = base;
+    accepted["title"] = json!("😀".repeat(500));
+    accepted["state"] = json!("CLOSED");
+    accepted["updatedAt"] = json!("1969-12-31T23:59:59.999500Z");
+    assert_eq!(
+        inspect_local_task_source(&accepted.to_string())
+            .unwrap()
+            .updated_at,
+        "1969-12-31T23:59:59.999500Z"
+    );
+    assert!(inspect_local_task_source(&" ".repeat(32769)).is_err());
+}
+#[test]
+fn tasks_bind_selected_project_aliases_and_normalize_only_uuid_identity() {
+    let mut v = v2_package();
+    v["localTasks"][0]["externalId"] = json!("ABCDEFAB-4444-4444-8444-444444444444");
+    v["localTasks"][0]["sourceKey"] = json!("workItem:local:abcdefab-4444-4444-8444-444444444444");
+    let upper = prepare(&serde_json::to_vec(&v).unwrap()).unwrap();
+    v["localTasks"][0]["externalId"] = json!("abcdefab-4444-4444-8444-444444444444");
+    let lower = prepare(&serde_json::to_vec(&v).unwrap()).unwrap();
+    assert_eq!(upper.batch_fingerprint(), lower.batch_fingerprint());
+    assert_ne!(
+        upper.local_tasks()[0].source_payload,
+        lower.local_tasks()[0].source_payload
+    );
+    v["localTasks"][0]["state"] = json!("OPEN");
+    assert_ne!(
+        prepare(&serde_json::to_vec(&v).unwrap())
+            .unwrap()
+            .batch_fingerprint(),
+        lower.batch_fingerprint()
+    );
+    for alias in ["missing", "other-project"] {
+        v["localTasks"][0]["projectAlias"] = json!(alias);
+        assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+    v["localTasks"][0]["projectAlias"] = v["localTasks"][0]["projectId"].clone();
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_ok());
+    v["localTasks"][0]["projectId"] = json!("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+}
+#[test]
+fn task_batch_order_policy_and_selected_omission_identity() {
+    let mut v = v2_package();
+    let first = v["localTasks"][0].clone();
+    let mut second = first.clone();
+    second["externalId"] = json!("55555555-5555-4555-8555-555555555555");
+    second["sourceKey"] = json!("workItem:local:55555555-5555-4555-8555-555555555555");
+    v["localTasks"] = json!([first, second]);
+    v["categories"]["tasks"]["count"] = json!(2);
+    v["categories"]["tasks"]["unselectedCount"] = json!(0);
+    let p = prepare(&serde_json::to_vec(&v).unwrap()).unwrap();
+    assert_eq!(p.task_selection().unwrap().omissions.origin_session_id, 2);
+    v["localTasks"].as_array_mut().unwrap().reverse();
+    v["taskPolicy"]["omittedSourceFields"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    v["exportId"] = json!("55555555-5555-4555-8555-555555555555");
+    assert_eq!(
+        p.batch_fingerprint(),
+        prepare(&serde_json::to_vec(&v).unwrap())
+            .unwrap()
+            .batch_fingerprint()
+    );
+    for mutate in 0..3 {
+        let mut changed = v.clone();
+        match mutate {
+            0 => changed["localTasks"][0]["omissions"]["url"] = json!(1),
+            1 => changed["categories"]["tasks"]["excluded"]["epic"] = json!(1),
+            _ => {
+                changed["categories"]["tasks"]["supportedCount"] = json!(3);
+                changed["categories"]["tasks"]["unselectedCount"] = json!(1);
+            }
+        }
+        assert_ne!(
+            p.batch_fingerprint(),
+            prepare(&serde_json::to_vec(&changed).unwrap())
+                .unwrap()
+                .batch_fingerprint()
+        );
+    }
+    v["localTasks"][1] = v["localTasks"][0].clone();
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+}
+
+#[test]
+fn task_catalog_ceiling_and_duplicate_decoded_package_keys_are_rejected() {
+    let mut v = v2_package();
+    let task = v["localTasks"][0].clone();
+    v["localTasks"] = json!(
+        (0..2000)
+            .map(|n| {
+                let mut t = task.clone();
+                let id = format!("{n:08x}-4444-4444-8444-444444444444");
+                t["externalId"] = json!(id);
+                t["sourceKey"] = json!(format!("workItem:local:{id}"));
+                t
+            })
+            .collect::<Vec<_>>()
+    );
+    v["categories"]["tasks"]["count"] = json!(2000);
+    v["categories"]["tasks"]["supportedCount"] = json!(2000);
+    v["categories"]["tasks"]["unselectedCount"] = json!(0);
+    assert_eq!(
+        prepare(&serde_json::to_vec(&v).unwrap())
+            .unwrap()
+            .local_tasks()
+            .len(),
+        2000
+    );
+    v["localTasks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"unread":"over-limit element"}));
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+    let text = v2_package().to_string();
+    for text in [
+        text.replacen(
+            "\"localTasks\":",
+            "\"localTasks\":[],\"local\\u0054asks\":",
+            1,
+        ),
+        text.replacen(
+            "\"dueDates\":",
+            "\"dueDates\":\"notInferred\",\"due\\u0044ates\":",
+            1,
+        ),
+        text.replacen(
+            "\"externalTracker\":0",
+            "\"externalTracker\":0,\"external\\u0054racker\":1",
+            1,
+        ),
+    ] {
+        assert!(prepare(text.as_bytes()).is_err());
+    }
+    let mut v = v2_package();
+    v["taskPolicy"]["omittedSourceFields"] = json!(["url", "url", "lastSeenAt", "sessionLinks"]);
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+    let mut v: Value = serde_json::from_slice(SWIFT_FIXTURE).unwrap();
+    for field in ["localTasks", "taskPolicy"] {
+        v[field] = Value::Null;
+        assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+        v.as_object_mut().unwrap().remove(field);
+    }
+    v["localTasks"] = json!([]);
+    assert!(prepare(&serde_json::to_vec(&v).unwrap()).is_err());
+}
+
+#[test]
+fn actual_swift_v2_bytes_prepare_apply_reopen_and_bind_tasks_without_task_entities() {
+    let bytes =
+        include_bytes!("../../../../tests/fixtures/Swift Import/Synthetic Swift Task Export.json");
+    let prepared = prepare(bytes).unwrap();
+    assert_eq!(prepared.local_tasks().len(), 3);
+    let selection = prepared.task_selection().unwrap();
+    assert_eq!(
+        (
+            selection.count,
+            selection.supported_count,
+            selection.unselected_count
+        ),
+        (3, 4, 1)
+    );
+    assert_eq!(
+        selection.omissions,
+        PreparedTaskOmissions {
+            url: 1,
+            origin_session_id: 1,
+            last_seen_at: 1
+        }
+    );
+    assert_eq!(
+        selection.excluded,
+        PreparedTaskExcluded {
+            external_tracker: 1,
+            epic: 1,
+            dismissed: 1,
+            snoozed: 1,
+            parent: 1,
+            dependencies: 1,
+            labels: 1,
+            external_origin: 1
+        }
+    );
+    assert!(
+        prepared
+            .local_tasks()
+            .iter()
+            .any(|t| t.origin == "agent_spawned" && t.triage_state == "inbox")
+    );
+    assert!(prepared.local_tasks().iter().any(|t| t.state == "CLOSED"));
+    for t in prepared.local_tasks() {
+        assert_eq!(&inspect_local_task_source(&t.source_payload).unwrap(), t);
+    }
+    let dir = std::env::temp_dir().join(format!("swift-task-import-{}", uuid::Uuid::new_v4()));
+    let path = dir.join("memory.db");
+    let mut memory = crate::Memory::open(&path).unwrap();
+    let first = apply(&mut memory.conn, &prepared).unwrap();
+    assert_eq!(
+        inspect_target(&memory.conn, &prepared).unwrap(),
+        TargetState::AlreadyImported
+    );
+    assert_eq!(
+        apply(&mut memory.conn, &prepared).unwrap().batch_id,
+        first.batch_id
+    );
+    assert_eq!(memory.conn.query_row("SELECT count(*) FROM shelby_swift_import_entities WHERE entity_kind NOT IN ('project','alias','memory','edge')",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    drop(memory);
+    let memory = crate::Memory::open(&path).unwrap();
+    assert_eq!(
+        inspect_target(&memory.conn, &prepared).unwrap(),
+        TargetState::AlreadyImported
+    );
+    assert_eq!(memory.schema_version().unwrap(), 18);
+    drop(memory);
+    std::fs::remove_dir_all(dir).unwrap();
+    let mut v1: Value = serde_json::from_slice(bytes).unwrap();
+    v1["version"] = json!(1);
+    v1.as_object_mut().unwrap().remove("localTasks");
+    v1.as_object_mut().unwrap().remove("taskPolicy");
+    v1["categories"]["tasks"] = json!({"count":0,"status":"notSelected"});
+    let original = prepare(&serde_json::to_vec(&v1).unwrap()).unwrap();
+    assert_eq!(prepared.entities.len(), original.entities.len());
+    for e in &original.entities {
+        let other = prepared
+            .entities
+            .iter()
+            .find(|v| v.kind == e.kind && v.id == e.id)
+            .unwrap();
+        assert_eq!(e.fingerprint, other.fingerprint);
+        assert_eq!(e.source_payload, other.source_payload);
+    }
+}
+
+#[test]
+fn v1_committed_fixture_preserves_pre_s3_exact_source_manifest_and_batch_identity() {
+    // Independently captured by running 8c9c75816d67a0b98f05ed556f77a666be8319ed.
+    let p = prepare(SWIFT_FIXTURE).unwrap();
+    assert_eq!(p.wire_version(), 1);
+    assert!(p.local_tasks().is_empty());
+    assert!(p.task_selection().is_none());
+    assert_eq!(
+        p.batch_fingerprint(),
+        "96668e9e536561af30373fe72caa18a4a3a11b5a65182972283f9c500490780f"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(p.manifest.as_bytes())),
+        "fcfcf363b3fcccd6464e4cfddeb89285173f332c71293c98a1f10117c1ee7dc0"
+    );
+    let sources = p
+        .entities
+        .iter()
+        .map(|e| json!([e.kind, e.id, e.fingerprint, e.source_payload]))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        format!(
+            "{:x}",
+            Sha256::digest(encoded(&sources).unwrap().as_bytes())
+        ),
+        "2cc482b8cfa0c252915e2afc742778866a434dcf1a54c40967fef6cec5f441cc"
+    );
+    assert_eq!(POLICY_VERSION, 1);
+}

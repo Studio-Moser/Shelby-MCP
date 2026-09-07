@@ -105,6 +105,18 @@ pub(super) struct Package {
     pub edges: List<Edge, 5000>,
     pub categories: Categories,
     pub policy: Policy,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub local_tasks: Option<List<LocalTask, 2000>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub task_policy: Option<TaskPolicy>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -265,7 +277,7 @@ pub(super) struct Categories {
     pub projects: Category,
     pub memories: Category,
     pub edges: Category,
-    pub tasks: Category,
+    pub tasks: TaskCategory,
     pub conversations: Category,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -280,4 +292,58 @@ pub(super) struct Policy {
     pub automatic_eligibility: Label,
     pub trust: Label,
     pub omitted_source_fields: List<Label, 5>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct TaskCategory {
+    pub count: u32,
+    pub status: Label,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub supported_count: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unselected_count: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub excluded: Option<super::PreparedTaskExcluded>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct TaskPolicy {
+    pub due_dates: Text<32>,
+    pub sessions: Text<32>,
+    pub omitted_source_fields: List<Text<32>, 4>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct LocalTask {
+    pub source_key: Text<64>,
+    pub tracker: Text<16>,
+    pub external_id: Text<36>,
+    pub project_id: Text<36>,
+    pub project_alias: Id,
+    pub kind: Text<16>,
+    pub title: Text<2000>,
+    pub state: Text<6>,
+    pub origin: Text<16>,
+    pub triage_state: Text<8>,
+    pub updated_at: Date,
+    #[serde(deserialize_with = "nullable")]
+    pub snooze_until: Option<Date>,
+    pub labels: List<Text<4096>, 0>,
+    pub relations: List<Text<0>, 0>,
+    #[serde(deserialize_with = "nullable")]
+    pub parent_external_id: Option<Id>,
+    pub omissions: super::PreparedTaskOmissions,
 }
