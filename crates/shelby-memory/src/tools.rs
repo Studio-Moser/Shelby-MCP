@@ -11,8 +11,7 @@ use crate::brief::{
     render_token_bound_brief, select_brief_items,
 };
 use crate::edges::{
-    EdgeInput, VALID_EDGE_TYPES, expire_edge, fetch_graph_related, link_thoughts, traverse_graph,
-    unlink_thoughts,
+    EdgeInput, expire_edge, fetch_graph_related, link_thoughts, traverse_graph, unlink_thoughts,
 };
 use crate::error::Error;
 use crate::fts::{SearchOptions, search_thoughts};
@@ -1346,10 +1345,6 @@ pub fn manage_edges_tool(m: &Memory, args: &Value) -> ToolResult {
             },
         ) {
             Ok(edge_id) => success(json!({ "edge_id": edge_id, "action": "linked" })),
-            Err(Error::InvalidInput(_)) => error(
-                "invalid_input",
-                format!("Edge type must be one of: {}", VALID_EDGE_TYPES.join(", ")),
-            ),
             Err(e) => from_engine(e),
         },
         Some("unlink") => {
@@ -2076,8 +2071,11 @@ mod tests {
                 .unwrap()
                 .contains("renamed")
         );
-        // `valid_until` compares as a string against datetime('now') (same as the TS engine), so use an explicit past timestamp.
-        assert_eq!(manage_edges_tool(&m, &json!({ "action": "expire", "edge_id": e["edge_id"], "valid_until": "2000-01-01T00:00:00.000Z" })).json()["action"], "expired");
+        // Default expiration must take effect immediately through the canonical active predicate.
+        assert_eq!(
+            manage_edges_tool(&m, &json!({ "action": "expire", "edge_id": e["edge_id"] })).json()["action"],
+            "expired"
+        );
         assert_eq!(
             explore_graph_tool(&m, &json!({ "thought_id": a })).json()["node_count"],
             1

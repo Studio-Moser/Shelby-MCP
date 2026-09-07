@@ -20,6 +20,7 @@ pub mod repair;
 pub mod resolve;
 pub mod seed;
 pub mod telemetry;
+mod temporal;
 pub mod thoughts;
 pub mod tools;
 pub mod topics;
