@@ -1,4 +1,5 @@
 //! Project registry (ADR 0001 §1a) and alias lookups.
+pub mod membership;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
