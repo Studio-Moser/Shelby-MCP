@@ -79,6 +79,23 @@ fn reads_and_extends_a_typescript_created_database() {
     )
     .unwrap();
 
+    assert_eq!(m.schema_version().unwrap(), 18);
+    let edge_id = shelby_memory::edges::link_thoughts(
+        &m.conn,
+        &shelby_memory::edges::EdgeInput {
+            source_id: SEED_ID.into(),
+            target_id: id.clone(),
+            edge_type: "refines".into(),
+            valid_from: Some("2026-09-06 12:00:00.500".into()),
+            valid_until: Some("2026-09-06T05:00:00.500000001-07:00".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let edge_before = shelby_memory::edges::get_edge(&m.conn, &edge_id)
+        .unwrap()
+        .unwrap();
+    assert!(shelby_memory::edges::is_active_at(&edge_before, "2026-09-06T12:00:00.500Z").unwrap());
     drop(m);
     let reopened = Memory::open(&path).unwrap();
     assert_eq!(
@@ -88,6 +105,35 @@ fn reads_and_extends_a_typescript_created_database() {
             .summary
             .as_deref(),
         Some("rust row")
+    );
+    assert_eq!(reopened.schema_version().unwrap(), 18);
+    let edge_after = shelby_memory::edges::get_edge(&reopened.conn, &edge_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        edge_after, edge_before,
+        "Opening cannot normalize legacy bounds"
+    );
+    assert_eq!(
+        shelby_memory::edges::get_connections_at(
+            &reopened.conn,
+            &id,
+            None,
+            "2026-09-06T12:00:00.500Z"
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+    assert!(
+        shelby_memory::edges::get_connections_at(
+            &reopened.conn,
+            &id,
+            None,
+            "2026-09-06T12:00:00.500000001Z"
+        )
+        .unwrap()
+        .is_empty()
     );
     drop(reopened);
     remove_sqlite_files(&path);

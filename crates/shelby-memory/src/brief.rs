@@ -168,16 +168,19 @@ pub fn load_brief_candidates(
     now: &str,
     scope: &BriefScopeInput,
 ) -> Result<Vec<BriefCandidate>> {
+    crate::temporal::parse_now(now)?;
+    crate::temporal::ensure_sql_function(conn)?;
+    let active = crate::temporal::ACTIVE_SQL;
     let requested = scope_priority(scope);
     let sql = format!(
         "SELECT t.id, t.project_id,
            COALESCE((SELECT current_slug FROM projects WHERE projects.project_id = t.project_id), t.project_identifier) AS project_identifier,
            t.visibility, t.trust_level, t.type, t.summary, t.source, t.reinforcement_count, t.last_confirmed_at, t.consolidated_into,
            t.metadata, t.created_at, t.updated_at,
-           EXISTS (SELECT 1 FROM edges e WHERE e.source_id = t.id AND e.edge_type = 'refuted_by' AND {SCOPED_CLAIM} IS NULL
-             AND (e.valid_from IS NULL OR e.valid_from <= @now) AND (e.valid_until IS NULL OR e.valid_until > @now)) AS actively_refuted,
+           COALESCE((SELECT SUM(CASE WHEN {active} THEN 1 ELSE 0 END) FROM edges e
+             WHERE e.source_id = t.id AND e.edge_type = 'refuted_by' AND {SCOPED_CLAIM} IS NULL), 0) > 0 AS actively_refuted,
            (SELECT json_group_array({SCOPED_CLAIM}) FROM edges e WHERE e.source_id = t.id AND e.edge_type = 'refuted_by' AND {SCOPED_CLAIM} IS NOT NULL
-             AND (e.valid_from IS NULL OR e.valid_from <= @now) AND (e.valid_until IS NULL OR e.valid_until > @now)) AS refuted_claims
+             AND {active}) AS refuted_claims
          FROM thoughts t
          ORDER BY CASE WHEN {requested} THEN 1 ELSE 0 END DESC,
            CASE WHEN {VALID_EXPLICIT_METADATA} THEN 2 WHEN {LEGACY_SAFE} THEN 1 ELSE 0 END DESC,
@@ -188,7 +191,7 @@ pub fn load_brief_candidates(
     let mut stmt = conn.prepare(&sql)?;
     // Only bind @project_id when the scope clause references it; SQLite rejects unknown names.
     let mut params: Vec<(&str, &dyn rusqlite::ToSql)> =
-        vec![("@now", &now), ("@limit", &BRIEF_CANDIDATE_LIMIT)];
+        vec![("@edge_now", &now), ("@limit", &BRIEF_CANDIDATE_LIMIT)];
     if sql.contains("@project_id") {
         params.push(("@project_id", &scope.project_id));
     }

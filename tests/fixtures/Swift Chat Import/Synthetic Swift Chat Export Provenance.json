@@ -1,0 +1,16 @@
+{
+  "construction" : "Synthetic memory\/task fixture plus unchanged frozen runtime store; SQL-bound composer bytes installed into newly copied SwiftData ZDATA with inline tag 01. No original fixture modified.",
+  "fixtureInputs" : [
+    "Complete Store",
+    "Runtime Store\/runstore.sqlite",
+    "Composer Image\/Large.jpg"
+  ],
+  "sourceFiles" : {
+    "F6BD0AF\/.swiftdata_SUPPORT\/_EXTERNAL_DATA\/475FB7CB-AAF1-4D36-8964-44E56A76785C" : "1e6ffb0b3f1713a64b17ffde7d4074c9e7e300408ba59996bb9b31c856e8c484",
+    "F6BD0AF\/memory.db" : "c79ad11bf689c56cdb53a6280579e6758e38acb76cc67b901f9880c60e2c5a20",
+    "F6BD0AF\/runstore.sqlite" : "260e83f251ab01213180652f1c0c9548d28f4175cbe097efe777fc7befd90d4f",
+    "F6BD0AF\/swiftdata.store" : "c9b7b27126f000ccf73435784ac37c190de6a6df68d1a292ca5b62a83ec07c7b",
+    "F6BD0AF\/swiftdata.store-shm" : "60dbe86c3f21f3a6101914715272c398812aa6413087f7e9012bbf68ffd8efbb",
+    "F6BD0AF\/swiftdata.store-wal" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

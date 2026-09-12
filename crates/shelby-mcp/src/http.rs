@@ -8,7 +8,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{any, get};
 use rmcp::transport::streamable_http_server::{
-    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    StreamableHttpServerConfig, StreamableHttpService,
+    session::{SessionManager, local::LocalSessionManager},
 };
 use serde_json::json;
 
@@ -66,7 +67,71 @@ async fn bearer_guard(State(auth): State<Auth>, req: Request<Body>, next: Next) 
     next.run(req).await
 }
 
+/// A transport shutdown handle, not proof that every detached rmcp task has exited.
+/// Keep this handle on closure failure for Retry. After closing sessions, callers
+/// must stop/join their HTTP server, drop routers/control, and obtain actual unique
+/// memory ownership before closing or replacing the database.
+#[derive(Clone)]
+pub struct HttpShutdown {
+    // Retain the existing config token without a new direct tokio-util dependency.
+    config: StreamableHttpServerConfig,
+    sessions: Arc<LocalSessionManager>,
+    admission: Arc<tokio::sync::RwLock<()>>,
+}
+impl HttpShutdown {
+    /// Stop new request admission and cancel rmcp response streams.
+    pub fn request_shutdown(&self) {
+        self.config.cancellation_token.cancel();
+    }
+
+    /// Drain admitted HTTP request setup and close the actual session registry.
+    /// rmcp enqueues each transport Close; its detached service tasks may still
+    /// be finishing. Success here does not certify release of SharedMemory.
+    pub async fn close_sessions(&self) -> std::io::Result<()> {
+        self.request_shutdown();
+        let _exclusive = self.admission.write().await;
+        let ids: Vec<_> = self
+            .sessions
+            .sessions
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        for id in ids {
+            self.sessions
+                .close_session(&id)
+                .await
+                .map_err(|_| std::io::Error::other("MCP session closure failed"))?;
+        }
+        Ok(())
+    }
+}
+
+async fn shutdown_guard(
+    State(shutdown): State<HttpShutdown>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if shutdown.config.cancellation_token.is_cancelled() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let _admitted = shutdown.admission.read().await;
+    if shutdown.config.cancellation_token.is_cancelled() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    // Hold admission through response creation: a pre-shutdown initialize must
+    // finish registering its session before close_sessions snapshots the registry.
+    next.run(req).await
+}
+
 pub fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
+    managed_router(memory, cfg).0
+}
+
+/// Build the existing routes with explicit, caller-controlled transport shutdown.
+/// Dropping the handle alone does not cancel a router built through `router`.
+pub fn managed_router(memory: SharedMemory, cfg: &ServeConfig) -> (axum::Router, HttpShutdown) {
     let mut config = StreamableHttpServerConfig::default();
     if cfg.http_host == "0.0.0.0" || cfg.http_host == "::" {
         // Container/remote deployments: the Host header is whatever the operator exposes.
@@ -82,10 +147,15 @@ pub fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
             format!("127.0.0.1:{}", cfg.http_port),
         ]);
     }
+    let shutdown = HttpShutdown {
+        config: config.clone(),
+        sessions: Arc::new(LocalSessionManager::default()),
+        admission: Arc::new(tokio::sync::RwLock::new(())),
+    };
     let handler_memory = memory.clone();
     let mcp = StreamableHttpService::new(
         move || Ok(ShelbyServer::new(handler_memory.clone())),
-        Arc::new(LocalSessionManager::default()),
+        shutdown.sessions.clone(),
         config,
     );
     let auth = Auth {
@@ -112,7 +182,7 @@ pub fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
             .route("/authorize", any(oauth_not_configured))
             .route("/token", any(oauth_not_configured)),
     };
-    axum::Router::new()
+    let router = axum::Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/.well-known/mcp.json", get(|| async { Json(discovery()) }))
         .route(
@@ -127,6 +197,11 @@ pub fn router(memory: SharedMemory, cfg: &ServeConfig) -> axum::Router {
                 .layer(middleware::from_fn_with_state(auth, bearer_guard)),
         )
         .fallback(|| async { (StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))) })
+        .layer(middleware::from_fn_with_state(
+            shutdown.clone(),
+            shutdown_guard,
+        ));
+    (router, shutdown)
 }
 
 pub async fn serve(memory: SharedMemory, cfg: &ServeConfig) -> std::io::Result<()> {
@@ -612,3 +687,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FOUND);
     }
 }
+
+#[cfg(test)]
+#[path = "http/shutdown_tests.rs"]
+mod shutdown_tests;
