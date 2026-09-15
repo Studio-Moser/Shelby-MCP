@@ -172,6 +172,20 @@ impl ShelbyServer {
 }
 
 impl ServerHandler for ShelbyServer {
+    /// Protocol 2026-07-28 (SEP-2549) makes `ttlMs` and `cacheScope` required on every
+    /// list result, and strict clients such as Claude Code reject a list without them.
+    /// rmcp 3.1 has no fields for those hints, so do not agree to that version; a client
+    /// that asks for it is negotiated down to 2025-11-25.
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        // ponytail: drop this override once rmcp emits SEP-2549 cache hints on list results.
+        std::borrow::Cow::Borrowed(&[
+            ProtocolVersion::V_2024_11_05,
+            ProtocolVersion::V_2025_03_26,
+            ProtocolVersion::V_2025_06_18,
+            ProtocolVersion::V_2025_11_25,
+        ])
+    }
+
     fn get_info(&self) -> ServerInfo {
         let capabilities = ServerCapabilities::builder()
             .enable_tools()
