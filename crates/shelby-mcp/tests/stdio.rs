@@ -197,3 +197,18 @@ fn tool_calls_reject_schema_violations_before_domain_handlers() {
     assert!(!is_error, "{body}");
     assert_eq!(body["captured"], 1);
 }
+
+#[test]
+fn client_asking_for_2026_07_28_is_negotiated_down() {
+    // SEP-2549 requires cache hints on list results at 2026-07-28; the server does not
+    // emit them, so it must not agree to that version (Claude Code rejects the list otherwise).
+    let mut c = Client::spawn();
+    let init = c.request("initialize", json!({ "protocolVersion": "2026-07-28", "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }));
+    assert_eq!(init["protocolVersion"], "2025-11-25", "{init}");
+    c.notify("notifications/initialized", json!({}));
+    let tools = c.request("tools/list", json!({}));
+    assert!(
+        tools["tools"].as_array().is_some_and(|t| !t.is_empty()),
+        "{tools}"
+    );
+}
