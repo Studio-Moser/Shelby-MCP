@@ -2,6 +2,12 @@
 
 ShelbyMCP is a Rust workspace that ships a local knowledge-graph memory engine, an MCP server, reusable client integrations, and a dependency-free npm launcher.
 
+## Related repositories
+
+- Product strategy, ADRs and specs: `../Docs` (Studio-Moser/Shelby-Docs) — `README.md` for intent, `docs/adr/0001-memory-server-architecture-contract.md` for the memory contract this workspace implements.
+- Consumer: `../Apps` (Studio-Moser/Shelby-App) embeds `shelby-memory` and `shelby-mcp` at a pinned revision.
+- `../MacOS` (Studio-Moser/Shelby-MacOS) is the archived Swift app; its memory engine is behavioural reference only.
+
 ## Repository map
 
 - `crates/shelby-memory/` — SQLite migrations, thoughts, search, vectors, edges, project identity, trust, repair, and tool-domain handlers.
